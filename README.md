@@ -1,8 +1,16 @@
-# StoryForge Desktop 0.26.0 — Vue d’ensemble et export final
+# StoryForge Desktop 0.28.0 — Stabilisation et export final
 
 StoryForge est une application **Linux locale et gratuite** pour apprendre l’écriture de fiction cinématographique en écrivant.
 
 Le code reste dans le dossier existant `storyforge_desktop_v051`, conformément au choix de conserver un seul dossier de travail.
+
+## V0.28.0 — Stabilisation et navigation fluide
+
+- les entrées du panneau latéral conservent une hauteur réservée identique : l’onglet actif ne repousse plus les entrées voisines et ne provoque plus de chevauchement ;
+- le changement rapide de projet regroupe les rafraîchissements et ignore les sélections intermédiaires devenues obsolètes ;
+- les aperçus d’images des lieux sont chargés après l’affichage du panneau, avec invalidation des aperçus devenus obsolètes ;
+- les données SQLite, les connexions existantes et les formats d’export restent inchangés ;
+- la suite de tests automatisés reste obligatoire avant chaque commit.
 
 ## V0.26.0 — Vue d’ensemble et export final
 

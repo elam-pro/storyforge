@@ -1,3 +1,14 @@
+# StoryForge 0.28.0 — Stabilisation et navigation fluide
+
+## V0.28.0
+
+- hauteur réservée identique pour les entrées du panneau latéral afin d’éviter les chevauchements lors du changement d’onglet ;
+- rafraîchissement de projet différé et regroupé pour éviter les reconstructions intermédiaires lors d’un changement rapide ;
+- chargement différé des aperçus de lieux avec protection contre l’affichage d’une image obsolète ;
+- aucune modification du schéma SQLite ou des formats d’export.
+
+---
+
 # StoryForge 0.26.0 — Vue d’ensemble et export final
 
 ## V0.26.0

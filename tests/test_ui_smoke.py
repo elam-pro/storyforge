@@ -37,7 +37,7 @@ def test_every_main_view_opens_without_mutating_user_data(tmp_path: Path) -> Non
     window.show()
     app.processEvents()
 
-    assert APP_VERSION == "0.27.1"
+    assert APP_VERSION == "0.28.0"
     assert len(LEARNING_SESSION.steps) == 14
     assert [key for key, _title in DEVELOPMENT_DOCUMENTS] == [
         "premise",
@@ -121,6 +121,11 @@ def test_every_main_view_opens_without_mutating_user_data(tmp_path: Path) -> Non
     window.toggle_sidebar()
     assert window.sidebar.width() == 236
     assert window.db.setting("sidebar_expanded", "0") == "1"
+    # The active row may change its styling, but must not change the layout
+    # height and push neighbouring entries into one another.
+    window.show_locations()
+    app.processEvents()
+    assert {button.height() for button in window.nav_buttons.values()} == {44}
     assert {"mckee_value_progression", "truby_seven_steps"}.issubset(
         {template["key"] for template in TEMPLATE_LIBRARY}
     )

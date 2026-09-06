@@ -97,7 +97,7 @@ from script_export import export_fdx, export_script_pdf, import_fdx, parse_scree
 from theme import DARK, LIGHT, Palette, stylesheet
 
 APP_NAME = "StoryForge"
-APP_VERSION = "0.27.1"
+APP_VERSION = "0.28.0"
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get("STORYFORGE_DB_PATH", BASE_DIR / "storyforge.db"))
 IDEA_ATTACHMENT_LIMIT = 25 * 1024 * 1024
@@ -1250,13 +1250,13 @@ class NavigationButton(QPushButton):
         self.style().unpolish(self)
         self.style().polish(self)
         if self.nav_expanded:
-            # Keep every row inside the same horizontal column. Only the
-            # vertical rhythm changes for the active destination.
-            self.setFixedSize(218, 44 if active else 38)
+            # Reserve the active row's height for every row. Changing the
+            # height only after a click made the sidebar reflow, which could
+            # overlap the next item while a page was being rebuilt.
+            self.setFixedSize(218, 44)
         else:
             self.setFixedSize(42, 38)
         self.updateGeometry()
-        QTimer.singleShot(0, self._refresh_parent_layout)
 
     def _refresh_parent_layout(self) -> None:
         parent = self.parentWidget()
@@ -2923,9 +2923,11 @@ class StoryForgeWindow(QMainWindow):
         self.autosave_seconds = int(self.db.setting("autosave_seconds", "60") or 60)
         self.active_project = int(self.db.setting("active_project", "0") or 0)
         self.current_view = "home"
+        self._project_refresh_generation = 0
         self._story_map_drag_item: StoryMapCardItem | None = None
         self._location_pixmap_cache: dict[int, QPixmap] = {}
         self._location_thumbnail_cache: dict[int, QPixmap] = {}
+        self._location_image_refresh_generation = 0
         self.story_map_pan_timer = QTimer(self)
         self.story_map_pan_timer.setInterval(24)
         self.story_map_pan_timer.timeout.connect(self._apply_story_map_auto_pan)
@@ -3397,11 +3399,22 @@ class StoryForgeWindow(QMainWindow):
         self._location_thumbnail_cache.clear()
         self.db.set_setting("active_project", self.active_project)
         self._update_project_chips()
-        self._refresh_after_project_change()
+        # Rebuilding a full workspace can involve several linked lists and
+        # image previews. Defer it to the event loop and coalesce quick
+        # successive project changes so an intermediate selection cannot
+        # rebuild the page after the user has already chosen another project.
+        self._project_refresh_generation += 1
+        generation = self._project_refresh_generation
+        QTimer.singleShot(
+            0,
+            lambda generation=generation: self._refresh_after_project_change(generation),
+        )
         self.save_state.setText(f"Projet actif · {self._active_project_label()}")
         QTimer.singleShot(2200, lambda: self.save_state.setText(""))
 
-    def _refresh_after_project_change(self) -> None:
+    def _refresh_after_project_change(self, generation: int | None = None) -> None:
+        if generation is not None and generation != self._project_refresh_generation:
+            return
         if self.current_view == "projects":
             self.project_id = self.active_project
             self.show_projects()
@@ -12415,6 +12428,8 @@ class StoryForgeWindow(QMainWindow):
     def _refresh_location_images(self) -> None:
         if not hasattr(self, "location_image_list"):
             return
+        self._location_image_refresh_generation += 1
+        refresh_generation = self._location_image_refresh_generation
         self.location_image_list.blockSignals(True)
         self.location_image_list.clear()
         rows = []
@@ -12441,7 +12456,16 @@ class StoryForgeWindow(QMainWindow):
         if rows:
             self.location_image_list.setCurrentRow(0)
             self.location_image_list.blockSignals(False)
-            self._show_location_image_row(rows[0])
+            # Let the new location shell paint before decoding a potentially
+            # large cover. If the user changes location again in the same
+            # event cycle, the stale preview is discarded.
+            first_row = dict(rows[0])
+            location_id = self.location_id
+            QTimer.singleShot(
+                0,
+                lambda generation=refresh_generation, row=first_row, location_id=location_id:
+                    self._show_deferred_location_image(generation, row, location_id),
+            )
         else:
             self.location_image_list.blockSignals(False)
             self.location_image_preview.set_source_pixmap(QPixmap())
@@ -12452,6 +12476,15 @@ class StoryForgeWindow(QMainWindow):
             self.location_primary_image_button.setEnabled(has_selection)
         if hasattr(self, "location_remove_image_button"):
             self.location_remove_image_button.setEnabled(has_selection)
+
+    def _show_deferred_location_image(
+        self, generation: int, row: dict, location_id: int | None
+    ) -> None:
+        if generation != self._location_image_refresh_generation:
+            return
+        if location_id != self.location_id:
+            return
+        self._show_location_image_row(row)
 
     def _show_location_image_row(self, row) -> None:
         image_id = int(row["id"])
