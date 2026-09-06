@@ -13,7 +13,7 @@ Ce fichier est la mémoire opérationnelle du projet. Il complète l’historiqu
 - Interface : PySide6, application locale, sans IA obligatoire, sans abonnement et sans synchronisation distante.
 - Base de données locale : SQLite (`storyforge.db`, ignorée par Git car elle contient les données de travail).
 - Version déclarée dans `app.py` : `0.29.0`.
-- La documentation `README.md` et `RELEASE_NOTES.md` est encore titrée `0.26.0` ; ne pas interpréter cette différence comme une régression.
+- `README.md` et `RELEASE_NOTES.md` suivent désormais la version visible courante `0.29.0`.
 
 ## 2. Règles de travail à respecter
 
@@ -32,11 +32,15 @@ Ce fichier est la mémoire opérationnelle du projet. Il complète l’historiqu
 
 - Branche actuelle : `main`
 - Commit de base avant migration : `74cc3ba chore: baseline StoryForge before Codex migration`
-- Dernier commit connu : `1dc37a4 fix: prime character connections on page load`
+- Dernier commit connu : `c8b3fb8 feat: make screenplay editor structure visible`
 - Tags de sécurité :
   - `v0.27.1-before-codex`
   - `v0.27.1-before-codex-tested`
-- Le dépôt est local et aucun remote Git n’est configuré.
+  - `v0.28.0-before-screenplay`
+  - `v0.28.0-stabilisation-tested`
+  - `v0.28.1-screenplay-tested`
+  - `v0.29.0-screenplay-visual`
+- Remote Git : `origin git@github.com:elam-pro/storyforge.git`.
 - Le dernier état contrôlé était propre : `git status --short --branch` affichait `## main`.
 - Archive complète pré-Codex : `/home/elam/Documents/Test/storyforge_desktop_v051_pre_codex_2026-09-06.tar.gz`
 - Sauvegarde SQLite : `/home/elam/Documents/Test/storyforge_desktop_v051/backups/storyforge_pre_codex_2026-09-06.db`
@@ -62,7 +66,7 @@ Tests complets :
 .venv/bin/python -m pytest -q
 ```
 
-La dernière vérification connue après la migration Codex était : `48 passed`.
+La dernière vérification connue après la V0.29.0 était : `54 passed`.
 
 Contrôles Git recommandés :
 
