@@ -12,7 +12,7 @@ Ce fichier est la mémoire opérationnelle du projet. Il complète l’historiqu
 - Dossier de travail unique : `/home/elam/Documents/Test/storyforge_desktop_v051`
 - Interface : PySide6, application locale, sans IA obligatoire, sans abonnement et sans synchronisation distante.
 - Base de données locale : SQLite (`storyforge.db`, ignorée par Git car elle contient les données de travail).
-- Version déclarée dans `app.py` : `0.28.0`.
+- Version déclarée dans `app.py` : `0.28.1`.
 - La documentation `README.md` et `RELEASE_NOTES.md` est encore titrée `0.26.0` ; ne pas interpréter cette différence comme une régression.
 
 ## 2. Règles de travail à respecter
@@ -85,12 +85,19 @@ git log --oneline --decorate -8
 
 ## 6. Fonctionnalités validées par version
 
-### V0.28.0 — état actuel
+### V0.28.1 — état actuel
+
+- `screenplay_model.py` fournit un modèle indépendant du `QTextEdit`, avec types de blocs, IDs persistants et sérialisation JSON.
+- Les scénarios historiques sont migrés automatiquement sans supprimer le texte compatible de `project_docs.content`.
+- `script_meta.document_json` conserve la représentation structurée et reste exportable/réimportable.
+- L’éditeur existant, ses raccourcis et sa navigation sont conservés.
+
+### V0.28.0 — stabilisation
 
 - Les entrées du panneau latéral gardent une hauteur réservée identique pour éviter les chevauchements.
 - Les changements rapides de projet sont regroupés avant de reconstruire l’espace de travail.
 - Les aperçus des lieux se chargent après l’affichage du panneau et les aperçus obsolètes sont ignorés.
-- Le schéma SQLite et les formats d’export ne changent pas.
+- Pour la V0.28 publiée, le schéma SQLite et les formats d’export restent inchangés.
 
 ### V0.27.1 — migration Codex
 

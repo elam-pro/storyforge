@@ -1,8 +1,17 @@
-# StoryForge Desktop 0.28.0 — Stabilisation et export final
+# StoryForge Desktop 0.28.1 — Éditeur de scripts structuré
 
 StoryForge est une application **Linux locale et gratuite** pour apprendre l’écriture de fiction cinématographique en écrivant.
 
 Le code reste dans le dossier existant `storyforge_desktop_v051`, conformément au choix de conserver un seul dossier de travail.
+
+## V0.28.1 — Éditeur de scripts structuré
+
+- modèle `ScreenplayDocument` indépendant du widget Qt, avec types de blocs et IDs persistants ;
+- migration rétrocompatible des scénarios existants depuis le texte historique ;
+- représentation JSON conservée dans `script_meta.document_json` sans supprimer `project_docs.content` ;
+- conservation du modèle structuré lors des exports et imports de projets ;
+- six tests supplémentaires couvrant le modèle et la persistance ;
+- aucune nouvelle navigation : l’éditeur existant reste le point d’entrée.
 
 ## V0.28.0 — Stabilisation et navigation fluide
 
@@ -371,6 +380,12 @@ L’éditeur reconnaît une mise en page légère directement lisible :
 - les transitions usuelles comme `COUPE À :`.
 
 Les anciens marqueurs Fountain `!` et `@` restent compris lors d’un import, mais les boutons n’en ajoutent pas à l’écran. Les boutons Scène, Action, Personnage, Dialogue, Parenthèse et Transition insèrent les éléments sans obliger à mémoriser la mise en page. La colonne de gauche retrouve automatiquement les scènes et permet de naviguer dans le premier jet.
+
+Depuis l’intégration du modèle structuré, l’éditeur conserve aussi chaque bloc
+et son type dans `script_meta.document_json` (schéma versionné). Le champ
+`project_docs.content` reste une projection texte compatible avec les projets
+existants et les exports. Les migrations sont automatiques et réversibles par
+la sauvegarde SQLite habituelle.
 
 ## Plan global et séquencier détaillé
 

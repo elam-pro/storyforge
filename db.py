@@ -527,7 +527,8 @@ class Database:
             author TEXT NOT NULL DEFAULT '', contact TEXT NOT NULL DEFAULT '',
             draft_date TEXT NOT NULL DEFAULT '', based_on TEXT NOT NULL DEFAULT '',
             copyright_notice TEXT NOT NULL DEFAULT '',
-            include_title_page INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL,
+            include_title_page INTEGER NOT NULL DEFAULT 1,
+            document_json TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL,
             FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE);
         CREATE TABLE IF NOT EXISTS image_library(
             id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL,
@@ -606,6 +607,7 @@ class Database:
             ("based_on", "TEXT NOT NULL DEFAULT ''"),
             ("copyright_notice", "TEXT NOT NULL DEFAULT ''"),
             ("include_title_page", "INTEGER NOT NULL DEFAULT 1"),
+            ("document_json", "TEXT NOT NULL DEFAULT ''"),
         ):
             if column not in script_meta_columns:
                 self.conn.execute(
@@ -2044,13 +2046,13 @@ class Database:
             self.run(
                 """INSERT OR REPLACE INTO script_meta(
                 project_id,title,author,contact,draft_date,based_on,copyright_notice,
-                include_title_page,updated_at
-                ) VALUES(?,?,?,?,?,?,?,?,?)""",
+                include_title_page,document_json,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
                 (
                     pid, meta.get("title", p.get("title", "")), meta.get("author", ""),
                     meta.get("contact", ""), meta.get("draft_date", ""),
                     meta.get("based_on", ""), meta.get("copyright_notice", ""),
-                    int(meta.get("include_title_page", 1)), NOW(),
+                    int(meta.get("include_title_page", 1)), meta.get("document_json", ""), NOW(),
                 ),
             )
         imported_images = {}

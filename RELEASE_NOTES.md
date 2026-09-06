@@ -1,3 +1,16 @@
+# StoryForge 0.28.1 — Éditeur de scripts structuré
+
+## V0.28.1
+
+- intégration du modèle `ScreenplayDocument` dans l’Éditeur de scripts déjà présent ;
+- types de paragraphes conservés séparément du widget Qt : scène, action, personnage, dialogue, parenthèse et transition ;
+- IDs persistants pour les blocs et sérialisation JSON versionnée ;
+- migration SQLite rétrocompatible via `script_meta.document_json` ;
+- export/import de projet StoryForge préservant la représentation structurée ;
+- aucune nouvelle navigation ni aucun parcours ajouté.
+
+---
+
 # StoryForge 0.28.0 — Stabilisation et navigation fluide
 
 ## V0.28.0

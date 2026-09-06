@@ -94,10 +94,11 @@ from db import NOW, Database
 from learning_content import load_session
 from pdf_export import export_manual_pdf
 from script_export import export_fdx, export_script_pdf, import_fdx, parse_screenplay
+from screenplay_model import BlockType, ScreenplayDocument
 from theme import DARK, LIGHT, Palette, stylesheet
 
 APP_NAME = "StoryForge"
-APP_VERSION = "0.28.0"
+APP_VERSION = "0.28.1"
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get("STORYFORGE_DB_PATH", BASE_DIR / "storyforge.db"))
 IDEA_ATTACHMENT_LIMIT = 25 * 1024 * 1024
@@ -17275,6 +17276,7 @@ class StoryForgeWindow(QMainWindow):
 
         project = self.db.one("SELECT title FROM projects WHERE id=?", (self.active_project,))
         document = self.db.ensure_doc(self.active_project, "script", "Scénario")
+        self.script_document = self._load_script_document(document["content"])
         self._load_script_prepared_scenes()
         body = QHBoxLayout()
         body.setSpacing(14)
@@ -17400,7 +17402,9 @@ class StoryForgeWindow(QMainWindow):
         )
         self.script_text.setObjectName("ScriptEditor")
         self.script_text.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-        self.script_text.setPlainText(document["content"])
+        self._script_document_syncing = True
+        self.script_text.setPlainText(self.script_document.to_plain_text())
+        self._script_document_syncing = False
         self.script_element_mode = "scene" if not document["content"].strip() else "action"
         self.script_text.current_element = self.script_element_mode
         self.script_text.tab_requested.connect(self._cycle_script_element)
@@ -17441,6 +17445,60 @@ class StoryForgeWindow(QMainWindow):
         ) == "1"
         self._set_script_context_visible(context_open)
         self.script_text.setFocus()
+
+    def _load_script_document(self, legacy_content: str) -> ScreenplayDocument:
+        """Load the structured script projection, migrating older plain text once."""
+
+        meta = self._script_meta()
+        stored = str(meta["document_json"] or "") if meta else ""
+        document = ScreenplayDocument.from_json(stored)
+        legacy = str(legacy_content or "")
+        # project_docs is the compatibility source for pre-model databases. If
+        # a user imported or edited one of those documents outside this editor,
+        # the visible legacy content wins over a stale structured projection.
+        if document is None or (
+            legacy.strip()
+            and document.to_plain_text().strip() != legacy.strip()
+        ):
+            document = ScreenplayDocument.from_legacy_text(
+                legacy,
+                project_id=self.active_project,
+            )
+        document.metadata.setdefault("project_id", str(self.active_project))
+        return document
+
+    def _script_block_values_from_editor(self) -> list[tuple[str, BlockType]]:
+        editor = getattr(self, "script_text", None)
+        if not isinstance(editor, ScreenplayEditor):
+            return []
+        values: list[tuple[str, BlockType]] = []
+        block = editor.document().firstBlock()
+        while block.isValid():
+            element = self._infer_legacy_script_element_from_block(block)
+            values.append((block.text(), BlockType.from_value(element)))
+            block = block.next()
+        return values
+
+    def _sync_script_document_from_editor(self) -> bool:
+        """Update the model from the existing Qt projection after an edit."""
+
+        if getattr(self, "_script_document_syncing", False):
+            return False
+        document = getattr(self, "script_document", None)
+        if not isinstance(document, ScreenplayDocument):
+            return False
+        changed = document.sync_from_editor(self._script_block_values_from_editor())
+        if changed:
+            self._script_document_dirty = True
+        return changed
+
+    def _set_script_model_block_type(self, element: str, cursor: QTextCursor | None = None) -> None:
+        document = getattr(self, "script_document", None)
+        editor = getattr(self, "script_text", None)
+        if not isinstance(document, ScreenplayDocument) or not isinstance(editor, ScreenplayEditor):
+            return
+        active_cursor = cursor or editor.textCursor()
+        document.set_block_type(active_cursor.block().blockNumber(), BlockType.from_value(element))
 
     def _load_script_prepared_scenes(self) -> None:
         rows = [
@@ -17826,6 +17884,7 @@ class StoryForgeWindow(QMainWindow):
         self.script_text.setFocus()
 
     def _script_text_changed(self) -> None:
+        self._sync_script_document_from_editor()
         if hasattr(self, "script_save_timer"):
             self.script_save_timer.start()
         self._refresh_script_structure()
@@ -17839,12 +17898,20 @@ class StoryForgeWindow(QMainWindow):
         selected_scene_id = int(getattr(self, "script_context_scene_id", 0) or 0)
         prepared = getattr(self, "script_prepared_scenes", [])
         headings: list[tuple[int, str]] = []
-        offset = 0
-        for line in text.splitlines(keepends=True):
-            stripped = line.strip()
-            if stripped.upper().startswith(("INT.", "EXT.", "INT./EXT.", "EXT./INT.", "I/E.")):
-                headings.append((offset, stripped.upper()))
-            offset += len(line)
+        document = getattr(self, "script_document", None)
+        if isinstance(document, ScreenplayDocument):
+            offset = 0
+            for block in document.blocks:
+                if block.type is BlockType.SCENE and block.text.strip():
+                    headings.append((offset, block.text.strip().upper()))
+                offset += len(block.text) + 1
+        else:
+            offset = 0
+            for line in text.splitlines(keepends=True):
+                stripped = line.strip()
+                if stripped.upper().startswith(("INT.", "EXT.", "INT./EXT.", "EXT./INT.", "I/E.")):
+                    headings.append((offset, stripped.upper()))
+                offset += len(line)
 
         scene_list.blockSignals(True)
         scene_list.clear()
@@ -17907,7 +17974,7 @@ class StoryForgeWindow(QMainWindow):
         else:
             self._show_script_scene_context(0)
         words = len(text.split())
-        elements = parse_screenplay(text)
+        elements = document.elements() if isinstance(document, ScreenplayDocument) else parse_screenplay(text)
         page_estimate = max(1, math.ceil(len(elements) / 45)) if elements else 0
         current_elements = parse_screenplay(text[:cursor_position])
         current_page = max(1, math.ceil(len(current_elements) / 45)) if elements else 0
@@ -17960,6 +18027,14 @@ class StoryForgeWindow(QMainWindow):
         )
 
     def _script_element_from_block(self, block) -> str:
+        document = getattr(self, "script_document", None)
+        if isinstance(document, ScreenplayDocument):
+            model_block = document.block(block.blockNumber())
+            if model_block is not None:
+                return model_block.type.value
+        return self._infer_legacy_script_element_from_block(block)
+
+    def _infer_legacy_script_element_from_block(self, block) -> str:
         state_element = {
             1001: "scene",
             1002: "action",
@@ -17992,7 +18067,7 @@ class StoryForgeWindow(QMainWindow):
         previous = block.previous()
         previous_text = previous.text().strip() if previous.isValid() else ""
         previous_element = (
-            self._script_element_from_block(previous) if previous.isValid() else ""
+            self._infer_legacy_script_element_from_block(previous) if previous.isValid() else ""
         )
         if previous_element in {"character", "dialogue", "parenthetical"} and previous_text:
             return "dialogue"
@@ -18005,6 +18080,7 @@ class StoryForgeWindow(QMainWindow):
         if not isinstance(editor, ScreenplayEditor):
             return
         active_cursor = QTextCursor(cursor or editor.textCursor())
+        self._set_script_model_block_type(element, active_cursor)
         active_cursor.block().setUserState(
             {
                 "scene": 1001,
@@ -18096,6 +18172,11 @@ class StoryForgeWindow(QMainWindow):
         }.get(block.userState())
         if state_element:
             return state_element
+        document = getattr(self, "script_document", None)
+        if isinstance(document, ScreenplayDocument):
+            model_block = document.block(block.blockNumber())
+            if model_block is not None:
+                return model_block.type.value
         line = block.text().strip()
         if not line:
             return getattr(self, "script_element_mode", "scene")
@@ -18127,7 +18208,8 @@ class StoryForgeWindow(QMainWindow):
             return
         self._set_script_element_mode(self._infer_script_element_from_cursor())
         text = self.script_text.toPlainText()
-        elements = parse_screenplay(text)
+        document = getattr(self, "script_document", None)
+        elements = document.elements() if isinstance(document, ScreenplayDocument) else parse_screenplay(text)
         page_total = max(1, math.ceil(len(elements) / 45)) if elements else 0
         current = parse_screenplay(text[: self.script_text.textCursor().position()])
         page_current = max(1, math.ceil(len(current) / 45)) if elements else 0
@@ -18190,9 +18272,9 @@ class StoryForgeWindow(QMainWindow):
         self.db.run(
             """INSERT OR IGNORE INTO script_meta(
             project_id,title,author,contact,draft_date,based_on,copyright_notice,
-            include_title_page,updated_at
-            ) VALUES(?,?,?,?,?,?,?,?,?)""",
-            (self.active_project, default_title, "", "", "", "", "", 1, NOW()),
+            include_title_page,document_json,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+            (self.active_project, default_title, "", "", "", "", "", 1, "", NOW()),
         )
         return self.db.one("SELECT * FROM script_meta WHERE project_id=?", (self.active_project,))
 
@@ -18283,7 +18365,14 @@ class StoryForgeWindow(QMainWindow):
             return
         if current:
             self.db.snapshot(self.active_project, "script", self.script_text.toPlainText(), "Avant import FDX")
-        self.script_text.setPlainText(imported)
+        self.script_document = ScreenplayDocument.from_legacy_text(
+            imported,
+            project_id=self.active_project,
+        )
+        self._script_document_syncing = True
+        self.script_text.setPlainText(self.script_document.to_plain_text())
+        self._script_document_syncing = False
+        self._format_all_script_blocks()
         self._save_script(silent=True)
         self.script_text.moveCursor(QTextCursor.MoveOperation.Start)
         self.save_state.setText("Scénario FDX importé")
@@ -18422,6 +18511,7 @@ class StoryForgeWindow(QMainWindow):
         cursor.setPosition(max(0, inserted_end - len(value.lstrip("\n"))))
         self.script_text.setTextCursor(cursor)
         self._set_script_element_mode(element)
+        self._apply_script_block_format(element)
         self.script_text.ensureCursorVisible()
         self.script_text.setFocus()
 
@@ -18431,8 +18521,18 @@ class StoryForgeWindow(QMainWindow):
             return
         if hasattr(self, "script_save_timer"):
             self.script_save_timer.stop()
+        self._sync_script_document_from_editor()
         self.db.ensure_doc(self.active_project, "script", "Scénario")
-        self.db.save_doc(self.active_project, "script", editor.toPlainText())
+        document = getattr(self, "script_document", None)
+        content = document.to_plain_text() if isinstance(document, ScreenplayDocument) else editor.toPlainText()
+        self.db.save_doc(self.active_project, "script", content)
+        self._script_meta()
+        if isinstance(document, ScreenplayDocument):
+            self.db.run(
+                "UPDATE script_meta SET document_json=?,updated_at=? WHERE project_id=?",
+                (document.to_json(), NOW(), self.active_project),
+            )
+            self._script_document_dirty = False
         self.db.run("UPDATE projects SET current_document='script' WHERE id=?", (self.active_project,))
         if not silent:
             self.save_state.setText("Scénario enregistré")
@@ -18448,6 +18548,10 @@ class StoryForgeWindow(QMainWindow):
         editor = getattr(self, "script_text", None)
         if not isinstance(editor, ScreenplayEditor):
             return parse_screenplay("")
+        self._sync_script_document_from_editor()
+        document = getattr(self, "script_document", None)
+        if isinstance(document, ScreenplayDocument):
+            return document.elements()
         type_names = {
             "scene": "Scene Heading",
             "action": "Action",
