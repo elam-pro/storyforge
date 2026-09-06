@@ -1,3 +1,11 @@
+# StoryForge 0.30.1 — Correction de l’autocomplétion des scènes
+
+## V0.30.1
+
+- les préfixes `INT`, `EXT` et `I/E` sont reconnus avant la saisie du point ;
+- un projet neuf propose des modèles de lieux neutres ;
+- `Tab` et `Entrée` valident une suggestion sans texte fantôme ni popup persistant.
+
 # StoryForge 0.30.0 — Export professionnel et autocomplétion
 
 ## V0.30.0

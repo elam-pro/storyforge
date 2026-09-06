@@ -37,7 +37,7 @@ def test_every_main_view_opens_without_mutating_user_data(tmp_path: Path) -> Non
     window.show()
     app.processEvents()
 
-    assert APP_VERSION == "0.30.0"
+    assert APP_VERSION == "0.30.1"
     assert len(LEARNING_SESSION.steps) == 14
     assert [key for key, _title in DEVELOPMENT_DOCUMENTS] == [
         "premise",
@@ -1620,6 +1620,16 @@ def test_explicit_completion_and_script_tab_cycle(tmp_path: Path) -> None:
     assert window.script_text.extraSelections()
     assert window.script_text._script_accent.isValid()
     assert "INT. MUSÉE - NUIT" in window.script_scene_completer_model.stringList()
+    window.script_text.clear()
+    window._set_script_element_mode("scene")
+    window.script_text.insertPlainText("INT")
+    window._update_script_scene_completion()
+    assert window.script_scene_completer.completionCount() >= 2
+    window.script_text.setFocus()
+    QTest.keyClick(window.script_text, Qt.Key.Key_Tab)
+    app.processEvents()
+    assert window.script_text.toPlainText() == "INT. LIEU - JOUR"
+    assert not window.script_scene_completer.popup().isVisible()
     window.script_text.clear()
     window._set_script_element_mode("scene")
     window.script_text.insertPlainText("INT. MUS")

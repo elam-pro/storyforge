@@ -1,8 +1,14 @@
-# StoryForge Desktop 0.30.0 — Export professionnel et autocomplétion
+# StoryForge Desktop 0.30.1 — Export professionnel et autocomplétion
 
 StoryForge est une application **Linux locale et gratuite** pour apprendre l’écriture de fiction cinématographique en écrivant.
 
 Le code reste dans le dossier existant `storyforge_desktop_v051`, conformément au choix de conserver un seul dossier de travail.
+
+## V0.30.1 — Correction de l’autocomplétion des scènes
+
+- autocomplétion disponible dès `INT`/`EXT`, même dans un projet sans lieu enregistré ;
+- modèles neutres `INT. LIEU` et `EXT. LIEU` proposés comme point de départ ;
+- acceptation par `Tab`/`Entrée` sans réouverture du menu ni texte parasite.
 
 ## V0.30.0 — Export professionnel et autocomplétion
 

@@ -101,7 +101,7 @@ from screenplay_model import BlockType, ScreenplayDocument
 from theme import DARK, LIGHT, Palette, stylesheet
 
 APP_NAME = "StoryForge"
-APP_VERSION = "0.30.0"
+APP_VERSION = "0.30.1"
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get("STORYFORGE_DB_PATH", BASE_DIR / "storyforge.db"))
 IDEA_ATTACHMENT_LIMIT = 25 * 1024 * 1024
@@ -17744,7 +17744,7 @@ class StoryForgeWindow(QMainWindow):
         self.script_scene_completer = QCompleter(self.script_scene_completer_model, self)
         self.script_scene_completer.setWidget(self.script_text)
         self.script_scene_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        self.script_scene_completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        self.script_scene_completer.setFilterMode(Qt.MatchFlag.MatchStartsWith)
         self.script_scene_completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
         self.script_scene_completer.setMaxVisibleItems(8)
         self.script_scene_completer.activated[str].connect(
@@ -18272,6 +18272,10 @@ class StoryForgeWindow(QMainWindow):
             for row in getattr(self, "script_prepared_scenes", [])
         }
         locations.update(value for value in prepared_locations if value)
+        # Keep the first-use experience useful on an empty project.  The
+        # placeholder can be replaced directly while project locations become
+        # increasingly specific as soon as they are created.
+        locations.add("LIEU")
         for location in locations:
             candidates.add(f"INT. {location} - JOUR")
             candidates.add(f"INT. {location} - NUIT")
@@ -18297,7 +18301,7 @@ class StoryForgeWindow(QMainWindow):
             completer.popup().hide()
             return
         prefix = editor.textCursor().block().text().strip().upper()
-        if len(prefix) < 4 or not prefix.startswith(("INT.", "EXT.", "I/E.")):
+        if len(prefix) < 3 or not prefix.startswith(("INT", "EXT", "I/E")):
             completer.popup().hide()
             return
         completer.setCompletionPrefix(prefix)
@@ -18585,6 +18589,11 @@ class StoryForgeWindow(QMainWindow):
         if not line:
             return getattr(self, "script_element_mode", "action")
         upper = line.upper()
+        # Keep an in-progress scene prefix in the scene mode.  Without this
+        # guard, a partial uppercase value such as ``INT`` is mistaken for a
+        # character cue before the writer has typed the period.
+        if upper in {"INT", "EXT", "I/E"}:
+            return "scene"
         if upper.startswith(("INT.", "EXT.", "INT./EXT.", "EXT./INT.", "I/E.")):
             return "scene"
         if line.startswith("@"):
@@ -18708,17 +18717,19 @@ class StoryForgeWindow(QMainWindow):
         }.get(block.userState())
         if state_element:
             return state_element
+        line = block.text().strip()
+        upper = line.upper()
+        if upper in {"INT", "EXT", "I/E"}:
+            return "scene"
+        if upper.startswith(("INT.", "EXT.", "INT./EXT.", "EXT./INT.", "I/E.")):
+            return "scene"
         document = getattr(self, "script_document", None)
         if isinstance(document, ScreenplayDocument):
             model_block = document.block(block.blockNumber())
             if model_block is not None:
                 return model_block.type.value
-        line = block.text().strip()
         if not line:
             return getattr(self, "script_element_mode", "scene")
-        upper = line.upper()
-        if upper.startswith(("INT.", "EXT.", "INT./EXT.", "EXT./INT.", "I/E.")):
-            return "scene"
         if line.startswith("@"):
             return "character"
         if line.startswith("!"):

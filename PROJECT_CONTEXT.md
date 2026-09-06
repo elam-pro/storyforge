@@ -12,8 +12,8 @@ Ce fichier est la mémoire opérationnelle du projet. Il complète l’historiqu
 - Dossier de travail unique : `/home/elam/Documents/Test/storyforge_desktop_v051`
 - Interface : PySide6, application locale, sans IA obligatoire, sans abonnement et sans synchronisation distante.
 - Base de données locale : SQLite (`storyforge.db`, ignorée par Git car elle contient les données de travail).
-- Version déclarée dans `app.py` : `0.30.0`.
-- `README.md` et `RELEASE_NOTES.md` suivent désormais la version visible courante `0.30.0`.
+- Version déclarée dans `app.py` : `0.30.1`.
+- `README.md` et `RELEASE_NOTES.md` suivent désormais la version visible courante `0.30.1`.
 
 ## 2. Règles de travail à respecter
 
@@ -32,7 +32,7 @@ Ce fichier est la mémoire opérationnelle du projet. Il complète l’historiqu
 
 - Branche actuelle : `main`
 - Commit de base avant migration : `74cc3ba chore: baseline StoryForge before Codex migration`
-- Dernier commit connu : `18174d5 feat: add scene autocomplete and final project export`
+- Dernier commit connu : `38fe137 docs: list canonical v0.30 tag`
 - Tags de sécurité :
   - `v0.27.1-before-codex`
   - `v0.27.1-before-codex-tested`
@@ -44,6 +44,7 @@ Ce fichier est la mémoire opérationnelle du projet. Il complète l’historiqu
   - `v0.29.1-smarttype-final-draft`
   - `v0.30.0-export-autocomplete`
   - `v0.30.0`
+  - `v0.30.1`
 - Remote Git : `origin git@github.com:elam-pro/storyforge.git`.
 - Le dernier état contrôlé avant cette mise à jour était propre et synchronisé avec `origin/main`.
 - Archive complète pré-Codex : `/home/elam/Documents/Test/storyforge_desktop_v051_pre_codex_2026-09-06.tar.gz`
@@ -70,7 +71,7 @@ Tests complets :
 .venv/bin/python -m pytest -q
 ```
 
-La dernière vérification connue après la V0.30.0 était : `54 passed`.
+La dernière vérification connue après la V0.30.1 était : `54 passed`.
 
 Contrôles Git recommandés :
 
@@ -93,7 +94,13 @@ git log --oneline --decorate -8
 
 ## 6. Fonctionnalités validées par version
 
-### V0.30.0 — état actuel
+### V0.30.1 — état actuel
+
+- Les préfixes `INT`/`EXT` déclenchent l’autocomplétion dès les premières lettres, avec modèles neutres sur un projet vide.
+- L’acceptation par `Tab` ou `Entrée` remplace proprement le bloc et ferme la popup.
+- Le contenu V0.30.0 (exports finaux, cartes et métadonnées) reste inchangé.
+
+### V0.30.0 — export final
 
 - Les en-têtes de scène proposent des suggestions locales issues des lieux et scènes du projet.
 - Les exports FDX partagent les options de page de titre, adaptation et droits avec le PDF.
