@@ -1281,6 +1281,52 @@ class SendEditor(QTextEdit):
         super().keyPressEvent(event)
 
 
+class ScreenplayTypeRail(QWidget):
+    """Paints paragraph types in the reserved gutter beside the manuscript."""
+
+    def __init__(self, editor: "ScreenplayEditor"):
+        super().__init__(editor)
+        self.editor = editor
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAutoFillBackground(False)
+
+    def paintEvent(self, event) -> None:
+        editor = self.editor
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        rail_font = QFont(editor.font())
+        rail_font.setPointSize(max(8, round(editor.font().pointSize() * 0.68)))
+        rail_font.setWeight(QFont.Weight.DemiBold)
+        painter.setFont(rail_font)
+
+        active_block_number = editor.textCursor().block().blockNumber()
+        block = editor.document().firstBlock()
+        while block.isValid():
+            block_cursor = QTextCursor(block)
+            block_rect = editor.cursorRect(block_cursor)
+            block_top = block_rect.top()
+            block_bottom = block_rect.bottom()
+            if block_bottom >= 0 and block_top <= self.height():
+                label = editor._rail_label(block.userState(), block.text())
+                if label:
+                    active = block.blockNumber() == active_block_number
+                    painter.setPen(editor._script_accent if active else editor._script_muted)
+                    painter.drawText(
+                        QRectF(12, block_top, 84, block_rect.height()),
+                        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                        label,
+                    )
+                    painter.setPen(
+                        QPen(
+                            editor._script_accent if active else editor._script_muted,
+                            1.0 if active else 0.5,
+                        )
+                    )
+                    painter.drawLine(12, int(block_bottom), 94, int(block_bottom))
+            block = block.next()
+        painter.end()
+
+
 class ScreenplayEditor(QTextEdit):
     tab_requested = Signal(bool)
     return_pressed = Signal(str)
@@ -1294,6 +1340,22 @@ class ScreenplayEditor(QTextEdit):
         self._script_accent = QColor("#D04A33")
         self._script_muted = QColor("#8F9693")
         self._script_active_background = QColor("#3B211C")
+        self._type_rail = ScreenplayTypeRail(self)
+        self._type_rail.raise_()
+        self.verticalScrollBar().valueChanged.connect(self._update_type_rail)
+        self.horizontalScrollBar().valueChanged.connect(self._update_type_rail)
+        self.cursorPositionChanged.connect(self._update_type_rail)
+        self.document().contentsChanged.connect(self._update_type_rail)
+
+    def _position_type_rail(self) -> None:
+        viewport = self.viewport()
+        left = max(0, viewport.geometry().left())
+        self._type_rail.setGeometry(0, viewport.geometry().top(), left, viewport.height())
+        self._type_rail.raise_()
+        self._type_rail.update()
+
+    def _update_type_rail(self) -> None:
+        self._position_type_rail()
 
     def set_type_rail_style(
         self,
@@ -1308,6 +1370,7 @@ class ScreenplayEditor(QTextEdit):
         self._script_active_background = QColor(active_background)
         self.refresh_active_line()
         self.viewport().update()
+        self._type_rail.update()
 
     def refresh_active_line(self) -> None:
         """Keep the current screenplay paragraph visible while editing."""
@@ -1322,6 +1385,7 @@ class ScreenplayEditor(QTextEdit):
         )
         self.setExtraSelections([selection])
         self.viewport().update()
+        self._type_rail.update()
 
     @staticmethod
     def _rail_label(user_state: int, text: str) -> str:
@@ -1339,43 +1403,6 @@ class ScreenplayEditor(QTextEdit):
 
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
-        painter = QPainter(self.viewport())
-        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
-        rail_font = QFont(self.font())
-        rail_font.setPointSize(max(8, round(self.font().pointSize() * 0.68)))
-        rail_font.setWeight(QFont.Weight.DemiBold)
-        painter.setFont(rail_font)
-
-        active_block_number = self.textCursor().block().blockNumber()
-        block = self.document().firstBlock()
-        viewport_rect = self.viewport().rect()
-        while block.isValid():
-            block_cursor = QTextCursor(block)
-            block_rect = self.cursorRect(block_cursor)
-            if block_rect.bottom() >= viewport_rect.top() and block_rect.top() <= viewport_rect.bottom():
-                label = self._rail_label(block.userState(), block.text())
-                if label:
-                    active = block.blockNumber() == active_block_number
-                    painter.setPen(self._script_accent if active else self._script_muted)
-                    painter.drawText(
-                        QRectF(12, block_rect.top(), 84, block_rect.height()),
-                        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                        label,
-                    )
-                    painter.setPen(
-                        QPen(
-                            self._script_accent if active else self._script_muted,
-                            1.0 if active else 0.5,
-                        )
-                    )
-                    painter.drawLine(
-                        12,
-                        int(block_rect.bottom()),
-                        94,
-                        int(block_rect.bottom()),
-                    )
-            block = block.next()
-        painter.end()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Tab:
@@ -1421,6 +1448,7 @@ class ScreenplayEditor(QTextEdit):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        self._position_type_rail()
         self.layout_changed.emit()
 
 
