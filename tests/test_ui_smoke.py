@@ -37,7 +37,7 @@ def test_every_main_view_opens_without_mutating_user_data(tmp_path: Path) -> Non
     window.show()
     app.processEvents()
 
-    assert APP_VERSION == "0.28.1"
+    assert APP_VERSION == "0.29.0"
     assert len(LEARNING_SESSION.steps) == 14
     assert [key for key, _title in DEVELOPMENT_DOCUMENTS] == [
         "premise",
@@ -1612,6 +1612,8 @@ def test_explicit_completion_and_script_tab_cycle(tmp_path: Path) -> None:
     window.show_script_editor()
     window.show()
     app.processEvents()
+    assert window.script_text.extraSelections()
+    assert window.script_text._script_accent.isValid()
     window.script_text.clear()
     window._set_script_element_mode("scene")
     window._apply_script_block_format("scene")

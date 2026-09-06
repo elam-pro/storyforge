@@ -44,6 +44,7 @@ from PySide6.QtGui import (
     QShortcut,
     QTextBlockFormat,
     QTextCursor,
+    QTextFormat,
 )
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -98,7 +99,7 @@ from screenplay_model import BlockType, ScreenplayDocument
 from theme import DARK, LIGHT, Palette, stylesheet
 
 APP_NAME = "StoryForge"
-APP_VERSION = "0.28.1"
+APP_VERSION = "0.29.0"
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get("STORYFORGE_DB_PATH", BASE_DIR / "storyforge.db"))
 IDEA_ATTACHMENT_LIMIT = 25 * 1024 * 1024
@@ -1290,6 +1291,91 @@ class ScreenplayEditor(QTextEdit):
     def __init__(self):
         super().__init__()
         self.current_element = "scene"
+        self._script_accent = QColor("#D04A33")
+        self._script_muted = QColor("#8F9693")
+        self._script_active_background = QColor("#3B211C")
+
+    def set_type_rail_style(
+        self,
+        accent: str,
+        muted: str,
+        active_background: str,
+    ) -> None:
+        """Configure the non-editable type rail drawn inside the editor."""
+
+        self._script_accent = QColor(accent)
+        self._script_muted = QColor(muted)
+        self._script_active_background = QColor(active_background)
+        self.refresh_active_line()
+        self.viewport().update()
+
+    def refresh_active_line(self) -> None:
+        """Keep the current screenplay paragraph visible while editing."""
+
+        selection = QTextEdit.ExtraSelection()
+        selection.cursor = self.textCursor()
+        selection.cursor.clearSelection()
+        selection.format.setBackground(self._script_active_background)
+        selection.format.setProperty(
+            QTextFormat.Property.FullWidthSelection,
+            True,
+        )
+        self.setExtraSelections([selection])
+        self.viewport().update()
+
+    @staticmethod
+    def _rail_label(user_state: int, text: str) -> str:
+        labels = {
+            1001: "SCÈNE",
+            1002: "ACTION",
+            1003: "PERSO",
+            1004: "DIALOGUE",
+            1005: "PARENTHÈSE",
+            1006: "TRANSITION",
+        }
+        if user_state in labels:
+            return labels[user_state]
+        return "" if not text.strip() else "ACTION"
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        painter = QPainter(self.viewport())
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        rail_font = QFont(self.font())
+        rail_font.setPointSize(max(8, round(self.font().pointSize() * 0.68)))
+        rail_font.setWeight(QFont.Weight.DemiBold)
+        painter.setFont(rail_font)
+
+        active_block_number = self.textCursor().block().blockNumber()
+        block = self.document().firstBlock()
+        viewport_rect = self.viewport().rect()
+        while block.isValid():
+            block_cursor = QTextCursor(block)
+            block_rect = self.cursorRect(block_cursor)
+            if block_rect.bottom() >= viewport_rect.top() and block_rect.top() <= viewport_rect.bottom():
+                label = self._rail_label(block.userState(), block.text())
+                if label:
+                    active = block.blockNumber() == active_block_number
+                    painter.setPen(self._script_accent if active else self._script_muted)
+                    painter.drawText(
+                        QRectF(12, block_rect.top(), 84, block_rect.height()),
+                        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                        label,
+                    )
+                    painter.setPen(
+                        QPen(
+                            self._script_accent if active else self._script_muted,
+                            1.0 if active else 0.5,
+                        )
+                    )
+                    painter.drawLine(
+                        12,
+                        int(block_rect.bottom()),
+                        94,
+                        int(block_rect.bottom()),
+                    )
+            block = block.next()
+        painter.end()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Tab:
@@ -17338,7 +17424,7 @@ class StoryForgeWindow(QMainWindow):
         tools_box.setContentsMargins(0, 0, 0, 0)
         tools_box.setSpacing(6)
         format_bar = QHBoxLayout()
-        format_bar.setSpacing(6)
+        format_bar.setSpacing(8)
         compact_editor = self.width() < 1250
         self.script_element_buttons: dict[str, QPushButton] = {}
         self.script_element_button_group = QButtonGroup(self)
@@ -17357,6 +17443,17 @@ class StoryForgeWindow(QMainWindow):
                 lambda _checked=False, element=kind: self._set_script_element(element),
             )
             button.setProperty("scriptElement", True)
+            button.setMinimumHeight(36)
+            button.setToolTip(
+                {
+                    "scene": "Scène · Ctrl+1",
+                    "action": "Action · Ctrl+2",
+                    "character": "Personnage · Ctrl+3",
+                    "dialogue": "Dialogue · Ctrl+4",
+                    "parenthetical": "Parenthèse · Ctrl+5",
+                    "transition": "Transition · Ctrl+6",
+                }[kind]
+            )
             button.setCheckable(True)
             self.script_element_button_group.addButton(button)
             self.script_element_buttons[kind] = button
@@ -17401,6 +17498,11 @@ class StoryForgeWindow(QMainWindow):
             "INT. LIEU - JOUR\n\nUne action visible et précise.\n\nPERSONNAGE\nUne première réplique."
         )
         self.script_text.setObjectName("ScriptEditor")
+        self.script_text.set_type_rail_style(
+            self.palette.accent,
+            self.palette.muted,
+            self.palette.accent_soft,
+        )
         self.script_text.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self._script_document_syncing = True
         self.script_text.setPlainText(self.script_document.to_plain_text())
@@ -18012,6 +18114,8 @@ class StoryForgeWindow(QMainWindow):
     def _set_script_element_mode(self, element: str) -> None:
         self.script_element_mode = element
         self.script_text.current_element = element
+        if isinstance(self.script_text, ScreenplayEditor):
+            self.script_text.refresh_active_line()
         self.script_element_state.setText(self._script_element_caption(element))
         for kind, button in getattr(self, "script_element_buttons", {}).items():
             button.setChecked(kind == element)
@@ -18206,7 +18310,9 @@ class StoryForgeWindow(QMainWindow):
     def _sync_script_element_from_cursor(self) -> None:
         if not isinstance(getattr(self, "script_text", None), ScreenplayEditor):
             return
-        self._set_script_element_mode(self._infer_script_element_from_cursor())
+        element = self._infer_script_element_from_cursor()
+        self._set_script_element_mode(element)
+        self.script_text.refresh_active_line()
         text = self.script_text.toPlainText()
         document = getattr(self, "script_document", None)
         elements = document.elements() if isinstance(document, ScreenplayDocument) else parse_screenplay(text)

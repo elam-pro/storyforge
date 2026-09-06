@@ -12,7 +12,7 @@ Ce fichier est la mémoire opérationnelle du projet. Il complète l’historiqu
 - Dossier de travail unique : `/home/elam/Documents/Test/storyforge_desktop_v051`
 - Interface : PySide6, application locale, sans IA obligatoire, sans abonnement et sans synchronisation distante.
 - Base de données locale : SQLite (`storyforge.db`, ignorée par Git car elle contient les données de travail).
-- Version déclarée dans `app.py` : `0.28.1`.
+- Version déclarée dans `app.py` : `0.29.0`.
 - La documentation `README.md` et `RELEASE_NOTES.md` est encore titrée `0.26.0` ; ne pas interpréter cette différence comme une régression.
 
 ## 2. Règles de travail à respecter
@@ -85,7 +85,13 @@ git log --oneline --decorate -8
 
 ## 6. Fonctionnalités validées par version
 
-### V0.28.1 — état actuel
+### V0.29.0 — état actuel
+
+- Le canevas de l’Éditeur de scripts affiche un rail de type non éditable à gauche de chaque paragraphe.
+- La ligne active est surlignée et les six formats sont plus lisibles dans la barre d’outils.
+- La structure `ScreenplayDocument`, les IDs persistants et la migration `script_meta.document_json` restent inchangés.
+
+### V0.28.1 — fondation de l’éditeur structuré
 
 - `screenplay_model.py` fournit un modèle indépendant du `QTextEdit`, avec types de blocs, IDs persistants et sérialisation JSON.
 - Les scénarios historiques sont migrés automatiquement sans supprimer le texte compatible de `project_docs.content`.

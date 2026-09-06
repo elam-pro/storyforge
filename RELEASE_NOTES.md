@@ -1,3 +1,13 @@
+# StoryForge 0.29.0 — Éditeur de scripts visible
+
+## V0.29.0
+
+- ajout d’un rail de lecture non éditable indiquant le type de chaque paragraphe : scène, action, personnage, dialogue, parenthèse ou transition ;
+- surlignage de la ligne active pour suivre immédiatement la position du curseur ;
+- marge de lecture dédiée à gauche du manuscrit afin d’éviter que les types et le texte se mélangent ;
+- barre des six formats agrandie et raccourcis affichés dans les info-bulles ;
+- modèle structuré et compatibilité des anciennes sauvegardes conservés.
+
 # StoryForge 0.28.1 — Éditeur de scripts structuré
 
 ## V0.28.1

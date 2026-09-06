@@ -1,8 +1,15 @@
-# StoryForge Desktop 0.28.1 — Éditeur de scripts structuré
+# StoryForge Desktop 0.29.0 — Éditeur de scripts visible
 
 StoryForge est une application **Linux locale et gratuite** pour apprendre l’écriture de fiction cinématographique en écrivant.
 
 Le code reste dans le dossier existant `storyforge_desktop_v051`, conformément au choix de conserver un seul dossier de travail.
+
+## V0.29.0 — Éditeur de scripts visible
+
+- rail de lecture indiquant le type de chaque paragraphe ;
+- surlignage de la ligne active ;
+- marge dédiée et barre des formats plus lisible ;
+- modèle structuré et compatibilité des anciennes sauvegardes préservés.
 
 ## V0.28.1 — Éditeur de scripts structuré
 

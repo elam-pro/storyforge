@@ -161,6 +161,7 @@ def stylesheet(p: Palette, editor_font_size: int = 15) -> str:
     }}
     QPushButton[scriptElement="true"] {{
         color: {p.muted}; background: transparent; border-color: transparent;
+        padding: 9px 13px; min-height: 32px; font-size: 12px; font-weight: 650;
     }}
     QPushButton[scriptElement="true"]:hover {{
         color: {p.text}; background: {p.surface_raised}; border-color: {p.border};
@@ -548,7 +549,7 @@ def stylesheet(p: Palette, editor_font_size: int = 15) -> str:
     QTextEdit#IdeaEditor:focus {{ border-color: {p.accent}; }}
     QTextEdit#ScriptEditor {{
         color: {p.text}; background: {p.surface}; border: 1px solid {p.border_strong};
-        border-radius: 12px; padding: 26px 34px;
+        border-radius: 12px; padding: 30px 42px 30px 108px;
         font-family: "Courier Prime", "Courier New", monospace;
         font-size: {editor_font_size}px;
     }}
