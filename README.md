@@ -12,6 +12,12 @@ Le code reste dans le dossier existant `storyforge_desktop_v051`, conformément 
 - scénario, chronologie, personnages, relations, lieux, univers, cartes, scènes et images regroupés dans une archive portable ;
 - manifeste et métadonnées du projet inclus pour vérifier rapidement le contenu exporté.
 
+## V0.29.2 — Export scénario
+
+- PDF paginé selon les indents de scénario (scènes, actions, personnages, dialogues et transitions) ;
+- page de garde configurable et partagée par les exports PDF/FDX ;
+- sauts de page, numéros de page et dialogues poursuivis vérifiés sur plusieurs pages.
+
 ## V0.29.1 — SmartType Final Draft
 
 - navigation Tab/Maj+Tab bornée aux six formats sans texte fantôme ;
