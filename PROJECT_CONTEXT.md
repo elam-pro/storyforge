@@ -43,6 +43,7 @@ Ce fichier est la mémoire opérationnelle du projet. Il complète l’historiqu
   - `v0.29.0-screenplay-visual-fixed`
   - `v0.29.1-smarttype-final-draft`
   - `v0.30.0-export-autocomplete`
+  - `v0.30.0`
 - Remote Git : `origin git@github.com:elam-pro/storyforge.git`.
 - Le dernier état contrôlé avant cette mise à jour était propre et synchronisé avec `origin/main`.
 - Archive complète pré-Codex : `/home/elam/Documents/Test/storyforge_desktop_v051_pre_codex_2026-09-06.tar.gz`
