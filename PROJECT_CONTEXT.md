@@ -12,7 +12,7 @@ Ce fichier est la mémoire opérationnelle du projet. Il complète l’historiqu
 - Dossier de travail unique : `/home/elam/Documents/Test/storyforge_desktop_v051`
 - Interface : PySide6, application locale, sans IA obligatoire, sans abonnement et sans synchronisation distante.
 - Base de données locale : SQLite (`storyforge.db`, ignorée par Git car elle contient les données de travail).
-- Version déclarée dans `app.py` : `0.29.0`.
+- Version déclarée dans `app.py` : `0.29.1`.
 - `README.md` et `RELEASE_NOTES.md` suivent désormais la version visible courante `0.29.0`.
 
 ## 2. Règles de travail à respecter
@@ -67,7 +67,7 @@ Tests complets :
 .venv/bin/python -m pytest -q
 ```
 
-La dernière vérification connue après la V0.29.0 était : `54 passed`.
+La dernière vérification connue après la V0.29.1 était : `54 passed`.
 
 Contrôles Git recommandés :
 
@@ -90,7 +90,13 @@ git log --oneline --decorate -8
 
 ## 6. Fonctionnalités validées par version
 
-### V0.29.0 — état actuel
+### V0.29.1 — état actuel
+
+- Le SmartType du scénario reste borné aux six formats et ne crée pas de texte lors des changements répétés.
+- Les marqueurs `(CONT'D)` sont recalculés après les modifications de noms et les marqueurs obsolètes sont retirés.
+- La suppression progressive et le rail visuel de la V0.29.0 restent disponibles.
+
+### V0.29.0 — éditeur visible
 
 - Le canevas de l’Éditeur de scripts affiche un rail de type non éditable à gauche de chaque paragraphe.
 - La ligne active est surlignée et les six formats sont plus lisibles dans la barre d’outils.

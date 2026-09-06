@@ -37,7 +37,7 @@ def test_every_main_view_opens_without_mutating_user_data(tmp_path: Path) -> Non
     window.show()
     app.processEvents()
 
-    assert APP_VERSION == "0.29.0"
+    assert APP_VERSION == "0.29.1"
     assert len(LEARNING_SESSION.steps) == 14
     assert [key for key, _title in DEVELOPMENT_DOCUMENTS] == [
         "premise",
@@ -1664,6 +1664,21 @@ def test_explicit_completion_and_script_tab_cycle(tmp_path: Path) -> None:
     QTest.keyClick(window.script_text, Qt.Key.Key_Return)
     assert window.script_element_mode == "dialogue"
     assert "MINA (CONT'D)" in window.script_text.toPlainText()
+
+    # Renaming or removing a cue later in the draft must also remove a stale
+    # continuation marker instead of leaving formatting behind in the text.
+    window.script_text.setPlainText(
+        "INT. HALL - JOUR\n\nMINA\nBonjour.\n\nMINA\nEncore."
+    )
+    window._format_all_script_blocks()
+    window._normalise_script_continued_cues()
+    assert "MINA (CONT'D)" in window.script_text.toPlainText()
+    window.script_text.setPlainText(
+        "INT. HALL - JOUR\n\nMINA\nBonjour.\n\nNOAH\nEncore."
+    )
+    window._format_all_script_blocks()
+    window._normalise_script_continued_cues()
+    assert "MINA (CONT'D)" not in window.script_text.toPlainText()
 
     window.script_save_timer.stop()
     window.autosave_timer.stop()

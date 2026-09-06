@@ -1,3 +1,13 @@
+# StoryForge 0.29.1 — SmartType Final Draft
+
+## V0.29.1
+
+- tabulations et retours restent bornés aux six formats sans créer de texte parasite ;
+- suppression progressive conservée entre Personnage, Action et Scène ;
+- `(CONT'D)` est recalculé après une modification, un renommage ou une suppression de personnage ;
+- les marqueurs de continuation obsolètes sont automatiquement retirés ;
+- les données structurées et les exports existants restent compatibles.
+
 # StoryForge 0.29.0 — Éditeur de scripts visible
 
 ## V0.29.0

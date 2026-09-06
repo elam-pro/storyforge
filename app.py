@@ -99,7 +99,7 @@ from screenplay_model import BlockType, ScreenplayDocument
 from theme import DARK, LIGHT, Palette, stylesheet
 
 APP_NAME = "StoryForge"
-APP_VERSION = "0.29.0"
+APP_VERSION = "0.29.1"
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get("STORYFORGE_DB_PATH", BASE_DIR / "storyforge.db"))
 IDEA_ATTACHMENT_LIMIT = 25 * 1024 * 1024
@@ -18015,9 +18015,96 @@ class StoryForgeWindow(QMainWindow):
 
     def _script_text_changed(self) -> None:
         self._sync_script_document_from_editor()
+        if not getattr(self, "_normalizing_continued_cues", False):
+            self._normalise_script_continued_cues()
         if hasattr(self, "script_save_timer"):
             self.script_save_timer.start()
         self._refresh_script_structure()
+
+    def _normalise_script_continued_cues(self) -> None:
+        """Keep consecutive character cues in sync with the visible text.
+
+        The interactive Return handler adds ``(CONT'D)`` when a cue is first
+        created.  This second pass also removes stale markers after a writer
+        renames, deletes or reorders a character cue later in the draft.
+        """
+
+        editor = getattr(self, "script_text", None)
+        if not isinstance(editor, ScreenplayEditor):
+            return
+        if getattr(self, "_normalizing_continued_cues", False):
+            return
+
+        def identity(cue: str) -> str:
+            result = re.sub(
+                r"\s*\(CONT['’]?D\)\s*$",
+                "",
+                cue.strip().lstrip("@").strip().upper(),
+                flags=re.IGNORECASE,
+            ).strip()
+            while re.search(r"\s+\([^)]*\)\s*$", result):
+                result = re.sub(r"\s+\([^)]*\)\s*$", "", result).strip()
+            return result
+
+        replacements: list[tuple[int, int, str]] = []
+        previous_character = ""
+        offset = 0
+        block = editor.document().firstBlock()
+        while block.isValid():
+            text = block.text()
+            stripped = text.strip()
+            element = self._script_element_from_block(block)
+            if element == "scene":
+                previous_character = ""
+            elif element == "character" and stripped:
+                cue = stripped.lstrip("@").strip().upper()
+                without_continued = re.sub(
+                    r"\s*\(CONT['’]?D\)\s*$",
+                    "",
+                    cue,
+                    flags=re.IGNORECASE,
+                ).strip()
+                current_identity = identity(cue)
+                desired = (
+                    f"{without_continued} (CONT'D)"
+                    if previous_character and previous_character == current_identity
+                    else without_continued
+                )
+                if desired != text:
+                    replacements.append((offset, len(text), desired))
+                previous_character = current_identity
+            elif element in {"action", "transition"} and stripped:
+                previous_character = ""
+            offset += len(text) + 1
+            block = block.next()
+
+        if not replacements:
+            return
+        current_position = editor.textCursor().position()
+        position_delta = sum(
+            len(new) - old_length
+            for start, old_length, new in replacements
+            if start < current_position
+        )
+        self._normalizing_continued_cues = True
+        try:
+            document = editor.document()
+            for start, old_length, new in reversed(replacements):
+                cursor = QTextCursor(document)
+                cursor.setPosition(start)
+                cursor.setPosition(
+                    start + old_length,
+                    QTextCursor.MoveMode.KeepAnchor,
+                )
+                cursor.insertText(new)
+            cursor = editor.textCursor()
+            cursor.setPosition(
+                max(0, min(current_position + position_delta, len(editor.toPlainText())))
+            )
+            editor.setTextCursor(cursor)
+            self._sync_script_document_from_editor()
+        finally:
+            self._normalizing_continued_cues = False
 
     def _refresh_script_structure(self) -> None:
         editor = getattr(self, "script_text", None)

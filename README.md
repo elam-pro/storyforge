@@ -1,8 +1,14 @@
-# StoryForge Desktop 0.29.0 — Éditeur de scripts visible
+# StoryForge Desktop 0.29.1 — SmartType Final Draft
 
 StoryForge est une application **Linux locale et gratuite** pour apprendre l’écriture de fiction cinématographique en écrivant.
 
 Le code reste dans le dossier existant `storyforge_desktop_v051`, conformément au choix de conserver un seul dossier de travail.
+
+## V0.29.1 — SmartType Final Draft
+
+- navigation Tab/Maj+Tab bornée aux six formats sans texte fantôme ;
+- suppression progressive entre les formats du scénario ;
+- recalcul des mentions `(CONT'D)` après modification des personnages.
 
 ## V0.29.0 — Éditeur de scripts visible
 
