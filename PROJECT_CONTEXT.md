@@ -32,7 +32,7 @@ Ce fichier est la mémoire opérationnelle du projet. Il complète l’historiqu
 
 - Branche actuelle : `main`
 - Commit de base avant migration : `74cc3ba chore: baseline StoryForge before Codex migration`
-- Dernier commit connu : `0c6494e fix: keep screenplay type rail out of text`
+- Dernier commit connu : `cab8b88 feat: refine screenplay smarttype behavior`
 - Tags de sécurité :
   - `v0.27.1-before-codex`
   - `v0.27.1-before-codex-tested`
@@ -41,6 +41,7 @@ Ce fichier est la mémoire opérationnelle du projet. Il complète l’historiqu
   - `v0.28.1-screenplay-tested`
   - `v0.29.0-screenplay-visual`
   - `v0.29.0-screenplay-visual-fixed`
+  - `v0.29.1-smarttype-final-draft`
 - Remote Git : `origin git@github.com:elam-pro/storyforge.git`.
 - Le dernier état contrôlé était propre : `git status --short --branch` affichait `## main`.
 - Archive complète pré-Codex : `/home/elam/Documents/Test/storyforge_desktop_v051_pre_codex_2026-09-06.tar.gz`
