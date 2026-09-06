@@ -1,6 +1,6 @@
 # StoryForge — contexte de continuité Codex
 
-Dernière mise à jour : 2026-09-06
+Dernière mise à jour : 2026-09-07
 
 Ce fichier est la mémoire opérationnelle du projet. Il complète l’historique des conversations Work/Codex sans le remplacer. Il doit être mis à jour lorsqu’une décision importante, une version ou une prochaine étape change.
 
@@ -32,7 +32,7 @@ Ce fichier est la mémoire opérationnelle du projet. Il complète l’historiqu
 
 - Branche actuelle : `main`
 - Commit de base avant migration : `74cc3ba chore: baseline StoryForge before Codex migration`
-- Dernier commit connu : `cab8b88 feat: refine screenplay smarttype behavior`
+- Dernier commit connu : `18174d5 feat: add scene autocomplete and final project export`
 - Tags de sécurité :
   - `v0.27.1-before-codex`
   - `v0.27.1-before-codex-tested`
@@ -42,8 +42,9 @@ Ce fichier est la mémoire opérationnelle du projet. Il complète l’historiqu
   - `v0.29.0-screenplay-visual`
   - `v0.29.0-screenplay-visual-fixed`
   - `v0.29.1-smarttype-final-draft`
+  - `v0.30.0-export-autocomplete`
 - Remote Git : `origin git@github.com:elam-pro/storyforge.git`.
-- Le dernier état contrôlé était propre : `git status --short --branch` affichait `## main`.
+- Le dernier état contrôlé avant cette mise à jour était propre et synchronisé avec `origin/main`.
 - Archive complète pré-Codex : `/home/elam/Documents/Test/storyforge_desktop_v051_pre_codex_2026-09-06.tar.gz`
 - Sauvegarde SQLite : `/home/elam/Documents/Test/storyforge_desktop_v051/backups/storyforge_pre_codex_2026-09-06.db`
 - Les anciennes versions et archives hors `v051` ont été déplacées dans la corbeille Linux ; elles restent récupérables.
