@@ -86,19 +86,24 @@ def export_fdx(
     draft_date: str = "",
     *,
     elements: list[tuple[str, str]] | None = None,
+    based_on: str = "",
+    copyright_notice: str = "",
+    include_title_page: bool = True,
 ) -> None:
     root = ET.Element(
         "FinalDraft",
         {"DocumentType": "Script", "Template": "No", "Version": "1"},
     )
-    title_page = ET.SubElement(root, "TitlePage")
-    title_content = ET.SubElement(title_page, "Content")
-    for paragraph_type, value in (
-        ("Title", title), ("Author", author), ("Contact", contact), ("Draft", draft_date),
-    ):
-        if value:
-            paragraph = ET.SubElement(title_content, "Paragraph", {"Type": paragraph_type})
-            ET.SubElement(paragraph, "Text").text = value
+    if include_title_page:
+        title_page = ET.SubElement(root, "TitlePage")
+        title_content = ET.SubElement(title_page, "Content")
+        for paragraph_type, value in (
+            ("Title", title), ("Author", author), ("Contact", contact),
+            ("Draft", draft_date), ("Based On", based_on), ("Copyright", copyright_notice),
+        ):
+            if value:
+                paragraph = ET.SubElement(title_content, "Paragraph", {"Type": paragraph_type})
+                ET.SubElement(paragraph, "Text").text = value
     content = ET.SubElement(root, "Content")
     for element_type, value in (elements if elements is not None else parse_screenplay(text)):
         paragraph = ET.SubElement(content, "Paragraph", {"Type": element_type})

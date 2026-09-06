@@ -1,3 +1,22 @@
+# StoryForge 0.30.0 — Export professionnel et autocomplétion
+
+## V0.30.0
+
+- autocomplétion locale des en-têtes de scène à partir des lieux et scènes du projet ;
+- FDX enrichi avec page de titre optionnelle, adaptation et mentions de droits ;
+- export final enrichi d’un manifeste JSON et d’une représentation structurée du scénario ;
+- cartes de l’histoire exportées en Markdown/CSV avec connexions, personnages liés et positions ;
+- métadonnées du projet exportées séparément pour contrôler le contenu de l’archive ;
+- types de paragraphes préservés dans les exports finaux au lieu d’une nouvelle détection heuristique.
+
+# StoryForge 0.29.2 — Export scénario
+
+## V0.29.2
+
+- mise en page PDF scénario et pagination professionnelle conservées et vérifiées ;
+- page de garde configurable partagée par les exports PDF et FDX ;
+- numérotation et continuation des dialogues vérifiées sur plusieurs pages.
+
 # StoryForge 0.29.1 — SmartType Final Draft
 
 ## V0.29.1

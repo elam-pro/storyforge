@@ -51,6 +51,27 @@ def test_screenplay_parser_and_exports(tmp_path: Path) -> None:
     assert pdf_path.read_bytes().startswith(b"%PDF-1.4")
     assert pdf_path.stat().st_size > 500
 
+    metadata_fdx = tmp_path / "metadata.fdx"
+    export_fdx(
+        metadata_fdx,
+        "Le tableau",
+        SCRIPT,
+        "Camille",
+        based_on="Une histoire originale",
+        copyright_notice="Copyright 2026 Camille",
+    )
+    metadata_root = ET.parse(metadata_fdx).getroot()
+    title_page_values = {
+        paragraph.attrib["Type"]: paragraph.findtext("Text")
+        for paragraph in metadata_root.findall("./TitlePage/Content/Paragraph")
+    }
+    assert title_page_values["Based On"] == "Une histoire originale"
+    assert title_page_values["Copyright"] == "Copyright 2026 Camille"
+
+    no_title_fdx = tmp_path / "without_title.fdx"
+    export_fdx(no_title_fdx, "Le tableau", SCRIPT, include_title_page=False)
+    assert ET.parse(no_title_fdx).getroot().find("TitlePage") is None
+
 
 def test_pdf_uses_screenplay_indents_and_optional_title_page(tmp_path: Path) -> None:
     elements = parse_screenplay(SCRIPT)

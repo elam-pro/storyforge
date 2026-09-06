@@ -12,8 +12,8 @@ Ce fichier est la mémoire opérationnelle du projet. Il complète l’historiqu
 - Dossier de travail unique : `/home/elam/Documents/Test/storyforge_desktop_v051`
 - Interface : PySide6, application locale, sans IA obligatoire, sans abonnement et sans synchronisation distante.
 - Base de données locale : SQLite (`storyforge.db`, ignorée par Git car elle contient les données de travail).
-- Version déclarée dans `app.py` : `0.29.1`.
-- `README.md` et `RELEASE_NOTES.md` suivent désormais la version visible courante `0.29.0`.
+- Version déclarée dans `app.py` : `0.30.0`.
+- `README.md` et `RELEASE_NOTES.md` suivent désormais la version visible courante `0.30.0`.
 
 ## 2. Règles de travail à respecter
 
@@ -68,7 +68,7 @@ Tests complets :
 .venv/bin/python -m pytest -q
 ```
 
-La dernière vérification connue après la V0.29.1 était : `54 passed`.
+La dernière vérification connue après la V0.30.0 était : `54 passed`.
 
 Contrôles Git recommandés :
 
@@ -91,7 +91,14 @@ git log --oneline --decorate -8
 
 ## 6. Fonctionnalités validées par version
 
-### V0.29.1 — état actuel
+### V0.30.0 — état actuel
+
+- Les en-têtes de scène proposent des suggestions locales issues des lieux et scènes du projet.
+- Les exports FDX partagent les options de page de titre, adaptation et droits avec le PDF.
+- L’export final contient un manifeste JSON, les métadonnées du projet, un scénario JSON structuré,
+  les cartes de l’histoire en Markdown/CSV et la sauvegarde réimportable complète.
+
+### V0.29.1 — SmartType Final Draft
 
 - Le SmartType du scénario reste borné aux six formats et ne crée pas de texte lors des changements répétés.
 - Les marqueurs `(CONT'D)` sont recalculés après les modifications de noms et les marqueurs obsolètes sont retirés.

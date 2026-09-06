@@ -37,7 +37,7 @@ def test_every_main_view_opens_without_mutating_user_data(tmp_path: Path) -> Non
     window.show()
     app.processEvents()
 
-    assert APP_VERSION == "0.29.1"
+    assert APP_VERSION == "0.30.0"
     assert len(LEARNING_SESSION.steps) == 14
     assert [key for key, _title in DEVELOPMENT_DOCUMENTS] == [
         "premise",
@@ -1596,6 +1596,11 @@ def test_explicit_completion_and_script_tab_cycle(tmp_path: Path) -> None:
     window.active_project = project_id
     window.db.set_setting("active_project", project_id)
     window.db.set_setting(f"last_development_doc_{project_id}", "premise")
+    window.db.run(
+        """INSERT INTO locations(project_id,position,name,created_at,updated_at)
+        VALUES(?,?,?,?,?)""",
+        (project_id, 0, "Musée", NOW(), NOW()),
+    )
     window.show_development()
     window.development_text.setPlainText("Une archiviste découvre que ses souvenirs ont été classés.")
     window._set_development_step_status("complete")
@@ -1614,6 +1619,17 @@ def test_explicit_completion_and_script_tab_cycle(tmp_path: Path) -> None:
     app.processEvents()
     assert window.script_text.extraSelections()
     assert window.script_text._script_accent.isValid()
+    assert "INT. MUSÉE - NUIT" in window.script_scene_completer_model.stringList()
+    window.script_text.clear()
+    window._set_script_element_mode("scene")
+    window.script_text.insertPlainText("INT. MUS")
+    window._update_script_scene_completion()
+    assert window.script_scene_completer.completionCount() >= 1
+    window.script_text.setFocus()
+    QTest.keyClick(window.script_text, Qt.Key.Key_Tab)
+    app.processEvents()
+    assert window.script_text.toPlainText() == "INT. MUSÉE - JOUR"
+    assert not window.script_scene_completer.popup().isVisible()
     window.script_text.clear()
     window._set_script_element_mode("scene")
     window._apply_script_block_format("scene")

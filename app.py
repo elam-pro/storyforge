@@ -24,6 +24,7 @@ from PySide6.QtCore import (
     QThread,
     QTimer,
     QUrl,
+    QStringListModel,
     Signal,
 )
 from PySide6.QtGui import (
@@ -53,6 +54,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QColorDialog,
     QComboBox,
+    QCompleter,
     QDialog,
     QDoubleSpinBox,
     QFileDialog,
@@ -99,7 +101,7 @@ from screenplay_model import BlockType, ScreenplayDocument
 from theme import DARK, LIGHT, Palette, stylesheet
 
 APP_NAME = "StoryForge"
-APP_VERSION = "0.29.1"
+APP_VERSION = "0.30.0"
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get("STORYFORGE_DB_PATH", BASE_DIR / "storyforge.db"))
 IDEA_ATTACHMENT_LIMIT = 25 * 1024 * 1024
@@ -1333,6 +1335,7 @@ class ScreenplayEditor(QTextEdit):
     character_activated = Signal(str)
     element_emptied = Signal(str)
     layout_changed = Signal()
+    scene_completion_accepted = Signal(str)
 
     def __init__(self):
         super().__init__()
@@ -1405,6 +1408,19 @@ class ScreenplayEditor(QTextEdit):
         super().paintEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
+        completer = getattr(self, "scene_completer", None)
+        if (
+            event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Tab)
+            and not (event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+            and isinstance(completer, QCompleter)
+            and completer.popup().isVisible()
+        ):
+            value = completer.currentCompletion()
+            if not value and completer.completionCount():
+                value = str(completer.completionModel().index(0, 0).data() or "")
+            if value:
+                self.scene_completion_accepted.emit(value)
+                return
         if event.key() == Qt.Key.Key_Tab:
             reverse = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
             self.tab_requested.emit(reverse)
@@ -16997,6 +17013,20 @@ class StoryForgeWindow(QMainWindow):
                 (project_id,),
             )
         ]
+        story_map_nodes = [
+            dict(row)
+            for row in self.db.q(
+                "SELECT * FROM story_map_nodes WHERE project_id=? ORDER BY id",
+                (project_id,),
+            )
+        ]
+        story_map_links = [
+            dict(row)
+            for row in self.db.q(
+                "SELECT * FROM story_map_links WHERE project_id=? ORDER BY id",
+                (project_id,),
+            )
+        ]
 
         with tempfile.TemporaryDirectory(prefix="storyforge_final_") as temp_dir:
             root = Path(temp_dir)
@@ -17006,6 +17036,7 @@ class StoryForgeWindow(QMainWindow):
             ):
                 (root / directory).mkdir(parents=True, exist_ok=True)
             self._write_final_script_and_documents(root, project, docs, sequences, scenes)
+            self._write_final_story_map(root, project_id, story_map_nodes, story_map_links)
             self._write_final_timeline(root, project_id, events)
             self._write_final_characters(root, project_id, characters)
             self._write_final_universe(root, project_id, locations)
@@ -17025,17 +17056,92 @@ class StoryForgeWindow(QMainWindow):
                         f"- Scènes : {len(scenes)}", f"- Séquences : {len(sequences)}",
                         f"- Personnages : {len(characters)}", f"- Événements : {len(events)}",
                         f"- Lieux : {len(locations)}", "", "## Contenu", "",
-                        "1. `01_Scenario` — scénario en PDF, FDX et Fountain.",
+                        "1. `01_Scenario` — scénario en PDF, FDX, Fountain et JSON structuré.",
                         "2. `02_Construction` — prémisse, logline, synopsis et autres documents.",
-                        "3. `03_Plan` — séquencier et liste de scènes.",
+                        "3. `03_Plan` — cartes de l’histoire, séquencier et liste de scènes.",
                         "4. `04_Chronologie` — chronologie lisible et tableau CSV.",
                         "5. `05_Personnages` — fiches, portraits et relations.",
                         "6. `06_Univers` — lieux, monde, règles, lexique, thème et conflits.",
                         "7. `07_Images` — bibliothèque d’images originale.",
                         "8. `08_Sauvegarde` — sauvegarde complète réimportable dans StoryForge.", "",
+                        "`00_metadata.json` et `00_manifest.json` décrivent le projet, les volumes exportés et la version de l’application.", "",
                         "Les fichiers lisibles restent exploitables sans StoryForge. La sauvegarde JSON conserve les données et les connexions internes.", "",
                     ]
                 ),
+                encoding="utf-8",
+            )
+            metadata_payload = {
+                "format": "storyforge-project-metadata-v1",
+                "application": APP_NAME,
+                "application_version": APP_VERSION,
+                "exported_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "project": project,
+            }
+            (root / "00_metadata.json").write_text(
+                json.dumps(metadata_payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            files_before_manifest = [
+                path for path in root.rglob("*") if path.is_file()
+            ]
+            image_count = int(
+                self.db.one(
+                    "SELECT COUNT(*) FROM image_library WHERE project_id=?",
+                    (project_id,),
+                )[0]
+            )
+            relationship_count = int(
+                self.db.one(
+                    "SELECT COUNT(*) FROM character_relationships WHERE project_id=?",
+                    (project_id,),
+                )[0]
+            )
+            track_count = int(
+                self.db.one(
+                    "SELECT COUNT(*) FROM timeline_tracks WHERE project_id=?",
+                    (project_id,),
+                )[0]
+            )
+            rule_count = int(
+                self.db.one(
+                    "SELECT COUNT(*) FROM world_rules WHERE project_id=?",
+                    (project_id,),
+                )[0]
+            )
+            term_count = int(
+                self.db.one(
+                    "SELECT COUNT(*) FROM world_terms WHERE project_id=?",
+                    (project_id,),
+                )[0]
+            )
+            manifest_payload = {
+                "format": "storyforge-final-v2",
+                "application": APP_NAME,
+                "application_version": APP_VERSION,
+                "project_id": int(project_id),
+                "project_title": project["title"],
+                "project_status": status,
+                "exported_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "counts": {
+                    "documents": len(docs),
+                    "sequences": len(sequences),
+                    "scenes": len(scenes),
+                    "characters": len(characters),
+                    "relations": relationship_count,
+                    "events": len(events),
+                    "locations": len(locations),
+                    "story_map_nodes": len(story_map_nodes),
+                    "story_map_links": len(story_map_links),
+                    "images": image_count,
+                    "timelines": track_count,
+                    "rules": rule_count,
+                    "terms": term_count,
+                },
+                "files": len(files_before_manifest) + 1,
+                "backup": "08_Sauvegarde/projet.storyforge.json",
+            }
+            (root / "00_manifest.json").write_text(
+                json.dumps(manifest_payload, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
             with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -17063,10 +17169,21 @@ class StoryForgeWindow(QMainWindow):
         meta_row = self.db.one("SELECT * FROM script_meta WHERE project_id=?", (project_id,))
         meta = dict(meta_row) if meta_row else {}
         title = meta.get("title") or project["title"] or "Scénario"
+        structured_document = ScreenplayDocument.from_json(meta.get("document_json", ""))
+        if (
+            structured_document is not None
+            and structured_document.to_plain_text().strip() != str(script or "").strip()
+        ):
+            structured_document = None
+        script_elements = structured_document.elements() if structured_document else None
         scenario_dir = root / "01_Scenario"
         export_fdx(
             scenario_dir / "scenario.fdx", title, script, meta.get("author", ""),
             meta.get("contact", ""), meta.get("draft_date", ""),
+            based_on=meta.get("based_on", ""),
+            copyright_notice=meta.get("copyright_notice", ""),
+            include_title_page=bool(meta.get("include_title_page", 1)),
+            elements=script_elements,
         )
         export_script_pdf(
             scenario_dir / "scenario.pdf", title, script, meta.get("author", ""),
@@ -17074,8 +17191,25 @@ class StoryForgeWindow(QMainWindow):
             based_on=meta.get("based_on", ""),
             copyright_notice=meta.get("copyright_notice", ""),
             include_title_page=bool(meta.get("include_title_page", 1)),
+            elements=script_elements,
         )
         (scenario_dir / "scenario.fountain").write_text(script, encoding="utf-8")
+        scenario_payload = {
+            "format": "storyforge-screenplay-v1",
+            "title": title,
+            "author": meta.get("author", ""),
+            "contact": meta.get("contact", ""),
+            "draft_date": meta.get("draft_date", ""),
+            "based_on": meta.get("based_on", ""),
+            "copyright_notice": meta.get("copyright_notice", ""),
+            "include_title_page": bool(meta.get("include_title_page", 1)),
+            "document": structured_document.to_dict() if structured_document else None,
+            "elements": script_elements if script_elements is not None else parse_screenplay(script),
+        }
+        (scenario_dir / "scenario.json").write_text(
+            json.dumps(scenario_payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
         document_order = {
             key: index for index, (key, _label) in enumerate(DEVELOPMENT_DOCUMENTS, start=1)
@@ -17107,6 +17241,80 @@ class StoryForgeWindow(QMainWindow):
             ),
             encoding="utf-8",
         )
+
+    def _write_final_story_map(
+        self,
+        root: Path,
+        project_id: int,
+        nodes: list[dict],
+        links: list[dict],
+    ) -> None:
+        """Export the visual story map as readable files without losing layout."""
+
+        directory = root / "03_Plan"
+        node_by_id = {int(node["id"]): node for node in nodes}
+        linked_characters: dict[int, str] = {}
+        for row in self.db.q(
+            """SELECT link.node_id,GROUP_CONCAT(character.name, ', ') names
+            FROM story_map_node_characters link
+            JOIN story_map_nodes node ON node.id=link.node_id
+            JOIN characters character ON character.id=link.character_id
+            WHERE node.project_id=? GROUP BY link.node_id""",
+            (project_id,),
+        ):
+            linked_characters[int(row["node_id"])] = row["names"] or ""
+        outgoing: dict[int, list[str]] = {int(node["id"]): [] for node in nodes}
+        for link in links:
+            source_id = int(link["source_id"])
+            target = node_by_id.get(int(link["target_id"]))
+            if source_id in outgoing and target is not None:
+                target_title = target.get("title") or "Carte sans titre"
+                label = str(link.get("label") or "").strip()
+                outgoing[source_id].append(
+                    f"{label} → {target_title}" if label else f"→ {target_title}"
+                )
+
+        rows: list[dict] = []
+        for node in nodes:
+            exported = dict(node)
+            exported["characters"] = linked_characters.get(int(node["id"]), "")
+            exported["links"] = " ; ".join(outgoing.get(int(node["id"]), []))
+            rows.append(exported)
+        (directory / "cartes.md").write_text(
+            self._final_export_markdown(
+                "Cartes de l’histoire",
+                rows,
+                (
+                    ("kind", "Type"),
+                    ("source_step_key", "Étape source"),
+                    ("content", "Contenu"),
+                    ("characters", "Personnages liés"),
+                    ("links", "Connexions sortantes"),
+                    ("x", "Position X"),
+                    ("y", "Position Y"),
+                ),
+            ),
+            encoding="utf-8",
+        )
+        with (directory / "cartes.csv").open(
+            "w", encoding="utf-8-sig", newline=""
+        ) as handle:
+            writer = csv.writer(handle)
+            writer.writerow(
+                [
+                    "ID", "Titre", "Type", "Étape source", "Contenu",
+                    "Personnages liés", "Connexions sortantes", "Position X", "Position Y",
+                ]
+            )
+            for row in rows:
+                writer.writerow(
+                    [
+                        row.get("id", ""), row.get("title", ""), row.get("kind", ""),
+                        row.get("source_step_key", ""), row.get("content", ""),
+                        row.get("characters", ""), row.get("links", ""),
+                        row.get("x", ""), row.get("y", ""),
+                    ]
+                )
 
     def _write_final_timeline(self, root: Path, project_id: int, events: list[dict]) -> None:
         character_names = {
@@ -17532,6 +17740,24 @@ class StoryForgeWindow(QMainWindow):
             self.palette.accent_soft,
         )
         self.script_text.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.script_scene_completer_model = QStringListModel(self)
+        self.script_scene_completer = QCompleter(self.script_scene_completer_model, self)
+        self.script_scene_completer.setWidget(self.script_text)
+        self.script_scene_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.script_scene_completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        self.script_scene_completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self.script_scene_completer.setMaxVisibleItems(8)
+        self.script_scene_completer.activated[str].connect(
+            self._apply_script_scene_completion
+        )
+        # Let the editor consume Enter/Tab while the popup is open, just like
+        # a screenplay editor: accepting a heading must not also advance the
+        # screenplay element type.
+        self.script_text.scene_completer = self.script_scene_completer
+        self.script_text.scene_completion_accepted.connect(
+            self._apply_script_scene_completion
+        )
+        self._refresh_script_scene_completion_model()
         self._script_document_syncing = True
         self.script_text.setPlainText(self.script_document.to_plain_text())
         self._script_document_syncing = False
@@ -18020,6 +18246,94 @@ class StoryForgeWindow(QMainWindow):
         if hasattr(self, "script_save_timer"):
             self.script_save_timer.start()
         self._refresh_script_structure()
+        self._update_script_scene_completion()
+
+    def _script_scene_completion_candidates(self) -> list[str]:
+        """Return local scene-heading suggestions for the active project."""
+
+        candidates: set[str] = set()
+        document = getattr(self, "script_document", None)
+        if isinstance(document, ScreenplayDocument):
+            candidates.update(
+                value.strip().upper()
+                for element_type, value in document.elements()
+                if element_type == "Scene Heading" and value.strip()
+            )
+
+        locations = {
+            str(row["name"]).strip().upper()
+            for row in self.db.q(
+                "SELECT name FROM locations WHERE project_id=? AND TRIM(name)<>''",
+                (self.active_project,),
+            )
+        }
+        prepared_locations = {
+            str(row.get("location_name") or "").strip().upper()
+            for row in getattr(self, "script_prepared_scenes", [])
+        }
+        locations.update(value for value in prepared_locations if value)
+        for location in locations:
+            candidates.add(f"INT. {location} - JOUR")
+            candidates.add(f"INT. {location} - NUIT")
+            candidates.add(f"EXT. {location} - JOUR")
+            candidates.add(f"EXT. {location} - NUIT")
+        return sorted(candidates)
+
+    def _refresh_script_scene_completion_model(self) -> None:
+        model = getattr(self, "script_scene_completer_model", None)
+        if not isinstance(model, QStringListModel):
+            return
+        model.setStringList(self._script_scene_completion_candidates())
+
+    def _update_script_scene_completion(self) -> None:
+        completer = getattr(self, "script_scene_completer", None)
+        editor = getattr(self, "script_text", None)
+        if not isinstance(completer, QCompleter) or not isinstance(editor, ScreenplayEditor):
+            return
+        if getattr(self, "_applying_script_scene_completion", False):
+            completer.popup().hide()
+            return
+        if self._infer_script_element_from_cursor() != "scene":
+            completer.popup().hide()
+            return
+        prefix = editor.textCursor().block().text().strip().upper()
+        if len(prefix) < 4 or not prefix.startswith(("INT.", "EXT.", "I/E.")):
+            completer.popup().hide()
+            return
+        completer.setCompletionPrefix(prefix)
+        if completer.completionCount() == 0:
+            completer.popup().hide()
+            return
+        cursor_rect = editor.cursorRect()
+        cursor_rect.setWidth(420)
+        completer.complete(cursor_rect)
+
+    def _apply_script_scene_completion(self, value: str) -> None:
+        editor = getattr(self, "script_text", None)
+        if not isinstance(editor, ScreenplayEditor):
+            return
+        if self._infer_script_element_from_cursor() != "scene":
+            return
+        completer = getattr(self, "script_scene_completer", None)
+        if isinstance(completer, QCompleter):
+            completer.popup().hide()
+        cursor = editor.textCursor()
+        cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
+        self._applying_script_scene_completion = True
+        try:
+            cursor.insertText(str(value).strip().upper())
+        finally:
+            self._applying_script_scene_completion = False
+        editor.setTextCursor(cursor)
+        self._set_script_element_mode("scene")
+        self._apply_script_block_format("scene", cursor)
+        if isinstance(completer, QCompleter):
+            # QCompleter may schedule a second popup update after the key event
+            # (notably on Linux/Wayland).  Hide it once that queued event has
+            # finished so accepting a heading leaves the writer in a stable
+            # scene block.
+            QTimer.singleShot(0, completer.popup().hide)
+        editor.setFocus()
 
     def _normalise_script_continued_cues(self) -> None:
         """Keep consecutive character cues in sync with the visible text.
@@ -18231,6 +18545,9 @@ class StoryForgeWindow(QMainWindow):
         self.script_text.current_element = element
         if isinstance(self.script_text, ScreenplayEditor):
             self.script_text.refresh_active_line()
+        completer = getattr(self, "script_scene_completer", None)
+        if element != "scene" and isinstance(completer, QCompleter):
+            completer.popup().hide()
         self.script_element_state.setText(self._script_element_caption(element))
         for kind, button in getattr(self, "script_element_buttons", {}).items():
             button.setChecked(kind == element)
@@ -18486,6 +18803,9 @@ class StoryForgeWindow(QMainWindow):
         focus_shortcut = QShortcut(QKeySequence("Ctrl+Shift+F"), self.script_text)
         focus_shortcut.activated.connect(self._toggle_script_focus_mode)
         self.script_shortcuts.append(focus_shortcut)
+        completion_shortcut = QShortcut(QKeySequence("Ctrl+Space"), self.script_text)
+        completion_shortcut.activated.connect(self._update_script_scene_completion)
+        self.script_shortcuts.append(completion_shortcut)
 
     def _script_meta(self):
         project = self.db.one("SELECT title FROM projects WHERE id=?", (self.active_project,))
@@ -18811,6 +19131,9 @@ class StoryForgeWindow(QMainWindow):
         export_fdx(
             output_path, meta["title"] or (project["title"] if project else "Scénario"),
             self.script_text.toPlainText(), meta["author"], meta["contact"], meta["draft_date"],
+            based_on=meta["based_on"],
+            copyright_notice=meta["copyright_notice"],
+            include_title_page=bool(meta["include_title_page"]),
             elements=self._script_elements_for_export(),
         )
         self.save_state.setText("Fichier FDX exporté")

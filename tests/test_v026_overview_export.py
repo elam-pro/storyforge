@@ -103,6 +103,23 @@ def test_overview_reuses_project_data_and_final_export_is_portable(tmp_path: Pat
         VALUES(?,?,?,?,?,?,?)""",
         (project_id, 0, "Musée", "Travail", "Un musée fermé la nuit", NOW(), NOW()),
     )
+    map_node_a = window.db.run(
+        """INSERT INTO story_map_nodes(
+        project_id,title,content,kind,source_step_key,x,y,created_at,updated_at
+        ) VALUES(?,?,?,?,?,?,?,?,?)""",
+        (project_id, "Le tableau", "Un objet impossible à déplacer", "incident", "seed", 120, 180, NOW(), NOW()),
+    ).lastrowid
+    map_node_b = window.db.run(
+        """INSERT INTO story_map_nodes(
+        project_id,title,content,kind,source_step_key,x,y,created_at,updated_at
+        ) VALUES(?,?,?,?,?,?,?,?,?)""",
+        (project_id, "Le choix", "Mina doit protéger sa sœur", "decision", "decision", 420, 180, NOW(), NOW()),
+    ).lastrowid
+    window.db.run(
+        """INSERT INTO story_map_links(project_id,source_id,target_id,label,created_at)
+        VALUES(?,?,?,?,?)""",
+        (project_id, map_node_a, map_node_b, "déclenche", NOW()),
+    )
 
     window.show_story_overview()
     app.processEvents()
@@ -127,9 +144,14 @@ def test_overview_reuses_project_data_and_final_export_is_portable(tmp_path: Pat
         names = set(archive.namelist())
         assert {
             "00_LIRE_MOI.md",
+            "00_metadata.json",
+            "00_manifest.json",
             "01_Scenario/scenario.pdf",
             "01_Scenario/scenario.fdx",
             "01_Scenario/scenario.fountain",
+            "01_Scenario/scenario.json",
+            "03_Plan/cartes.md",
+            "03_Plan/cartes.csv",
             "03_Plan/scenes.md",
             "04_Chronologie/chronologie.csv",
             "04_Chronologie/chronologie.md",
@@ -138,6 +160,18 @@ def test_overview_reuses_project_data_and_final_export_is_portable(tmp_path: Pat
             "06_Univers/lieux.md",
             "08_Sauvegarde/projet.storyforge.json",
         }.issubset(names)
+        metadata = json.loads(archive.read("00_metadata.json").decode("utf-8"))
+        assert metadata["format"] == "storyforge-project-metadata-v1"
+        assert metadata["project"]["title"] == "Les Veilleurs"
+        final_manifest = json.loads(archive.read("00_manifest.json").decode("utf-8"))
+        assert final_manifest["format"] == "storyforge-final-v2"
+        assert final_manifest["application_version"] == "0.30.0"
+        assert final_manifest["counts"]["story_map_nodes"] == 2
+        assert final_manifest["counts"]["story_map_links"] == 1
+        assert "déclenche" in archive.read("03_Plan/cartes.md").decode("utf-8")
+        scenario = json.loads(archive.read("01_Scenario/scenario.json").decode("utf-8"))
+        assert scenario["format"] == "storyforge-screenplay-v1"
+        assert scenario["elements"][0] == ["Scene Heading", "INT. MUSÉE - NUIT"]
         exported = json.loads(
             archive.read("08_Sauvegarde/projet.storyforge.json").decode("utf-8")
         )

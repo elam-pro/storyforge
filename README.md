@@ -1,8 +1,16 @@
-# StoryForge Desktop 0.29.1 — SmartType Final Draft
+# StoryForge Desktop 0.30.0 — Export professionnel et autocomplétion
 
 StoryForge est une application **Linux locale et gratuite** pour apprendre l’écriture de fiction cinématographique en écrivant.
 
 Le code reste dans le dossier existant `storyforge_desktop_v051`, conformément au choix de conserver un seul dossier de travail.
+
+## V0.30.0 — Export professionnel et autocomplétion
+
+- autocomplétion locale des en-têtes de scène à partir des lieux et scènes du projet ;
+- export FDX avec page de titre configurable et informations de droits ;
+- export final avec scénario structuré en JSON, manifeste machine-readable et sauvegarde StoryForge réimportable ;
+- scénario, chronologie, personnages, relations, lieux, univers, cartes, scènes et images regroupés dans une archive portable ;
+- manifeste et métadonnées du projet inclus pour vérifier rapidement le contenu exporté.
 
 ## V0.29.1 — SmartType Final Draft
 
