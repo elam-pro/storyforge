@@ -12912,6 +12912,10 @@ class StoryForgeWindow(QMainWindow):
         self._render_character_portrait()
         self._refresh_character_group_choices()
         self._refresh_characters(select_first=True)
+        # Prime the first visible page once. Subsequent character switches
+        # skip this cross-tool panel unless the author opens its tab.
+        if self.character_id and self.character_tabs.currentIndex() != self.character_connections_tab_index:
+            self._refresh_character_connections()
 
     def _character_form_tab(self, definitions) -> QScrollArea:
         area = QScrollArea()
