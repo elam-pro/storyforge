@@ -1,0 +1,162 @@
+{
+  "key": "session01",
+  "cycle": "Cycle 0 · Fondations",
+  "title": "De l’idée vague à la graine",
+  "subtitle": "Construire une histoire en répondant à une question utile à la fois.",
+  "steps": [
+    {
+      "key": "idea",
+      "title": "Idée de départ",
+      "concept_key": "idee",
+      "concept_label": "Idée",
+      "question": "Quelle idée veux-tu explorer ?",
+      "why": "Il ne faut pas encore raconter toute l’histoire. Commence par une image, une situation, une relation, une peur ou un « et si… ? » qui te donne envie d’aller plus loin.",
+      "example": "Chaque nuit, une gardienne de musée déplace secrètement un tableau de quelques centimètres.",
+      "placeholder": "Mon idée de départ…",
+      "tips": ["Une à trois phrases suffisent", "Cherche quelque chose de précis", "Ne juge pas encore l’idée"]
+    },
+    {
+      "key": "interest",
+      "title": "Ce qui t’attire",
+      "concept_key": "intention",
+      "concept_label": "Intention",
+      "question": "Qu’est-ce qui t’intéresse vraiment dans cette idée ?",
+      "why": "Ta réponse sert de boussole. Elle indique ce que tu ne veux pas perdre lorsque l’histoire commencera à évoluer.",
+      "example": "Ce qui m’attire, c’est que la gardienne protège peut-être le tableau contre le musée lui-même.",
+      "placeholder": "Ce que je veux absolument explorer, c’est… parce que…",
+      "tips": ["Nomme un élément précis", "Explique pourquoi il compte pour toi"]
+    },
+    {
+      "key": "protagonist",
+      "title": "Protagoniste",
+      "concept_key": "protagoniste",
+      "concept_label": "Protagoniste",
+      "question": "Qui est le protagoniste ?",
+      "why": "Le protagoniste est la personne dont nous suivons surtout les décisions et les conséquences. Choisis celle pour qui la situation compte le plus.",
+      "example": "Une ancienne restauratrice renvoyée du musée, aujourd’hui gardienne de nuit.",
+      "placeholder": "Le protagoniste est… Cette histoire passe par cette personne parce que…",
+      "tips": ["Une personne identifiable", "Une raison de suivre son point de vue"]
+    },
+    {
+      "key": "desire",
+      "title": "Désir",
+      "concept_key": "desir",
+      "concept_label": "Désir",
+      "question": "Que veut cette personne ?",
+      "why": "Le désir donne une direction au personnage. Il peut être large pour l’instant : être reconnu, protéger quelqu’un, retrouver une place, connaître la vérité.",
+      "example": "Elle veut prouver qu’elle avait raison et retrouver sa crédibilité.",
+      "placeholder": "Cette personne veut…",
+      "tips": ["Le désir appartient au personnage", "Il peut provoquer des actions"]
+    },
+    {
+      "key": "objective",
+      "title": "Objectif concret",
+      "concept_key": "objectif",
+      "concept_label": "Objectif",
+      "question": "Que cherche-t-elle concrètement à obtenir, accomplir, empêcher ou préserver ?",
+      "why": "Un objectif rend le désir observable. Le spectateur doit pouvoir comprendre si le personnage avance, échoue ou change de stratégie.",
+      "example": "Prouver avant l’exposition que le tableau présenté est une contrefaçon.",
+      "placeholder": "Concrètement, cette personne cherche à…",
+      "tips": ["Un résultat imaginable", "Une direction que l’on peut montrer à l’écran"]
+    },
+    {
+      "key": "opposition",
+      "title": "Opposition",
+      "concept_key": "opposition",
+      "concept_label": "Opposition",
+      "question": "Qu’est-ce qui l’en empêche ?",
+      "why": "L’opposition crée la nécessité d’agir et de choisir. Elle peut venir d’une personne, d’un groupe, d’une situation, du monde ou du personnage lui-même.",
+      "example": "Le directeur contrôle chaque déplacement du tableau et peut la faire arrêter.",
+      "placeholder": "Ce qui l’empêche d’atteindre son objectif, c’est…",
+      "tips": ["Une résistance précise", "Elle touche directement l’objectif"]
+    },
+    {
+      "key": "stakes",
+      "title": "Enjeux",
+      "concept_key": "enjeux",
+      "concept_label": "Enjeux",
+      "question": "Pourquoi est-ce important pour elle ?",
+      "why": "Les enjeux expliquent ce que le personnage risque de perdre, de subir ou de ne jamais obtenir. Ils donnent un poids personnel à l’objectif.",
+      "example": "Si elle échoue, sa réputation restera détruite et la contrefaçon deviendra la version officielle.",
+      "placeholder": "C’est important pour elle parce que… Si elle échoue…",
+      "tips": ["Une conséquence personnelle", "Pas seulement « parce que c’est grave »"]
+    },
+    {
+      "key": "action",
+      "title": "Actions",
+      "concept_key": "action",
+      "concept_label": "Action",
+      "question": "Que fait-elle pour obtenir ce qu’elle veut ?",
+      "why": "Une histoire avance lorsque le personnage tente quelque chose. Décris une première stratégie, même si elle est imparfaite.",
+      "example": "Elle déplace le tableau chaque nuit pour révéler une marque cachée derrière le cadre.",
+      "placeholder": "Pour atteindre son objectif, elle décide de…",
+      "tips": ["Un comportement observable", "Une action provoquée par l’objectif"]
+    },
+    {
+      "key": "consequence",
+      "title": "Conséquences",
+      "concept_key": "consequence",
+      "concept_label": "Conséquence",
+      "question": "Que provoquent ses actions et ses décisions ?",
+      "why": "La causalité relie les événements : quelque chose arrive parce que le personnage a agi, échoué ou choisi. Évite la simple succession de hasards.",
+      "example": "Son déplacement déclenche l’alarme et pousse le directeur à installer une surveillance nocturne.",
+      "placeholder": "À cause de cette action…",
+      "tips": ["Une conséquence directe", "Elle modifie la situation suivante"]
+    },
+    {
+      "key": "progression",
+      "title": "Progression",
+      "concept_key": "progression",
+      "concept_label": "Progression",
+      "question": "Comment la situation devient-elle plus difficile, plus coûteuse ou différente ?",
+      "why": "La progression évite que l’histoire répète le même obstacle. Chaque étape doit changer le problème ou augmenter le prix à payer.",
+      "example": "Elle ne risque plus seulement son emploi : un collègue innocent est maintenant accusé à sa place.",
+      "placeholder": "La situation se complique lorsque… Désormais…",
+      "tips": ["Le problème change ou s’intensifie", "Le coût devient plus personnel"]
+    },
+    {
+      "key": "choice",
+      "title": "Choix difficile",
+      "concept_key": "choix",
+      "concept_label": "Choix",
+      "question": "Quel choix difficile doit-elle faire ?",
+      "why": "Un choix révèle les priorités du personnage. Les deux options doivent avoir un coût ; sinon, il ne s’agit que d’une formalité.",
+      "example": "Accuser publiquement le directeur sans preuve, ou laisser son collègue perdre son emploi.",
+      "placeholder": "Elle doit choisir entre… et… Dans les deux cas…",
+      "tips": ["Deux options réellement coûteuses", "Le choix révèle ce qui compte pour elle"]
+    },
+    {
+      "key": "change",
+      "title": "Changement",
+      "concept_key": "changement",
+      "concept_label": "Changement",
+      "question": "Qu’est-ce qui pourrait changer ?",
+      "why": "Le changement peut concerner le personnage, une relation, une situation ou sa manière de voir le problème. Il n’a pas besoin d’être positif.",
+      "example": "Elle cesse de vouloir rétablir sa réputation et choisit de protéger la vérité, même anonymement.",
+      "placeholder": "Au début… À la fin, quelque chose pourrait avoir changé : …",
+      "tips": ["Compare un avant et un après", "Le changement peut rester provisoire"]
+    },
+    {
+      "key": "ending",
+      "title": "Fin possible",
+      "concept_key": "fin",
+      "concept_label": "Fin",
+      "question": "Vers quelle fin cette histoire pourrait-elle conduire ?",
+      "why": "Une fin provisoire donne une direction au développement. Elle peut changer plus tard : son rôle est de t’aider à voir où les choix et les conséquences pourraient aboutir.",
+      "example": "Le faux tableau est retiré, mais la gardienne laisse volontairement un autre personnage recevoir le mérite.",
+      "placeholder": "À la fin, il pourrait arriver que…",
+      "tips": ["Un résultat concret", "Une conséquence des choix précédents"]
+    },
+    {
+      "key": "seed",
+      "title": "Graine d’histoire",
+      "concept_key": "graine",
+      "concept_label": "Synthèse",
+      "question": "Quelle histoire commence à apparaître ?",
+      "why": "Relie maintenant les réponses les plus solides. Tu n’écris pas encore un synopsis : deux à cinq phrases suffisent pour faire sentir une personne, une direction, une opposition et une évolution possible.",
+      "example": "Une ancienne restauratrice devenue gardienne découvre que le tableau vedette du musée est faux. Pour le prouver avant l’exposition, elle le déplace chaque nuit, mais ses actions font accuser un collègue et l’obligent à choisir entre sa réputation et la vérité.",
+      "placeholder": "Ma graine d’histoire…",
+      "tips": ["Qui veut quoi", "Contre quoi", "Ce que cela pourrait provoquer"]
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+tmp/
+output/
+backups/
+storyforge.db
+*.db-shm
+*.db-wal

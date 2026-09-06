@@ -1,0 +1,20512 @@
+from __future__ import annotations
+
+import csv
+import json
+import math
+import mimetypes
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import zipfile
+from datetime import datetime
+from itertools import pairwise
+from pathlib import Path
+from xml.etree.ElementTree import ParseError
+
+from PySide6.QtCore import (
+    QPoint,
+    QPointF,
+    QRectF,
+    QSize,
+    Qt,
+    QThread,
+    QTimer,
+    QUrl,
+    Signal,
+)
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QDesktopServices,
+    QFont,
+    QFontDatabase,
+    QIcon,
+    QKeyEvent,
+    QKeySequence,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+    QPolygonF,
+    QRegion,
+    QShortcut,
+    QTextBlockFormat,
+    QTextCursor,
+)
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
+    QButtonGroup,
+    QCheckBox,
+    QColorDialog,
+    QComboBox,
+    QDialog,
+    QDoubleSpinBox,
+    QFileDialog,
+    QFrame,
+    QGraphicsItem,
+    QGraphicsPathItem,
+    QGraphicsRectItem,
+    QGraphicsScene,
+    QGraphicsTextItem,
+    QGraphicsView,
+    QGridLayout,
+    QHBoxLayout,
+    QHeaderView,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QListView,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QTabWidget,
+    QTextEdit,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ai_service import ProfessorAI
+from db import NOW, Database
+from learning_content import load_session
+from pdf_export import export_manual_pdf
+from script_export import export_fdx, export_script_pdf, import_fdx, parse_screenplay
+from theme import DARK, LIGHT, Palette, stylesheet
+
+APP_NAME = "StoryForge"
+APP_VERSION = "0.27.1"
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = Path(os.environ.get("STORYFORGE_DB_PATH", BASE_DIR / "storyforge.db"))
+IDEA_ATTACHMENT_LIMIT = 25 * 1024 * 1024
+LEARNING_SESSION = load_session(BASE_DIR / "content" / "sessions" / "session_01.json")
+GUIDE_SESSIONS = {
+    "seed": LEARNING_SESSION,
+    "strengthen_idea": load_session(BASE_DIR / "content" / "sessions" / "guide_strengthen_idea.json"),
+    "find_ending": load_session(BASE_DIR / "content" / "sessions" / "guide_find_ending.json"),
+    "prepare_scene": load_session(BASE_DIR / "content" / "sessions" / "guide_prepare_scene.json"),
+}
+GUIDE_ORDER = ("seed", "strengthen_idea", "find_ending", "prepare_scene")
+GUIDE_LEVELS = {
+    "discovery": "Découverte",
+    "guided": "Guidé",
+    "autonomous": "Autonome",
+}
+
+# A guide explains one problem at a time; these links take the learner to the
+# real project workspace where that precise notion can be tested.  They do not
+# copy an answer into several documents: the guide remains the reasoning trace
+# and the project tool remains the source of truth.
+LEARNING_TOOL_LINKS = {
+    "seed": {
+        "idea": ("development", "premise", "Construction · Prémisse", "project", "", "Clarifie ce que l’histoire explore."),
+        "interest": ("development", "premise", "Construction · Prémisse", "project", "", "Vérifie que ton intention reste visible dans la prémisse."),
+        "protagonist": ("characters", "", "Projet · Personnages", "character", "description", "Donne une existence concrète au protagoniste."),
+        "desire": ("characters", "", "Personnage · Dramaturgie", "character", "desire", "Relie le désir au personnage concerné."),
+        "objective": ("characters", "", "Personnage · Dramaturgie", "character", "objective", "Teste l’objectif concret dans la fiche du personnage."),
+        "opposition": ("conflicts", "", "Projet · Conflits", "conflict", "incompatibility", "Construis les deux volontés qui ne peuvent pas réussir ensemble."),
+        "stakes": ("conflicts", "", "Conflit · Noyau", "conflict", "stakes", "Rends visible ce que l’échec ferait perdre."),
+        "action": ("development", "story_map", "Construction · Carte de l’histoire", "project", "first_actions", "Place l’action comme une cause, pas comme un épisode isolé."),
+        "consequence": ("development", "story_map", "Construction · Carte de l’histoire", "project", "obstacles_consequences", "Relie l’action à ce qu’elle provoque."),
+        "progression": ("development", "story_map", "Construction · Carte de l’histoire", "project", "escalation", "Vérifie que la situation se transforme ou se resserre."),
+        "choice": ("development", "story_map", "Construction · Carte de l’histoire", "project", "difficult_choice", "Place le choix au point où il devient coûteux."),
+        "change": ("characters", "", "Personnage · Arc et transformation", "character", "arc", "Compare le personnage du début à celui de la fin."),
+        "ending": ("development", "story_map", "Construction · Carte de l’histoire", "project", "resolution_change", "Teste si la fin vient des décisions précédentes."),
+        "seed": ("development", "premise", "Construction · Prémisse", "project", "", "Confronte la graine au document de départ du projet."),
+    },
+    "strengthen_idea": {
+        "attraction": ("development", "premise", "Construction · Prémisse", "project", "", "Garde visible ce qui rend cette histoire importante pour toi."),
+        "specificity": ("development", "premise", "Construction · Prémisse", "project", "", "Remplace le général par une situation reconnaissable."),
+        "personal_pressure": ("conflicts", "", "Projet · Conflits", "conflict", "stakes", "Vérifie ce que la situation coûte personnellement."),
+        "resistance": ("conflicts", "", "Projet · Conflits", "conflict", "incompatibility", "Donne à la résistance un objectif et des moyens d’agir."),
+        "strengthened_premise": ("development", "premise", "Construction · Prémisse", "project", "", "Compare la nouvelle formulation à la prémisse du projet."),
+    },
+    "find_ending": {
+        "promise": ("promises", "", "Projet · Accroche et promesses", "promise", "description", "Identifie l’attente que la fin doit accomplir ou transformer."),
+        "decisive_choice": ("development", "story_map", "Construction · Carte de l’histoire", "project", "difficult_choice", "Fais découler la fin d’un choix assumé."),
+        "result": ("development", "story_map", "Construction · Carte de l’histoire", "project", "final_confrontation", "Rends le résultat observable et causal."),
+        "final_change": ("characters", "", "Personnage · Arc et transformation", "character", "arc", "Relie le changement final à ce que le personnage a traversé."),
+        "provisional_ending": ("development", "synopsis", "Construction · Synopsis", "project", "", "Teste cette fin dans le mouvement complet du synopsis."),
+    },
+    "prepare_scene": {
+        "scene_situation": ("development", "scenes", "Construction · Liste de scènes", "scene", "entry_state", "Précise la situation au moment d’entrer dans la scène."),
+        "scene_objective": ("development", "scenes", "Scène · Noyau", "scene", "objective", "Donne à la scène une direction jouable."),
+        "scene_opposition": ("development", "scenes", "Scène · Noyau", "scene", "opposition", "Fais agir l’opposition dans la scène."),
+        "scene_change": ("development", "scenes", "Scène · Noyau", "scene", "change_note", "Vérifie ce qui n’est plus pareil en sortant de la scène."),
+        "scene_title": ("development", "scenes", "Construction · Liste de scènes", "scene", "title", "Nomme la scène par sa fonction ou son mouvement principal."),
+    },
+}
+
+TIMELINE_UNITS = {
+    "year": ("Années", 365 * 24.0, "an"),
+    "month": ("Mois", 30 * 24.0, "mois"),
+    "day": ("Jours", 24.0, "jour"),
+    "hour": ("Heures", 1.0, "heure"),
+}
+TIMELINE_CATEGORIES = (
+    "Intrigue principale",
+    "Backstory",
+    "Monde",
+    "Guerre",
+    "Famille",
+    "Relation",
+)
+CHARACTER_ROLES = (
+    "Protagoniste",
+    "Antagoniste",
+    "Allié",
+    "Opposition",
+    "Personnage secondaire",
+    "Figurant",
+    "Groupe / faction",
+)
+FORM_TEMPLATE_TARGETS = {
+    "character": "Personnage",
+    "location": "Lieu",
+    "world": "Monde",
+    "scene": "Scène",
+    "event": "Événement",
+    "object": "Objet",
+    "faction": "Faction",
+    "theme": "Thème",
+}
+FORM_FIELD_TYPES = {
+    "text_short": "Texte court",
+    "text_long": "Texte long",
+    "number": "Nombre",
+    "date": "Date",
+    "list": "Liste",
+    "tags": "Tags",
+    "checkbox": "Case à cocher",
+    "image": "Image du projet",
+    "link_character": "Lien vers un personnage",
+    "link_scene": "Lien vers une scène",
+    "link_location": "Lien vers un lieu",
+}
+SEARCH_TARGETS = {
+    "idea": "Idée",
+    "character": "Personnage",
+    "location": "Lieu",
+    "scene": "Scène",
+    "event": "Événement",
+    "story_node": "Carte de l’histoire",
+    "sequence": "Séquence",
+    "conflict": "Conflit",
+    "image": "Image",
+    "faction": "Faction",
+    "document": "Document",
+}
+CHARACTER_ARC_TYPES = (
+    "À préciser",
+    "Transformation positive",
+    "Transformation négative",
+    "Arc stable",
+    "Arc tragique",
+    "Transformation inachevée",
+)
+STORY_PROMISE_TYPES = (
+    "Concept",
+    "Personnage",
+    "Conflit",
+    "Mystère",
+    "Émotion",
+    "Univers",
+    "Ton / genre",
+)
+STORY_PROMISE_STATUSES = (
+    "À placer",
+    "Introduite",
+    "Développée",
+    "Accomplie",
+    "Abandonnée",
+)
+STORY_MOMENT_TYPES = (
+    "Confrontation",
+    "Révélation",
+    "Retournement",
+    "Découverte",
+    "Moment émotionnel",
+    "Image forte",
+    "Décision",
+    "Climax",
+    "Autre",
+)
+STORY_MOMENT_STATUSES = (
+    "Idée",
+    "Placée",
+    "Développée",
+    "Écrite",
+    "Écartée",
+)
+SCENE_STATUSES = (
+    ("idea", "Idée"),
+    ("to_write", "À écrire"),
+    ("draft", "Brouillon"),
+    ("to_review", "À revoir"),
+    ("validated", "Validée"),
+)
+SCENE_STATUS_LABELS = dict(SCENE_STATUSES)
+CHARACTER_GROUP_TYPES = (
+    "Famille",
+    "Équipe",
+    "Faction",
+    "Entreprise",
+    "Royaume",
+    "Gang",
+    "Classe sociale",
+    "Autre",
+)
+RELATIONSHIP_TYPES = (
+    "Amour",
+    "Amitié",
+    "Famille",
+    "Rivalité",
+    "Haine",
+    "Respect",
+    "Méfiance",
+    "Manipulation",
+    "Autorité",
+    "Secret",
+    "Alliance",
+    "Autre",
+)
+RELATIONSHIP_COLORS = {
+    "Amour": "#D9578B",
+    "Amitié": "#3C93FF",
+    "Famille": "#9B6FE8",
+    "Rivalité": "#F08A35",
+    "Haine": "#E25555",
+    "Respect": "#31A879",
+    "Méfiance": "#C49A34",
+    "Manipulation": "#8C647F",
+    "Autorité": "#60748B",
+    "Secret": "#6F63B7",
+    "Alliance": "#278FA1",
+    "Autre": "#7A7D85",
+}
+
+LEARNING_QUESTION_KEYS = {
+    "interest": "interest",
+    "protagonist": "center",
+    "desire": "desire",
+    "objective": "objective",
+    "opposition": "opposition",
+    "stakes": "stakes",
+    "action": "action",
+    "consequence": "consequence",
+    "progression": "progression",
+    "choice": "choice",
+    "change": "change",
+    "ending": "ending",
+}
+
+DOC_TYPES = [
+    ("summary", "Résumé très court"),
+    ("synopsis", "Synopsis"),
+    ("treatment", "Treatment"),
+    ("beats", "Carte de beats"),
+    ("outline", "Plan global"),
+    ("scenes", "Scènes"),
+    ("script", "Scénario"),
+]
+
+PROJECT_FORMATS = (
+    ("micro", "Micro-film", 5, "Une histoire très concentrée, généralement entre 1 et 5 minutes."),
+    ("short", "Court métrage", 20, "Un film court, généralement entre 5 et 30 minutes."),
+    ("medium", "Moyen métrage", 50, "Une histoire plus ample, généralement entre 30 et 60 minutes."),
+    ("feature", "Long métrage", 100, "Un film de plus de 60 minutes."),
+    ("free", "Durée libre", 0, "Aucun objectif chiffré imposé au démarrage."),
+)
+PROJECT_FORMAT_LABELS = {key: label for key, label, _duration, _description in PROJECT_FORMATS}
+PROJECT_STATUS_LABELS = {
+    "ongoing": "En cours",
+    "paused": "En pause",
+    "completed": "Terminé",
+    "archived": "Archivé",
+}
+DOC_META = {
+    "summary": "Tester le cœur de l’histoire en quelques lignes.",
+    "synopsis": "Raconter toute l’histoire, fin comprise, pour vérifier sa progression.",
+    "treatment": "Développer l’expérience du film avant le découpage en scènes.",
+    "beats": "Repérer les décisions, bascules et conséquences importantes.",
+    "outline": "Organiser les séquences et scènes avant le premier jet.",
+    "scenes": "Vérifier la fonction et l’enchaînement de chaque scène.",
+    "script": "Écrire les actions, comportements et dialogues destinés à l’écran.",
+}
+
+DEVELOPMENT_DOCUMENTS = [
+    ("premise", "Prémisse / Concept"),
+    ("logline", "Logline"),
+    ("summary", "Résumé très court"),
+    ("story_map", "Carte de l’histoire"),
+    ("synopsis", "Synopsis"),
+    ("treatment", "Treatment"),
+    ("beats", "Carte de beats"),
+    ("outline", "Plan global"),
+    ("scenes", "Scènes"),
+    ("script", "Scénario"),
+]
+
+DEVELOPMENT_GUIDES = {
+    "premise": {
+        "objective": "Trouver le noyau dramatique que tu as réellement envie de développer.",
+        "definition": "Une prémisse présente la personne, la situation et la tension centrale sans raconter tout le film.",
+        "how": "Assemble une personne précise + une situation inhabituelle + la tension ou transformation que cette situation promet.",
+        "format": "Une à trois phrases. Reste précis, provisoire et racontable à l’écran.",
+        "prompt": "Quelle personne se retrouve dans quelle situation porteuse de conflit ou de changement ?",
+    },
+    "logline": {
+        "objective": "Tester si la direction dramatique de l’histoire est compréhensible.",
+        "definition": "Une logline condense le protagoniste, son objectif, l’opposition principale et, si utile, les enjeux.",
+        "how": "Après un événement déclencheur, [protagoniste] doit [action / objectif], mais [opposition], sinon [enjeu]. Adapte ou raccourcis cette formule librement.",
+        "format": "Une ou deux phrases. C’est un outil de diagnostic, pas une formule obligatoire.",
+        "prompt": "Qui poursuit quoi, contre quelle force, et pourquoi le résultat compte-t-il ?",
+    },
+    "summary": {
+        "objective": "Vérifier que l’histoire entière peut être racontée simplement.",
+        "definition": "Le résumé très court raconte le mouvement principal du début jusqu’à la fin, sans détailler les scènes.",
+        "format": "Un court paragraphe. Inclus la fin, même si elle reste provisoire.",
+        "prompt": "Quelle situation commence l’histoire, qu’est-ce qui la complique, et où conduit-elle ?",
+    },
+    "story_map": {
+        "objective": "Rendre visibles les décisions et les conséquences qui font avancer l’histoire.",
+        "definition": "La carte de l’histoire relie les grands moments par leur causalité : ceci arrive, donc la personne agit, donc la situation change.",
+        "format": "Une liste courte de moments reliés. Aucun nombre d’étapes n’est imposé.",
+        "prompt": "Quelles décisions ou bascules modifient réellement la situation jusqu’à la fin ?",
+    },
+    "synopsis": {
+        "objective": "Tester la progression complète avant de découper l’histoire en scènes.",
+        "definition": "Le synopsis raconte toute l’histoire au présent, fin comprise, en privilégiant actions, décisions et conséquences.",
+        "format": "Pour un court métrage, commence par une à trois pages claires et continues.",
+        "prompt": "Peut-on suivre sans explication extérieure ce qui arrive, pourquoi et avec quel résultat ?",
+    },
+    "treatment": {
+        "objective": "Voir le film se dérouler avant de le découper précisément en scènes.",
+        "definition": "Le treatment raconte toute l’histoire au présent, fin comprise, en développant les situations, les comportements, les changements de lieu et les transitions importantes.",
+        "how": "Pars du synopsis, puis développe chaque grand moment : ce que fait le protagoniste, ce qui lui résiste, ce qui change et comment cela conduit au moment suivant.",
+        "format": "Quelques pages de prose lisible, sans écrire tous les dialogues ni les indications de tournage.",
+        "prompt": "Raconte le film comme à une personne qui doit pouvoir l’imaginer : quelles actions, réactions et conséquences relient le début à la fin ?",
+    },
+    "beats": {
+        "objective": "Isoler les unités dramatiques qui produisent un changement utile.",
+        "definition": "Un beat est un moment d’action, de réaction, de révélation ou de décision qui déplace la situation.",
+        "format": "Une liste de lignes courtes. Garde seulement les moments qui provoquent quelque chose.",
+        "prompt": "À chaque ligne, qu’est-ce qui change et qu’est-ce que ce changement provoque ensuite ?",
+    },
+    "outline": {
+        "objective": "Organiser l’enchaînement avant de rédiger les scènes en détail.",
+        "definition": "L’outline ou séquencier décrit dans l’ordre les séquences et leurs fonctions dramatiques.",
+        "format": "Une entrée par séquence : situation, objectif, opposition, changement et conséquence.",
+        "prompt": "Chaque séquence pousse-t-elle naturellement vers la suivante ?",
+    },
+    "scenes": {
+        "objective": "Vérifier que chaque scène mérite sa place dans le film.",
+        "definition": "La liste de scènes précise où l’on est, qui agit, ce qui est recherché et ce qui change avant la sortie.",
+        "format": "Une ligne ou un petit paragraphe par scène, sans écrire encore tous les dialogues.",
+        "prompt": "Si cette scène disparaît, quelle information, décision ou conséquence essentielle manque ?",
+    },
+    "script": {
+        "objective": "Écrire le film en actions observables, descriptions économiques et dialogues nécessaires.",
+        "definition": "Le scénario est le document destiné à faire exister l’histoire scène après scène à l’écran.",
+        "format": "Avance scène par scène. Une première version complète vaut mieux qu’un début indéfiniment poli.",
+        "prompt": "Que voit-on et entend-on, qui agit, qu’est-ce qui résiste et comment la scène se termine-t-elle autrement ?",
+    },
+}
+
+OUTLINE_TYPES = {
+    "section": "SECTION",
+    "sequence": "SÉQUENCE",
+    "beat": "BEAT",
+    "scene": "SCÈNE",
+}
+
+STORY_MAP_STEPS = [
+    {
+        "key": "starting_situation",
+        "title": "Situation de départ",
+        "question": "À quoi ressemble la vie du protagoniste juste avant que l’histoire se dérègle ?",
+        "why": "Cette base permet de mesurer ensuite ce qui est perdu, menacé ou transformé.",
+        "definition": "Décris une situation concrète, déjà porteuse d’un manque ou d’une tension, sans raconter tout le passé.",
+        "example": "Mina trie les lettres impossibles à livrer dans une ville enfermée par un couvre-feu.",
+        "placeholder": "En une à trois phrases : où en est la personne avant l’événement ?",
+    },
+    {
+        "key": "disrupting_event",
+        "title": "Événement qui dérègle",
+        "question": "Quel événement précis rend le retour à la situation précédente difficile ou impossible ?",
+        "why": "L’histoire commence réellement lorsqu’un fait oblige la personne à réagir ou à choisir.",
+        "definition": "L’événement doit produire une conséquence, pas seulement apporter une information intéressante.",
+        "example": "Mina découvre une lettre prouvant l’innocence de son frère, mais les portes ferment à l’aube.",
+        "placeholder": "Qu’arrive-t-il, et pourquoi cet événement oblige-t-il à agir ?",
+    },
+    {
+        "key": "objective",
+        "title": "Objectif",
+        "question": "Après cet événement, qu’essaie-t-elle concrètement d’obtenir, d’empêcher ou d’accomplir ?",
+        "why": "Un objectif observable donne une direction aux actions et permet de mesurer les progrès.",
+        "definition": "Précise un résultat concret, même provisoire, plutôt qu’une intention abstraite comme être heureuse.",
+        "example": "Mina veut remettre la lettre au juge avant la fermeture définitive des portes.",
+        "placeholder": "Formule le résultat concret recherché et, si utile, sa limite de temps.",
+    },
+    {
+        "key": "first_actions",
+        "title": "Premières actions",
+        "question": "Que fait d’abord le protagoniste pour atteindre cet objectif ?",
+        "why": "Le personnage devient le moteur de l’histoire par ses décisions, même lorsqu’elles sont imparfaites.",
+        "definition": "Écris des actions observables qui découlent de l’objectif, pas une liste d’événements subis.",
+        "example": "Mina vole un laissez-passer et tente de rejoindre le tribunal par les tunnels de service.",
+        "placeholder": "Quelles sont ses premières décisions et pourquoi choisit-elle cette voie ?",
+    },
+    {
+        "key": "obstacles_consequences",
+        "title": "Obstacles et conséquences",
+        "question": "Qu’est-ce qui résiste, et que provoquent concrètement ses premières tentatives ?",
+        "why": "Une opposition utile force une nouvelle décision et transforme la situation.",
+        "definition": "Relie obstacle, action et conséquence : elle tente ceci, donc quelque chose change.",
+        "example": "Le tunnel est surveillé ; en forçant une grille, Mina déclenche une alarme qui condamne sa sortie.",
+        "placeholder": "Quel obstacle répond à son action, et quelle conséquence rend la suite différente ?",
+    },
+    {
+        "key": "escalation",
+        "title": "Aggravation",
+        "question": "Comment les conséquences rendent-elles maintenant l’objectif plus difficile, coûteux ou urgent ?",
+        "why": "La progression vient de ce qui a déjà eu lieu, pas d’obstacles ajoutés au hasard.",
+        "definition": "Fais monter le coût, réduire les options ou déplacer le conflit à cause des décisions précédentes.",
+        "example": "Recherchée par les gardes, Mina ne peut plus passer seule et doit faire confiance à une ancienne rivale.",
+        "placeholder": "Quelles options disparaissent et quel nouveau prix faut-il payer ?",
+    },
+    {
+        "key": "difficult_choice",
+        "title": "Choix difficile",
+        "question": "Quel choix oblige le protagoniste à sacrifier quelque chose d’important ?",
+        "why": "Un vrai choix révèle les priorités du personnage et prépare son changement éventuel.",
+        "definition": "Les deux options doivent avoir un coût réel ; une bonne solution face à une mauvaise n’est pas un dilemme.",
+        "example": "Mina peut garder son passage secret ou sauver sa rivale arrêtée, au risque de manquer l’aube.",
+        "placeholder": "Entre quelles options coûteuses doit-elle choisir, et que révèle sa décision ?",
+    },
+    {
+        "key": "final_confrontation",
+        "title": "Confrontation finale",
+        "question": "Quelle action ou décision décisive confronte directement le principal obstacle ?",
+        "why": "La fin se joue lorsque le protagoniste utilise ce qu’il a choisi, appris ou refusé jusque-là.",
+        "definition": "La confrontation peut être physique, relationnelle ou morale ; elle doit résoudre la question centrale par une action.",
+        "example": "Bloquée devant le tribunal, Mina lit publiquement la lettre et force le juge à prendre position.",
+        "placeholder": "Que fait-elle finalement, contre quoi, et pourquoi cette action peut-elle décider de l’issue ?",
+    },
+    {
+        "key": "resolution_change",
+        "title": "Résolution et changement",
+        "question": "Quel est le résultat concret, et qu’est-ce qui a changé par rapport à la situation de départ ?",
+        "why": "La résolution montre les conséquences finales et donne un sens au parcours sans devoir tout expliquer.",
+        "definition": "Distingue le résultat extérieur de l’objectif et le changement possible de la personne ou de sa situation.",
+        "example": "La lettre ouvre une enquête ; Mina quitte son poste et choisit désormais d’agir plutôt que d’obéir.",
+        "placeholder": "Que devient l’objectif, quelles conséquences restent, et quelle différence voit-on à la fin ?",
+    },
+]
+
+SYNOPSIS_STEPS = [
+    {
+        "key": "opening_situation",
+        "part": "Début",
+        "title": "Point de départ",
+        "question": "Dans quelle situation concrète rencontrons-nous le protagoniste ?",
+        "why": "Le lecteur doit comprendre qui agit, où en est cette personne et quelle tension existe déjà avant la bascule.",
+        "guidance": "Raconte seulement ce qui est utile pour entrer dans l’histoire. Évite la biographie et les explications invisibles à l’écran.",
+        "placeholder": "En un court paragraphe : qui suivons-nous, que fait cette personne et quelle est sa situation au départ ?",
+        "story_keys": ("starting_situation",),
+        "fallback_kinds": ("situation",),
+    },
+    {
+        "key": "disruption_direction",
+        "part": "Début",
+        "title": "Dérèglement et direction",
+        "question": "Qu’est-ce qui dérègle cette situation, et vers quel objectif cela pousse-t-il le protagoniste ?",
+        "why": "Le synopsis devient lisible lorsque l’événement produit une réaction puis une direction concrète.",
+        "guidance": "Relie les éléments avec une causalité simple : ceci arrive, donc la personne décide d’essayer cela.",
+        "placeholder": "Quel événement survient, pourquoi compte-t-il et que décide alors de poursuivre le protagoniste ?",
+        "story_keys": ("disrupting_event", "objective"),
+        "fallback_kinds": ("event", "objective"),
+    },
+    {
+        "key": "first_chain",
+        "part": "Développement",
+        "title": "Premières actions et conséquences",
+        "question": "Que tente d’abord le protagoniste, qu’est-ce qui résiste et que provoque cette tentative ?",
+        "why": "Le milieu avance par les décisions et leurs conséquences, pas par une succession d’événements indépendants.",
+        "guidance": "Garde les actions importantes. Pour chacune, montre au moins un résultat qui modifie la suite.",
+        "placeholder": "Elle tente ceci ; l’obstacle répond ainsi ; par conséquent, la situation devient…",
+        "story_keys": ("first_actions", "obstacles_consequences"),
+        "fallback_kinds": ("action", "obstacle", "consequence"),
+    },
+    {
+        "key": "escalation_choice",
+        "part": "Développement",
+        "title": "Aggravation et choix",
+        "question": "Comment les conséquences aggravent-elles la situation jusqu’à obliger un choix coûteux ?",
+        "why": "Cette progression évite un développement répétitif et prépare une fin qui découle du parcours.",
+        "guidance": "Réduis les options, augmente le prix à payer et précise ce que le choix révèle du personnage.",
+        "placeholder": "À cause de ce qui précède, quelles options disparaissent et quel choix devient inévitable ?",
+        "story_keys": ("escalation", "difficult_choice"),
+        "fallback_kinds": ("choice",),
+    },
+    {
+        "key": "decisive_confrontation",
+        "part": "Fin",
+        "title": "Confrontation décisive",
+        "question": "Quelle action ou décision confronte finalement le principal obstacle ?",
+        "why": "Le résultat doit venir d’un acte décisif du protagoniste ou d’un choix clairement assumé.",
+        "guidance": "Décris ce qui se passe réellement, ce qui résiste encore et le moment qui décide de l’issue.",
+        "placeholder": "Comment le conflit central atteint-il son point décisif et que fait le protagoniste ?",
+        "story_keys": ("final_confrontation",),
+        "fallback_kinds": (),
+    },
+    {
+        "key": "outcome_change",
+        "part": "Fin",
+        "title": "Résultat et changement",
+        "question": "Quel est le résultat concret, et qu’est-ce qui a changé à la fin ?",
+        "why": "Le synopsis doit raconter la fin afin de vérifier si le parcours produit une conséquence claire.",
+        "guidance": "Distingue le résultat extérieur, les conséquences restantes et le changement éventuel de la personne.",
+        "placeholder": "Que devient l’objectif, quelles conséquences demeurent et quelle différence voit-on avec le début ?",
+        "story_keys": ("resolution_change",),
+        "fallback_kinds": ("resolution",),
+    },
+]
+
+# These are optional thinking tools, never validation grids. Applying one only
+# creates editable sequence blocks; it does not declare a story "correct".
+TEMPLATE_LIBRARY = [
+    {
+        "key": "causal_spine",
+        "group": "Sans structure imposée",
+        "title": "Colonne vertébrale causale",
+        "summary": "Construire une histoire par décisions et conséquences, sans modèle d’actes.",
+        "use_when": "Tu as une idée mais les événements ne s’enchaînent pas encore clairement.",
+        "caution": "Fusionne ou retire les étapes inutiles : la causalité compte davantage que leur nombre.",
+        "steps": [
+            ("Situation", "Établir ce qui existe avant la bascule", "Quelle tension existe déjà ?", "Qu’est-ce qui peut être perdu ou transformé ?"),
+            ("Dérèglement", "Obliger la personne à réagir", "Quel fait rend l’ancien équilibre impossible ?", "Quelle décision devient nécessaire ?"),
+            ("Première tentative", "Mettre l’objectif en mouvement", "Que tente concrètement le protagoniste ?", "Que provoque cette tentative ?"),
+            ("Aggravation", "Faire évoluer le conflit", "Qu’est-ce qui devient plus difficile ou coûteux ?", "Quelles options disparaissent ?"),
+            ("Choix", "Révéler une priorité", "Entre quelles options coûteuses faut-il choisir ?", "Que ferme ou ouvre la décision ?"),
+            ("Confrontation", "Décider de l’issue", "Quelle action affronte l’obstacle principal ?", "Quel résultat devient irréversible ?"),
+            ("Résolution", "Montrer les effets du parcours", "Quelle situation existe maintenant ?", "Qu’est-ce qui a changé depuis le début ?"),
+        ],
+    },
+    {
+        "key": "short_film",
+        "group": "Récits courts",
+        "title": "Court métrage concentré",
+        "summary": "Un parcours compact pour une histoire courte centrée sur une décision.",
+        "use_when": "Tu veux éviter les sous-intrigues et aller rapidement jusqu’à une fin nette.",
+        "caution": "Une étape peut tenir en une seule scène ; n’allonge pas le film pour remplir le modèle.",
+        "steps": [
+            ("Image de départ", "Faire sentir la situation", "Quelle action simple révèle le quotidien ?", "Quelle attente crée cette image ?"),
+            ("Incident", "Rompre l’équilibre", "Qu’arrive-t-il maintenant ?", "Pourquoi la personne doit-elle répondre ?"),
+            ("Tentative", "Faire agir", "Quelle solution essaie-t-elle ?", "Quelle complication en résulte ?"),
+            ("Bascule", "Changer la compréhension ou le coût", "Que découvre, perd ou comprend-elle ?", "Quel choix ne peut plus être évité ?"),
+            ("Décision", "Résoudre par une action", "Que choisit-elle finalement de faire ?", "Quel résultat produit ce choix ?"),
+            ("Image finale", "Rendre le changement visible", "Que voyons-nous après la décision ?", "En quoi cette image répond-elle au début ?"),
+        ],
+    },
+    {
+        "key": "three_acts",
+        "group": "Structures générales",
+        "title": "Trois actes — repère souple",
+        "summary": "Observer mise en place, développement du conflit et résolution comme trois grands mouvements.",
+        "use_when": "Tu as déjà une histoire et tu veux vérifier son mouvement global.",
+        "caution": "Les proportions et tournants ne sont pas des lois ; adapte-les à ton projet.",
+        "steps": [
+            ("Mise en place", "Présenter la situation et la tension", "Qui suivons-nous et qu’est-ce qui manque déjà ?", "Quel événement oblige à avancer ?"),
+            ("Entrée dans le conflit", "Donner une direction", "Quel objectif est adopté ?", "Pourquoi le retour en arrière devient-il difficile ?"),
+            ("Développement", "Multiplier les tentatives causales", "Quelles actions rencontrent quelles résistances ?", "Comment le coût augmente-t-il ?"),
+            ("Crise ou choix", "Réduire les options", "Quel choix concentre le conflit ?", "Que prépare cette décision ?"),
+            ("Résolution", "Affronter et conclure", "Quelle action décide de l’issue ?", "Quel nouvel équilibre apparaît ?"),
+        ],
+    },
+    {
+        "key": "four_movements",
+        "group": "Structures générales",
+        "title": "Quatre mouvements",
+        "summary": "Découper le parcours en quatre changements de direction plutôt qu’en actes rigides.",
+        "use_when": "Ton milieu paraît long, répétitif ou sans bascule visible.",
+        "caution": "Chaque mouvement doit modifier la stratégie ou la situation, pas seulement changer de lieu.",
+        "steps": [
+            ("Avant la rupture", "Installer le point de départ", "Quelle situation contient déjà une tension ?", "Qu’est-ce qui la dérègle ?"),
+            ("Première stratégie", "Poursuivre une première solution", "Comment le protagoniste pense-t-il réussir ?", "Pourquoi cette stratégie ne suffit-elle plus ?"),
+            ("Nouvelle stratégie", "Répondre à la bascule", "Que faut-il maintenant tenter autrement ?", "Quel coût ou choix final en découle ?"),
+            ("Issue", "Porter les conséquences jusqu’au bout", "Quelle action tranche le conflit ?", "Quel changement reste visible ?"),
+        ],
+    },
+    {
+        "key": "story_circle",
+        "group": "Structures générales",
+        "title": "Story Circle — 8 repères",
+        "summary": "Explorer un personnage poussé hors de son équilibre, puis transformé par ce qu’il obtient.",
+        "use_when": "La trajectoire extérieure existe mais le changement du personnage reste flou.",
+        "caution": "C’est une carte de lecture possible, pas une obligation de retour au point de départ.",
+        "steps": [
+            ("Zone familière", "Montrer un équilibre incomplet", "Dans quel monde la personne sait-elle fonctionner ?", "Quel manque trouble cet équilibre ?"),
+            ("Besoin ou désir", "Faire naître une direction", "Que veut-elle obtenir ou changer ?", "Qu’est-elle prête à quitter ?"),
+            ("Entrée dans l’inconnu", "Franchir une limite", "Quelle décision l’engage ?", "Quelles anciennes règles ne suffisent plus ?"),
+            ("Adaptation", "Apprendre à agir autrement", "Quelles tentatives et erreurs se succèdent ?", "Que comprend-elle du nouveau terrain ?"),
+            ("Obtention", "Atteindre ou approcher le but", "Qu’obtient-elle enfin ?", "Quel prix devient visible ?"),
+            ("Prix à payer", "Confronter la conséquence", "Que doit-elle perdre, risquer ou reconnaître ?", "Quel choix en résulte ?"),
+            ("Retour", "Revenir vers un nouvel équilibre", "Où la décision la conduit-elle ?", "Que retrouve-t-elle autrement ?"),
+            ("Changement", "Montrer la transformation", "Quelle action serait impossible au début ?", "Quelle trace du parcours demeure ?"),
+        ],
+    },
+    {
+        "key": "eight_sequences",
+        "group": "Structures générales",
+        "title": "Huit séquences — progression souple",
+        "summary": "Découper une histoire longue en huit mouvements ayant chacun une fonction et une conséquence.",
+        "use_when": "Le synopsis existe, mais le milieu reste difficile à organiser en blocs jouables.",
+        "caution": "Le nombre huit sert de repère de travail. Fusionne les blocs si ton histoire en demande moins.",
+        "steps": [
+            ("Équilibre sous tension", "Installer le monde avant la rupture", "Quelle tension existe déjà ?", "Quelle attente prépare le dérèglement ?"),
+            ("Rupture", "Rendre une réaction nécessaire", "Quel fait change la situation ?", "Quelle direction devient possible ?"),
+            ("Première direction", "Faire adopter une stratégie", "Que décide de tenter le protagoniste ?", "Quelle résistance apparaît ?"),
+            ("Complications", "Développer les conséquences", "Quelles actions produisent quels nouveaux problèmes ?", "Quelle bascule devient inévitable ?"),
+            ("Bascule", "Changer l’échelle ou la compréhension", "Que découvre, gagne ou perd la personne ?", "Pourquoi l’ancienne stratégie ne suffit-elle plus ?"),
+            ("Pression maximale", "Réduire les options", "Qu’est-ce qui se referme autour du protagoniste ?", "Quel choix doit être préparé ?"),
+            ("Décision et confrontation", "Faire trancher le conflit", "Quelle décision mène à l’affrontement décisif ?", "Quel résultat devient irréversible ?"),
+            ("Conséquences", "Montrer le nouvel état", "Que produit concrètement l’issue ?", "En quoi la fin répond-elle au début ?"),
+        ],
+    },
+    {
+        "key": "hero_journey",
+        "group": "Structures générales",
+        "title": "Voyage du héros — repères essentiels",
+        "summary": "Observer un départ, des épreuves, une transformation et un retour sans reproduire toutes les étapes classiques.",
+        "use_when": "Ton histoire repose sur le passage vers un monde inconnu et une transformation intérieure.",
+        "caution": "Ce modèle n’est ni universel ni nécessaire. Évite de forcer mentor, seuil ou retour s’ils ne servent pas le récit.",
+        "steps": [
+            ("Monde connu", "Montrer l’équilibre et son manque", "Comment la personne vit-elle avant l’appel ?", "Quel manque rend le départ possible ?"),
+            ("Appel", "Ouvrir une autre voie", "Quel événement ou désir appelle au changement ?", "Qu’est-ce qui retient encore la personne ?"),
+            ("Franchissement", "Engager réellement le parcours", "Quelle décision fait quitter l’ancien équilibre ?", "Quelles nouvelles règles apparaissent ?"),
+            ("Épreuves et relations", "Transformer par l’action", "Quelles alliances, oppositions et erreurs font évoluer la personne ?", "Quelle vérité devient difficile à éviter ?"),
+            ("Épreuve décisive", "Concentrer risque et choix", "Que faut-il affronter ou sacrifier ?", "Qu’est-ce que le choix révèle ?"),
+            ("Retour transformé", "Donner un effet au parcours", "Que rapporte la personne de cette expérience ?", "Quel comportement prouve le changement ?"),
+        ],
+    },
+    {
+        "key": "kishotenketsu",
+        "group": "Structures générales",
+        "title": "Kishōtenketsu — contraste et relecture",
+        "summary": "Construire un mouvement par installation, développement, rupture de perspective et réunion des éléments.",
+        "use_when": "L’intérêt vient moins d’un conflit frontal que d’un contraste, d’une découverte ou d’une nouvelle lecture.",
+        "caution": "Ne l’utilise pas comme une excuse pour supprimer toute progression : le contraste doit transformer notre compréhension.",
+        "steps": [
+            ("Ki — introduction", "Installer une situation lisible", "Quelle réalité suivons-nous ?", "Quelle attente est créée ?"),
+            ("Shō — développement", "Approfondir sans rompre", "Quels détails ou variations enrichissent cette réalité ?", "Que croyons-nous comprendre ?"),
+            ("Ten — bascule", "Introduire un contraste", "Quel élément inattendu change le regard ?", "Quelle nouvelle question apparaît ?"),
+            ("Ketsu — réunion", "Relier les éléments", "Comment la bascule éclaire-t-elle ce qui précédait ?", "Quelle impression ou conséquence finale demeure ?"),
+        ],
+    },
+    {
+        "key": "mystery",
+        "group": "Genres et situations",
+        "title": "Mystère et révélation",
+        "summary": "Organiser questions, indices, fausses interprétations et révélation par leurs conséquences.",
+        "use_when": "Le plaisir principal vient de ce que le protagoniste et le public cherchent à comprendre.",
+        "caution": "Une révélation forte change une décision ou un rapport de force ; elle ne fait pas qu’expliquer.",
+        "steps": [
+            ("Question initiale", "Créer un manque d’information actif", "Quel fait résiste à une explication simple ?", "Qui décide de chercher et pourquoi ?"),
+            ("Premier indice", "Ouvrir une piste", "Quel élément concret est découvert ?", "Quelle hypothèse provoque-t-il ?"),
+            ("Fausse lecture", "Produire une erreur crédible", "Pourquoi l’indice est-il mal compris ?", "Quelle action risquée suit cette interprétation ?"),
+            ("Contradiction", "Déstabiliser l’hypothèse", "Quel fait ne colle plus ?", "Quelle nouvelle question devient urgente ?"),
+            ("Révélation", "Reconfigurer les faits", "Quelle vérité relie les indices ?", "Quelle décision immédiate impose-t-elle ?"),
+            ("Conséquence", "Faire payer la vérité", "Que fait le protagoniste de ce qu’il sait ?", "Quel nouvel équilibre ou doute reste ?"),
+        ],
+    },
+    {
+        "key": "relationship",
+        "group": "Genres et situations",
+        "title": "Transformation d’une relation",
+        "summary": "Suivre une relation par actions, attentes contrariées et choix plutôt que par déclarations.",
+        "use_when": "Le cœur de l’histoire est la manière dont deux personnes se rapprochent, se séparent ou se redéfinissent.",
+        "caution": "Fais évoluer les comportements et les décisions ; les dialogues seuls ne prouvent pas le changement.",
+        "steps": [
+            ("Relation initiale", "Montrer les règles implicites", "Comment ces personnes se comportent-elles ensemble ?", "Quelle tension reste cachée ?"),
+            ("Besoin commun", "Les obliger à interagir", "Quel objectif ou problème les réunit ?", "Qu’attendent-elles l’une de l’autre ?"),
+            ("Friction", "Mettre les attentes en conflit", "Quelle action blesse, déçoit ou surprend ?", "Comment la relation se déplace-t-elle ?"),
+            ("Ouverture", "Rendre une autre relation possible", "Quel geste révèle une vulnérabilité ou une valeur ?", "Quelle confiance devient possible ?"),
+            ("Épreuve", "Tester réellement le lien", "Quel choix oppose intérêt personnel et relation ?", "Que décide chaque personne ?"),
+            ("Nouvelle relation", "Montrer les nouvelles règles", "Quel comportement a changé ?", "Qu’est-ce qui reste irréparable ou acquis ?"),
+        ],
+    },
+    {
+        "key": "mckee_value_progression",
+        "group": "Méthodes de scénaristes",
+        "title": "Robert McKee — valeurs et progression",
+        "summary": "Observer comment chaque grand mouvement fait basculer une valeur dramatique et augmente la pression.",
+        "use_when": "Les événements sont nombreux mais semblent produire le même effet émotionnel ou dramatique.",
+        "caution": "Il s’agit d’un outil de diagnostic inspiré de cette approche, pas d’un résumé exhaustif de la méthode.",
+        "steps": [
+            ("Valeur initiale", "Nommer l’état de départ", "Quelle valeur domine : confiance, liberté, sécurité, amour… ?", "Quel signe montre que cet état est instable ?"),
+            ("Incident", "Faire basculer l’équilibre", "Quel événement modifie la valeur initiale ?", "Quelle réaction devient nécessaire ?"),
+            ("Complications progressives", "Augmenter coût et écart", "Comment chaque tentative produit-elle une conséquence plus forte ?", "Quelles options disparaissent ?"),
+            ("Crise", "Formuler un choix véritable", "Entre quelles options incompatibles faut-il choisir ?", "Que révèle la décision ?"),
+            ("Climax", "Créer le changement de valeur le plus important", "Quelle action décide de l’issue ?", "Vers quelle valeur la scène ou l’histoire bascule-t-elle ?"),
+            ("Résolution", "Faire sentir les effets", "Quel nouvel équilibre existe ?", "Quelle question ou conséquence demeure ?"),
+        ],
+    },
+    {
+        "key": "truby_seven_steps",
+        "group": "Méthodes de scénaristes",
+        "title": "John Truby — 7 repères essentiels",
+        "summary": "Développer ensemble faiblesse, désir, opposition, plan, affrontement et transformation.",
+        "use_when": "L’intrigue et le personnage paraissent séparés ou le changement final semble ajouté après coup.",
+        "caution": "Ces repères peuvent changer d’ordre, se répéter ou rester implicites selon le projet.",
+        "steps": [
+            ("Faiblesse et besoin", "Identifier ce qui limite la personne", "Quel comportement lui nuit ou nuit aux autres ?", "Qu’aurait-elle besoin de comprendre ou changer ?"),
+            ("Désir", "Donner une direction extérieure", "Quel résultat concret poursuit-elle ?", "Pourquoi ce but compte-t-il maintenant ?"),
+            ("Opposition", "Créer une force capable de répondre", "Qui ou quoi poursuit un but incompatible ?", "Pourquoi cette opposition peut-elle gagner ?"),
+            ("Plan", "Faire choisir une stratégie", "Comment la personne pense-elle atteindre son but ?", "Quelle faille contient ce plan ?"),
+            ("Confrontation", "Pousser les stratégies jusqu’au bout", "Où les buts incompatibles se rencontrent-ils directement ?", "Quelle décision tranche l’action ?"),
+            ("Révélation sur soi", "Faire émerger une compréhension", "Que comprend la personne sur elle-même ou ses actes ?", "Que peut-elle désormais faire autrement ?"),
+            ("Nouvel équilibre", "Montrer la conséquence humaine", "Comment vit-elle après l’issue ?", "Quel comportement rend le changement visible ?"),
+        ],
+    },
+    {
+        "key": "save_the_cat",
+        "group": "Méthodes de scénaristes",
+        "title": "Save the Cat — 15 beats",
+        "summary": "Une beat sheet populaire pour observer rythme, promesses et bascules dans certains récits commerciaux.",
+        "use_when": "Tu veux comparer une histoire déjà construite à un modèle très balisé.",
+        "caution": "Ne force ni les pages ni les événements. Si un beat n’aide pas ton histoire, retire-le.",
+        "steps": [
+            ("Opening Image", "Donner une impression du point de départ", "Quelle image résume le monde avant le changement ?", "Quelle comparaison prépare-t-elle ?"),
+            ("Theme Stated", "Faire émerger une question de sens", "Quelle idée pourrait être mise à l’épreuve ?", "Pourquoi le protagoniste ne la comprend-il pas encore ?"),
+            ("Set-Up", "Présenter situation, manque et relations", "Qu’est-ce qui fonctionne mal avant l’incident ?", "Quelles promesses devront être suivies ?"),
+            ("Catalyst", "Dérégler la situation", "Quel événement oblige à répondre ?", "Quelle possibilité ou menace apparaît ?"),
+            ("Debate", "Faire hésiter avant l’engagement", "Qu’est-ce qui retient la personne ?", "Quelle décision finit par l’engager ?"),
+            ("Break into Two", "Entrer dans une nouvelle dynamique", "Quelle action change le terrain du conflit ?", "Quelles règles nouvelles s’imposent ?"),
+            ("B Story", "Ouvrir une relation ou ligne de contraste", "Quelle relation éclaire autrement le problème central ?", "Que peut-elle faire évoluer ?"),
+            ("Fun and Games", "Explorer la promesse de l’idée", "Quelles situations spécifiques rendent cette histoire unique ?", "Comment préparent-elles une complication ?"),
+            ("Midpoint", "Créer une bascule centrale", "Quelle victoire, défaite ou révélation change l’échelle ?", "Comment les enjeux se déplacent-ils ?"),
+            ("Bad Guys Close In", "Faire converger pressions et défauts", "Quelles forces réduisent les options ?", "Quelle erreur devient coûteuse ?"),
+            ("All Is Lost", "Faire croire que la voie choisie échoue", "Quelle perte concentre le conflit ?", "Qu’est-ce qui ne peut plus continuer ainsi ?"),
+            ("Dark Night", "Laisser apparaître une nouvelle compréhension", "Que reconnaît enfin le protagoniste ?", "Quelle nouvelle décision devient possible ?"),
+            ("Break into Three", "Combiner apprentissage et action", "Quel plan naît de cette compréhension ?", "Pourquoi peut-il répondre au conflit central ?"),
+            ("Finale", "Résoudre par une suite d’actions", "Comment l’obstacle est-il affronté jusqu’au résultat ?", "Quelles conséquences ferment les promesses ?"),
+            ("Final Image", "Montrer la différence finale", "Quelle image résume le nouvel état ?", "En quoi répond-elle à l’ouverture ?"),
+        ],
+    },
+]
+
+STORY_CARD_KINDS = [
+    ("situation", "Situation"),
+    ("event", "Événement"),
+    ("objective", "Objectif"),
+    ("action", "Action"),
+    ("obstacle", "Obstacle"),
+    ("consequence", "Conséquence"),
+    ("choice", "Choix"),
+    ("resolution", "Résolution"),
+    ("idea", "Idée libre"),
+]
+
+DOCUMENT_NAMES = dict(DOC_TYPES) | dict(DEVELOPMENT_DOCUMENTS)
+
+IDEA_TYPES = [
+    ("unclassified", "Non classée"),
+    ("concept", "Concept / « Et si… ? »"),
+    ("situation", "Situation / image"),
+    ("character", "Personnage"),
+    ("relationship", "Relation"),
+    ("dialogue", "Dialogue / phrase"),
+    ("theme", "Thème / question"),
+    ("setting", "Univers / décor"),
+    ("genre", "Genre / ton"),
+    ("event", "Événement"),
+    ("ending", "Fin / scène"),
+]
+
+UNIVERSAL_QUESTIONS = [
+    ("interest", "Qu’est-ce qui m’intéresse vraiment dans cette idée ?"),
+    ("center", "De qui est-ce l’histoire ?"),
+    ("desire", "Que veut cette personne ?"),
+    ("objective", "Que cherche-t-elle concrètement à obtenir, accomplir, empêcher ou préserver ?"),
+    ("opposition", "Qu’est-ce qui l’en empêche ?"),
+    ("stakes", "Pourquoi est-ce important pour elle ?"),
+    ("action", "Que fait-elle pour obtenir ce qu’elle veut ?"),
+    ("consequence", "Que provoquent ses actions et décisions ?"),
+    ("progression", "Comment la situation devient-elle plus difficile, plus coûteuse ou différente ?"),
+    ("choice", "Quels choix difficiles doit-elle faire ?"),
+    ("change", "Qu’est-ce qui pourrait changer ?"),
+    ("ending", "Vers quelle fin cette histoire pourrait-elle conduire ?"),
+]
+
+WORLD_RULE_CATEGORIES = (
+    "Physique et nature",
+    "Science et technologie",
+    "Magie et surnaturel",
+    "Société et pouvoir",
+    "Culture et religion",
+    "Économie et ressources",
+    "Autre",
+)
+
+LOCATION_CATEGORIES = (
+    "Maison / intérieur",
+    "Bâtiment / institution",
+    "Ville / village",
+    "Quartier / zone",
+    "Région / territoire",
+    "Nature / paysage",
+    "Lieu de passage",
+    "Autre",
+)
+
+THEME_POSITION_TYPES = (
+    ("main", "Position principale"),
+    ("opposite", "Position opposée"),
+    ("nuance", "Réponse nuancée"),
+    ("other", "Autre point de vue"),
+)
+
+THEME_POSITION_LABELS = dict(THEME_POSITION_TYPES)
+
+THEME_MOTIF_TYPES = (
+    "Objet",
+    "Lieu",
+    "Image",
+    "Comportement",
+    "Événement",
+    "Couleur / son",
+    "Autre",
+)
+
+CONFLICT_IMPORTANCE = (
+    ("primary", "Principal"),
+    ("secondary", "Secondaire / sous-intrigue"),
+)
+
+CONFLICT_IMPORTANCE_LABELS = dict(CONFLICT_IMPORTANCE)
+
+CONFLICT_NATURES = (
+    ("external", "Externe"),
+    ("internal", "Interne"),
+    ("relational", "Relationnel"),
+    ("social", "Social / institutionnel"),
+    ("world", "Monde / survie"),
+)
+
+CONFLICT_NATURE_LABELS = dict(CONFLICT_NATURES)
+
+# Glossaire éditorial livré avec l'application. Il reste distinct du lexique
+# propre à chaque univers, qui appartient aux données du projet.
+GLOSSARY_TERMS = [
+    ("Fondations", "Action", "Comportement ou événement observable qui modifie la situation."),
+    ("Fondations", "Antagonisme", "Ensemble des forces qui s'opposent au mouvement du protagoniste."),
+    ("Fondations", "Causalité", "Lien par lequel une décision ou un événement provoque réellement le suivant."),
+    ("Fondations", "Changement", "Différence significative entre un état initial et un état ultérieur."),
+    ("Fondations", "Conflit", "Rencontre active entre des volontés, besoins ou forces incompatibles."),
+    ("Fondations", "Conséquence", "Résultat d'une action qui affecte les possibilités suivantes."),
+    ("Fondations", "Désir", "Aspiration profonde d'un personnage, parfois consciente, parfois non."),
+    ("Fondations", "Enjeu", "Ce que le personnage risque de gagner, perdre ou sacrifier."),
+    ("Fondations", "Objectif", "Résultat concret que le personnage cherche à obtenir, empêcher ou préserver."),
+    ("Fondations", "Obstacle", "Ce qui rend l'objectif difficile sans forcément vouloir nuire au personnage."),
+    ("Fondations", "Prémisse", "Proposition centrale qui relie personnage, situation, conflit et direction possible."),
+    ("Fondations", "Protagoniste", "Personnage dont les choix structurent principalement le récit."),
+    ("Fondations", "Thème", "Question humaine ou idée explorée par les choix et leurs conséquences."),
+    ("Personnages", "Arc", "Évolution durable d'un personnage au cours de l'histoire."),
+    ("Personnages", "Backstory", "Passé antérieur au récit qui agit encore sur le présent."),
+    ("Personnages", "Besoin", "Évolution ou prise de conscience nécessaire, différente de l'objectif voulu."),
+    ("Personnages", "Caractérisation", "Manière de révéler un personnage par ses actes, paroles, choix et détails."),
+    ("Personnages", "Contradiction", "Coexistence de tendances opposées qui rend un personnage plus vivant."),
+    ("Personnages", "Motivation", "Raison qui pousse un personnage à agir."),
+    ("Personnages", "Relation", "Dynamique active entre deux personnages, avec attentes, pouvoir et évolution."),
+    ("Personnages", "Volonté", "Énergie avec laquelle un personnage poursuit un résultat."),
+    ("Structure", "Acte", "Grande unité de progression ; un modèle possible, jamais une obligation."),
+    ("Structure", "Aggravation", "Évolution qui augmente la difficulté, le coût ou l'irréversibilité."),
+    ("Structure", "Beat", "Plus petite unité significative d'action, de réaction ou de changement."),
+    ("Structure", "Climax", "Moment décisif où le conflit principal atteint son point de résolution."),
+    ("Structure", "Incident déclencheur", "Événement qui perturbe l'équilibre et ouvre une nouvelle direction."),
+    ("Structure", "Milieu", "Partie où les tentatives, conséquences et complications développent le conflit."),
+    ("Structure", "Payoff", "Résultat ou révélation préparé auparavant par un setup."),
+    ("Structure", "Progression", "Transformation continue de la situation au lieu d'une simple répétition."),
+    ("Structure", "Résolution", "État produit après la confrontation décisive et ses conséquences."),
+    ("Structure", "Séquence", "Groupe de scènes orienté vers un résultat intermédiaire identifiable."),
+    ("Structure", "Setup", "Élément installé pour prendre sens ou produire un effet plus tard."),
+    ("Structure", "Tournant", "Décision, révélation ou conséquence qui change la direction du récit."),
+    ("Scènes", "Entrée tardive", "Commencer une scène au plus près de son enjeu utile."),
+    ("Scènes", "Objectif de scène", "Résultat immédiat poursuivi par un personnage dans la scène."),
+    ("Scènes", "Scène", "Unité dramatique continue où une situation se transforme."),
+    ("Scènes", "Sortie tôt", "Quitter une scène dès que son changement essentiel est acquis."),
+    ("Scènes", "Sous-texte", "Intention ou sens non formulé directement mais perceptible dans la situation."),
+    ("Scènes", "Tension", "Attente créée par une incertitude, une résistance ou un risque."),
+    ("Écriture", "Action observable", "Description de ce qui peut être vu ou entendu à l'écran."),
+    ("Écriture", "Dialogue", "Paroles prononcées qui agissent dans une situation, pas seulement information."),
+    ("Écriture", "Exposition", "Information nécessaire au spectateur pour comprendre le récit."),
+    ("Écriture", "Fountain", "Syntaxe texte simple permettant d'écrire et convertir un scénario."),
+    ("Écriture", "INT./EXT.", "Indication précisant si une scène se déroule à l'intérieur ou à l'extérieur."),
+    ("Écriture", "Rythme", "Perception de vitesse et de densité créée par l'enchaînement des moments."),
+    ("Écriture", "Slugline", "En-tête de scène indiquant intérieur/extérieur, lieu et moment."),
+    ("Documents", "Beat sheet", "Liste ordonnée de moments narratifs significatifs."),
+    ("Documents", "Carte de l'histoire", "Représentation visuelle et déplaçable des moments et de leurs liens."),
+    ("Documents", "Liste de scènes", "Inventaire ordonné des scènes avec leurs informations essentielles."),
+    ("Documents", "Logline", "Phrase concise présentant protagoniste, objectif, opposition et singularité utile."),
+    ("Documents", "Outline", "Plan hiérarchisé du récit, du global vers les unités plus précises."),
+    ("Documents", "Scénario", "Document final destiné à raconter le film par scènes, actions et dialogues."),
+    ("Documents", "Séquencier", "Plan du récit organisé en séquences réordonnables."),
+    ("Documents", "Synopsis", "Récit condensé de l'histoire complète, fin comprise."),
+    ("Documents", "Treatment", "Version développée en prose qui raconte le film avant les pages dialoguées."),
+    ("Réécriture", "Diagnostic", "Identification des causes principales d'un problème avant correction."),
+    ("Réécriture", "Feedback", "Retour précis distinguant intention, fonctionnement, problème et pistes."),
+    ("Réécriture", "Premier jet", "Première version complète servant de matière au diagnostic."),
+    ("Réécriture", "Réécriture", "Transformation structurée d'une version selon des priorités de fond puis de forme."),
+    ("Réécriture", "Version", "État sauvegardé d'un document permettant de comparer les changements."),
+]
+
+CURRICULUM = [
+    {
+        "key": "foundations",
+        "phase": "Cycle 0",
+        "title": "Fondations dramatiques",
+        "intro": "Apprendre les mécanismes élémentaires sur des idées très courtes avant de porter tout un film.",
+        "deliverable": "Plusieurs micro-histoires, une micro-scène réécrite et un bilan des notions encore fragiles.",
+        "exit": "Tu peux relier une personne, un objectif, une opposition, des décisions et des conséquences simples.",
+        "route": "learning",
+        "steps": [
+            ("Idée → graine", "Partir d’une image ou d’une situation, puis préciser ce qui donne envie d’aller plus loin.", "Une graine d’histoire en quelques phrases."),
+            ("Protagoniste", "Choisir la personne à travers laquelle les événements seront vécus et les décisions prises.", "Un protagoniste précis, pas seulement un type de personnage."),
+            ("Désir et objectif", "Distinguer ce que la personne veut profondément du résultat concret qu’elle poursuit maintenant.", "Un objectif observable qui donne une direction."),
+            ("Opposition", "Identifier la force, la personne, la règle ou la contradiction qui empêche l’objectif d’être facile.", "Un conflit capable de provoquer des actions."),
+            ("Actions et causalité", "Faire agir le protagoniste puis relier chaque tentative à ce qu’elle déclenche réellement.", "Une chaîne simple : décision → action → conséquence."),
+            ("Progression et enjeux", "Rendre la situation plus difficile ou coûteuse à cause de ce qui vient de se produire.", "Une évolution visible et une raison de se soucier du résultat."),
+            ("Choix et changement", "Placer la personne devant deux options coûteuses et observer ce que sa décision révèle.", "Un choix dramatique et une possibilité de changement."),
+            ("Micro-scène", "Écrire une courte situation avec une intention, une résistance et une modification avant la sortie.", "Une scène brève qui ne termine pas comme elle a commencé."),
+            ("Feedback et réécriture", "Diagnostiquer un problème principal, modifier le texte puis comparer l’effet des deux versions.", "Une deuxième version consciemment améliorée."),
+            ("Mini-bilan", "Expliquer avec ses mots les notions utilisées et repérer celles qui restent difficiles à appliquer.", "Une liste claire : acquis, fragile, à revoir."),
+        ],
+    },
+    {
+        "key": "short_one",
+        "phase": "Court 1",
+        "title": "Premier court guidé",
+        "intro": "Traverser une première fois tout le processus, d’une idée assez petite jusqu’à un scénario réécrit.",
+        "deliverable": "Un court métrage complet, diagnostiqué puis réécrit au moins une fois.",
+        "exit": "L’histoire existe du début à la fin et sa faiblesse principale a été traitée dans une nouvelle version.",
+        "route": "development",
+        "steps": [
+            ("Choisir une idée faisable", "Comparer quelques graines et comprendre le coût narratif de chacune avant de s’engager.", "Une idée choisie et une ambition compatible avec un premier court."),
+            ("Clarifier le noyau", "Préciser protagoniste, désir, objectif, opposition, enjeux et fin provisoire sans figer le film.", "Une prémisse ou une logline de travail."),
+            ("Construire la carte causale", "Relier situation initiale, dérèglement, actions, conséquences, choix, confrontation et résolution.", "Une carte de l’histoire en neuf réponses modifiables."),
+            ("Raconter très court", "Résumer tout le mouvement dramatique pour vérifier qu’il reste compréhensible sans détails de scène.", "Un résumé complet en un court paragraphe."),
+            ("Développer le synopsis", "Raconter la fin et les principales décisions en prose continue afin de tester la progression globale.", "Un synopsis court dont les étapes découlent les unes des autres."),
+            ("Passer au treatment si utile", "Développer les situations, comportements et sensations lorsque le synopsis reste trop abstrait.", "Un treatment seulement s’il aide à voir le film plus précisément."),
+            ("Organiser beats et séquences", "Découper le mouvement en unités utiles sans chercher à remplir un modèle structurel obligatoire.", "Une carte de beats ou un séquencier utilisable."),
+            ("Préparer les scènes", "Donner à chaque scène une fonction, un objectif local, une opposition et un changement.", "Une liste de scènes sans doublons évidents."),
+            ("Écrire le premier jet", "Avancer scène après scène en privilégiant actions observables, économie et continuité jusqu’à la fin.", "Un scénario complet, même imparfait."),
+            ("Diagnostiquer puis réécrire", "Relire globalement, choisir le problème de fond prioritaire et produire une nouvelle version avant le polissage.", "Un court réécrit et un bilan de ce que la passe a amélioré."),
+        ],
+    },
+    {
+        "key": "short_two",
+        "phase": "Court 2",
+        "title": "Autonomie progressive",
+        "intro": "Répéter la boucle complète avec moins de questions-guides et davantage de décisions personnelles.",
+        "deliverable": "Un deuxième court terminé avec une méthode plus légère et un diagnostic plus autonome.",
+        "exit": "Tu sais choisir les outils dont ton histoire a besoin et expliquer pourquoi tu en écartes d’autres.",
+        "route": "ideas",
+        "steps": [
+            ("Repartir d’une nouvelle graine", "Produire et choisir sans chercher à reproduire le premier film ou sa structure.", "Une nouvelle idée avec un défi d’écriture identifiable."),
+            ("Choisir ses outils", "Décider si une logline, une carte, un synopsis ou un treatment aidera réellement le problème présent.", "Un chemin de développement adapté au projet."),
+            ("Construire avec moins d’aide", "Répondre seul aux questions causales avant de consulter les repères ou de demander un diagnostic.", "Une histoire construite avec moins de guidage."),
+            ("Approfondir personnage et conflit", "Rendre les décisions plus personnelles et l’opposition plus active ou contradictoire.", "Un conflit qui met les valeurs du protagoniste sous pression."),
+            ("Travailler voix et sous-texte", "Différencier ce que les personnages veulent obtenir de ce qu’ils disent explicitement.", "Des scènes dont le dialogue agit sans tout expliquer."),
+            ("Diagnostiquer soi-même", "Formuler l’intention, les réussites et le problème principal avant de chercher des solutions.", "Un diagnostic hiérarchisé et argumenté."),
+            ("Réécrire par priorité", "Traiter d’abord causalité, personnage ou scènes, puis seulement rythme, exposition et formulation.", "Une nouvelle version guidée par une priorité claire."),
+            ("Comparer les deux courts", "Observer les progrès, les habitudes répétées et les difficultés qui résistent d’un projet à l’autre.", "Un bilan comparatif et un objectif pour le projet suivant."),
+        ],
+    },
+    {
+        "key": "longer_projects",
+        "phase": "Long",
+        "title": "Projets plus longs",
+        "intro": "Étendre la durée seulement lorsque plusieurs boucles courtes ont rendu les fondations suffisamment solides.",
+        "deliverable": "Un projet plus long développé, écrit et réécrit par passes successives plutôt que d’un seul bloc.",
+        "exit": "Tu peux suivre plusieurs lignes dramatiques sans perdre l’objectif central, la causalité ni la progression.",
+        "route": "projects",
+        "steps": [
+            ("Évaluer l’ampleur", "Mesurer le nombre de personnages, lieux, périodes, lignes dramatiques et transformations promises.", "Un périmètre assumé et les principales difficultés anticipées."),
+            ("Étendre la carte", "Construire la trajectoire principale avant d’ajouter des couches secondaires ou des modèles d’actes.", "Une colonne vertébrale causale complète."),
+            ("Organiser en séquences", "Regrouper les scènes autour d’objectifs intermédiaires, de bascules et de conséquences importantes.", "Des séquences ayant chacune une progression propre."),
+            ("Développer les sous-intrigues", "Donner à chaque ligne secondaire une fonction et des points de rencontre avec l’histoire principale.", "Des sous-intrigues qui renforcent, compliquent ou contrastent le cœur du récit."),
+            ("Suivre les arcs", "Observer les croyances, relations et comportements qui évoluent sur une durée plus longue.", "Des changements préparés par des décisions et non déclarés à la fin."),
+            ("Préparer setups et payoffs", "Planter les informations, objets ou attentes assez tôt et vérifier leur conséquence ultérieure.", "Une liste de promesses narratives suivies jusqu’à leur résolution."),
+            ("Construire l’outline", "Coordonner trajectoire principale, séquences, sous-intrigues et arcs avant la rédaction massive.", "Un outline assez précis pour écrire, assez souple pour découvrir."),
+            ("Écrire par jalons", "Avancer jusqu’à des étapes de lecture définies sans polir les premières pages pendant des mois.", "Un premier jet complet découpé en objectifs de travail réalistes."),
+            ("Diagnostiquer à plusieurs échelles", "Séparer les problèmes globaux, les problèmes de séquence et les problèmes de scène.", "Une liste de réécriture hiérarchisée par impact."),
+            ("Réécrire par passes", "Effectuer des passes distinctes pour causalité, arcs, scènes, exposition, dialogue puis compression.", "Une version consolidée dont les changements peuvent être évalués."),
+        ],
+    },
+]
+
+DIAGNOSTICS = {
+    "synopsis": [
+        "Le protagoniste est identifiable",
+        "Son objectif est compréhensible",
+        "L’opposition est visible",
+        "Les grandes étapes sont causales",
+        "La fin est racontée",
+        "Les décisions changent la trajectoire",
+    ],
+    "outline": [
+        "Chaque scène a une fonction",
+        "Les scènes ne répètent pas le même travail",
+        "Le protagoniste agit",
+        "Le conflit progresse",
+        "Les setups importants ont un payoff",
+        "La fin découle des scènes précédentes",
+    ],
+    "script": [
+        "Les actions sont observables",
+        "Les scènes entrent assez tard",
+        "Chaque scène contient une intention",
+        "Le dialogue agit plutôt qu’il n’explique",
+        "Le sous-texte existe quand utile",
+        "Les répétitions peuvent être comprimées",
+    ],
+}
+
+
+def clear_layout(layout: QVBoxLayout | QHBoxLayout | QGridLayout) -> None:
+    while layout.count():
+        item = layout.takeAt(0)
+        if item.widget():
+            widget = item.widget()
+            widget.hide()
+            widget.setParent(None)
+            widget.deleteLater()
+        elif item.layout():
+            clear_layout(item.layout())
+
+
+def make_label(text: str, kind: str = "Body", wrap: bool = False) -> QLabel:
+    label = QLabel(text)
+    label.setObjectName(kind)
+    label.setWordWrap(wrap)
+    label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+    return label
+
+
+def make_button(text: str, role: str = "secondary", callback=None) -> QPushButton:
+    button = QPushButton(text)
+    button.setProperty("role", role)
+    button.setCursor(Qt.CursorShape.PointingHandCursor)
+    if callback:
+        button.clicked.connect(callback)
+    return button
+
+
+def make_card() -> QFrame:
+    card = QFrame()
+    card.setObjectName("Card")
+    return card
+
+
+def make_separator() -> QFrame:
+    separator = QFrame()
+    separator.setObjectName("Separator")
+    separator.setFrameShape(QFrame.Shape.HLine)
+    separator.setFixedHeight(1)
+    return separator
+
+
+def make_editor(minimum_height: int = 100, placeholder: str = "") -> QTextEdit:
+    editor = QTextEdit()
+    editor.setAcceptRichText(False)
+    editor.setProperty("editor", True)
+    editor.setMinimumHeight(minimum_height)
+    editor.setPlaceholderText(placeholder)
+    return editor
+
+
+def field_value(field: QLineEdit | QTextEdit | QComboBox) -> str:
+    if isinstance(field, QComboBox):
+        return field.currentText().strip()
+    return field.text().strip() if isinstance(field, QLineEdit) else field.toPlainText().strip()
+
+
+def set_field_value(field: QLineEdit | QTextEdit | QComboBox, value: str) -> None:
+    if isinstance(field, QComboBox):
+        field.setCurrentText(value or "")
+        return
+    if isinstance(field, QLineEdit):
+        field.setText(value or "")
+    else:
+        field.setPlainText(value or "")
+
+
+class AspectPixmapLabel(QLabel):
+    """Keep a portrait fully visible when its column is resized."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._source_pixmap = QPixmap()
+
+    def set_source_pixmap(self, pixmap: QPixmap) -> None:
+        self._source_pixmap = pixmap
+        self._rescale_pixmap()
+
+    def _rescale_pixmap(self) -> None:
+        if self._source_pixmap.isNull():
+            super().clear()
+            return
+        available = QSize(max(1, self.width() - 16), max(1, self.height() - 16))
+        super().setPixmap(
+            self._source_pixmap.scaled(
+                available,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._rescale_pixmap()
+
+
+class NavigationButton(QPushButton):
+    """Sidebar row with a stable icon column in both display modes."""
+
+    def __init__(self, icon: str, title: str, child: bool = False, parent=None):
+        super().__init__(parent)
+        self.nav_icon = icon
+        self.nav_title = title
+        self.nav_child = child
+        self.nav_expanded = False
+        self.setProperty("nav", True)
+        self.setProperty("navChild", child)
+        self.setProperty("navTitle", title)
+        self.setCheckable(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip(title)
+        self.setAccessibleName(title)
+
+        self.nav_layout = QHBoxLayout(self)
+        self.nav_layout.setContentsMargins(0, 0, 0, 0)
+        self.nav_layout.setSpacing(0)
+        self.nav_icon_label = QLabel(icon)
+        self.nav_icon_label.setObjectName("NavIcon")
+        self.nav_icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.nav_icon_label.setFixedWidth(22)
+        self.nav_title_label = QLabel(title)
+        self.nav_title_label.setObjectName("NavLabel")
+        self.nav_title_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        for label in (self.nav_icon_label, self.nav_title_label):
+            label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            label.setProperty("navChild", child)
+            label.setProperty("navActive", False)
+        self.nav_layout.addWidget(self.nav_icon_label)
+        self.nav_layout.addWidget(self.nav_title_label, 1)
+        self.toggled.connect(self._sync_active_state)
+        self.set_expanded(False)
+
+    def set_expanded(self, expanded: bool) -> None:
+        self.nav_expanded = expanded
+        self.setProperty("sidebarExpanded", expanded)
+        self.nav_title_label.setVisible(expanded)
+        if expanded:
+            left = 21 if self.nav_child else 9
+            self.nav_layout.setContentsMargins(left, 0, 8, 0)
+            self.nav_layout.setSpacing(7)
+        else:
+            self.nav_layout.setContentsMargins(10, 0, 10, 0)
+            self.nav_layout.setSpacing(0)
+        self._sync_active_state(self.isChecked())
+
+    def _sync_active_state(self, active: bool) -> None:
+        for label in (self.nav_icon_label, self.nav_title_label):
+            label.setProperty("navActive", active)
+            label.style().unpolish(label)
+            label.style().polish(label)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        if self.nav_expanded:
+            # Keep every row inside the same horizontal column. Only the
+            # vertical rhythm changes for the active destination.
+            self.setFixedSize(218, 44 if active else 38)
+        else:
+            self.setFixedSize(42, 38)
+        self.updateGeometry()
+        QTimer.singleShot(0, self._refresh_parent_layout)
+
+    def _refresh_parent_layout(self) -> None:
+        parent = self.parentWidget()
+        if parent is not None and parent.layout() is not None:
+            parent.layout().invalidate()
+            parent.layout().activate()
+            # The scroll canvas must always be at least as tall as the real
+            # sum of its rows. Otherwise Qt may visually compress the lower
+            # rows after the active entry grows by a few pixels.
+            parent.setMinimumHeight(parent.layout().minimumSize().height() + 4)
+
+
+class SendEditor(QTextEdit):
+    send_requested = Signal()
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            self.send_requested.emit()
+            return
+        super().keyPressEvent(event)
+
+
+class ScreenplayEditor(QTextEdit):
+    tab_requested = Signal(bool)
+    return_pressed = Signal(str)
+    character_activated = Signal(str)
+    element_emptied = Signal(str)
+    layout_changed = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self.current_element = "scene"
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key.Key_Tab:
+            reverse = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+            self.tab_requested.emit(reverse)
+            return
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not (
+            event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+        ):
+            previous = self.current_element
+            super().keyPressEvent(event)
+            self.return_pressed.emit(previous)
+            return
+        if event.key() in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
+            previous = self.current_element
+            block_was_empty = not self.textCursor().block().text().strip()
+            if block_was_empty and previous != "scene":
+                self.element_emptied.emit(previous)
+                return
+            super().keyPressEvent(event)
+            if (
+                previous != "scene"
+                and not self.textCursor().hasSelection()
+                and not self.textCursor().block().text().strip()
+            ):
+                self.element_emptied.emit(previous)
+            return
+        if (
+            self.current_element in {"scene", "character", "transition"}
+            and event.text()
+            and event.text().isprintable()
+            and not event.modifiers()
+        ):
+            self.textCursor().insertText(event.text().upper())
+            return
+        super().keyPressEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        super().mouseDoubleClickEvent(event)
+        block_text = self.textCursor().block().text().strip().lstrip("@").strip()
+        if block_text:
+            self.character_activated.emit(block_text)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self.layout_changed.emit()
+
+
+class SceneTableWidget(QTableWidget):
+    rows_reordered = Signal()
+
+    def __init__(self):
+        super().__init__(0, 5)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+
+    def dropEvent(self, event) -> None:
+        source_row = self.currentRow()
+        target_row = self.indexAt(event.position().toPoint()).row()
+        if source_row < 0:
+            event.ignore()
+            return
+        if target_row < 0:
+            target_row = self.rowCount()
+        if target_row == source_row or target_row == source_row + 1:
+            event.accept()
+            return
+        items = [self.takeItem(source_row, column) for column in range(self.columnCount())]
+        self.removeRow(source_row)
+        if target_row > source_row:
+            target_row -= 1
+        target_row = max(0, min(target_row, self.rowCount()))
+        self.insertRow(target_row)
+        for column, item in enumerate(items):
+            self.setItem(target_row, column, item or QTableWidgetItem())
+        self.setCurrentCell(target_row, 1)
+        event.accept()
+        self.rows_reordered.emit()
+
+
+class AttachmentPreviewLabel(QLabel):
+    clicked = Signal()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+
+class StoryMapCardItem(QGraphicsRectItem):
+    WIDTH = 236
+    HEIGHT = 146
+
+    def __init__(self, row, palette: Palette, on_click, on_edit, on_drag, on_move):
+        super().__init__(QRectF(0, 0, self.WIDTH, self.HEIGHT))
+        self.node_id = int(row["id"])
+        self.kind = row["kind"] or "idea"
+        self.on_click = on_click
+        self.on_edit = on_edit
+        self.on_drag = on_drag
+        self.on_move = on_move
+        self.edges: list[StoryMapLinkItem] = []
+        self.setPos(float(row["x"]), float(row["y"]))
+        self.setZValue(2)
+        self.setFlags(
+            QGraphicsItem.GraphicsItemFlag.ItemIsMovable
+            | QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
+            | QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges
+        )
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.setPen(QPen(QColor(palette.border_strong), 1.5))
+
+        dark = palette is DARK
+        light_colors = {
+            "situation": "#FFF0B8",
+            "event": "#FFD9C7",
+            "objective": "#DCEBFF",
+            "action": "#DDF4E5",
+            "obstacle": "#FFDCDC",
+            "consequence": "#E9E0FF",
+            "choice": "#FFE4BA",
+            "resolution": "#D7F2EE",
+            "idea": "#F0E8FF",
+        }
+        dark_colors = {
+            "situation": "#383019",
+            "event": "#3A261D",
+            "objective": "#172D46",
+            "action": "#183326",
+            "obstacle": "#3A2022",
+            "consequence": "#2C2440",
+            "choice": "#3B2B18",
+            "resolution": "#173431",
+            "idea": "#2D2540",
+        }
+        self.colors = dark_colors if dark else light_colors
+        self.setBrush(QBrush(QColor(self.colors.get(self.kind, self.colors["idea"]))))
+
+        kind_font = QFont("Inter", 8)
+        kind_font.setWeight(QFont.Weight.DemiBold)
+        self.kind_text = QGraphicsTextItem(self)
+        self.kind_text.setFont(kind_font)
+        self.kind_text.setDefaultTextColor(QColor(palette.muted))
+        self.kind_text.setPos(12, 8)
+        self.kind_text.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+
+        title_font = QFont("Inter", 11)
+        title_font.setWeight(QFont.Weight.DemiBold)
+        self.title_text = QGraphicsTextItem(self)
+        self.title_text.setFont(title_font)
+        self.title_text.setDefaultTextColor(QColor(palette.text))
+        self.title_text.setTextWidth(self.WIDTH - 24)
+        self.title_text.setPos(12, 28)
+        self.title_text.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+
+        body_font = QFont("Inter", 9)
+        self.body_text = QGraphicsTextItem(self)
+        self.body_text.setFont(body_font)
+        self.body_text.setDefaultTextColor(QColor(palette.muted))
+        self.body_text.setTextWidth(self.WIDTH - 24)
+        self.body_text.setPos(12, 67)
+        self.body_text.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self.update_text(row["title"], row["content"], self.kind)
+
+    def update_text(self, title: str, content: str, kind: str) -> None:
+        self.kind = kind
+        self.setBrush(QBrush(QColor(self.colors.get(kind, self.colors["idea"]))))
+        self.kind_text.setPlainText(dict(STORY_CARD_KINDS).get(kind, "Idée libre").upper())
+        self.title_text.setPlainText(title or "Carte sans titre")
+        compact = " ".join((content or "").split())
+        if len(compact) > 155:
+            compact = compact[:152].rstrip() + "…"
+        self.body_text.setPlainText(compact or "Double-clique pour ajouter du contenu.")
+        self.setToolTip("Double-clique pour modifier · glisse pour déplacer")
+
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
+            for edge in self.edges:
+                edge.update_path()
+        return super().itemChange(change, value)
+
+    def mousePressEvent(self, event) -> None:
+        self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        self.on_click(self)
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        super().mouseReleaseEvent(event)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.on_move(self)
+
+    def mouseMoveEvent(self, event) -> None:
+        super().mouseMoveEvent(event)
+        self.on_drag(self)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        self.on_edit(self)
+        event.accept()
+
+
+class StoryMapLinkItem(QGraphicsPathItem):
+    def __init__(self, link_id: int, source: StoryMapCardItem, target: StoryMapCardItem, palette: Palette):
+        super().__init__()
+        self.link_id = link_id
+        self.source = source
+        self.target = target
+        self.palette = palette
+        self.setZValue(1)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
+        source.edges.append(self)
+        target.edges.append(self)
+        self.update_path()
+
+    def boundingRect(self) -> QRectF:
+        # The arrow head is painted manually around the path endpoint. Include
+        # it in the dirty region so Qt also erases its previous position.
+        return super().boundingRect().adjusted(-12, -12, 12, 12)
+
+    def update_path(self) -> None:
+        source_rect = self.source.sceneBoundingRect()
+        target_rect = self.target.sceneBoundingRect()
+        source_center = source_rect.center()
+        target_center = target_rect.center()
+        dx = target_center.x() - source_center.x()
+        dy = target_center.y() - source_center.y()
+        if abs(dx) < 0.01 and abs(dy) < 0.01:
+            dx = 1.0
+
+        def boundary_distance(rect: QRectF) -> float:
+            x_distance = rect.width() / (2 * abs(dx)) if abs(dx) > 0.01 else float("inf")
+            y_distance = rect.height() / (2 * abs(dy)) if abs(dy) > 0.01 else float("inf")
+            return min(x_distance, y_distance)
+
+        source_distance = boundary_distance(source_rect)
+        target_distance = boundary_distance(target_rect)
+        start = QPointF(source_center.x() + dx * source_distance, source_center.y() + dy * source_distance)
+        end = QPointF(target_center.x() - dx * target_distance, target_center.y() - dy * target_distance)
+        path = QPainterPath(start)
+        horizontal = max(70.0, abs(end.x() - start.x()) * 0.45)
+        direction = 1 if end.x() >= start.x() else -1
+        path.cubicTo(
+            QPointF(start.x() + horizontal * direction, start.y()),
+            QPointF(end.x() - horizontal * direction, end.y()),
+            end,
+        )
+        self.setPath(path)
+
+    def paint(self, painter, option, widget=None) -> None:
+        color = QColor(self.palette.accent if self.isSelected() else self.palette.border_strong)
+        pen = QPen(color, 2.4 if self.isSelected() else 1.8)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(pen)
+        painter.setBrush(QBrush(color))
+        painter.drawPath(self.path())
+        end = self.path().pointAtPercent(1.0)
+        before = self.path().pointAtPercent(0.96)
+        angle = math.atan2(end.y() - before.y(), end.x() - before.x())
+        arrow_size = 9.0
+        left = QPointF(
+            end.x() - arrow_size * math.cos(angle - math.pi / 6),
+            end.y() - arrow_size * math.sin(angle - math.pi / 6),
+        )
+        right = QPointF(
+            end.x() - arrow_size * math.cos(angle + math.pi / 6),
+            end.y() - arrow_size * math.sin(angle + math.pi / 6),
+        )
+        painter.drawPolygon(QPolygonF([end, left, right]))
+
+
+class StoryMapView(QGraphicsView):
+    def __init__(self, scene: QGraphicsScene, palette: Palette):
+        super().__init__(scene)
+        self.grid_color = QColor(palette.border)
+        self.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # Moving a card redraws a curved link and its arrow on every frame.
+        # A full repaint avoids stale curve fragments with Linux graphics
+        # drivers that do not reliably clear Qt's minimal dirty regions.
+        self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
+        self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.setBackgroundBrush(QBrush(QColor(palette.surface_raised)))
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.setToolTip("Clique et glisse le fond pour parcourir librement la carte.")
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        # QGraphicsView is a compound widget: its viewport and the two scrollbars
+        # can otherwise repaint square pixels over opposite rounded corners.
+        outline = QPainterPath()
+        outline.addRoundedRect(QRectF(self.rect()).adjusted(0.0, 0.0, -1.0, -1.0), 14.0, 14.0)
+        self.setMask(QRegion(outline.toFillPolygon().toPolygon()))
+
+    def drawBackground(self, painter, rect) -> None:
+        super().drawBackground(painter, rect)
+        grid = 28
+        left = math.floor(rect.left() / grid) * grid
+        top = math.floor(rect.top() / grid) * grid
+        painter.setPen(QPen(self.grid_color, 0.7))
+        x = left
+        while x < rect.right():
+            painter.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()))
+            x += grid
+        y = top
+        while y < rect.bottom():
+            painter.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
+            y += grid
+
+    def wheelEvent(self, event) -> None:
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            factor = 1.12 if event.angleDelta().y() > 0 else 0.89
+            self.scale(factor, factor)
+            event.accept()
+            return
+        super().wheelEvent(event)
+
+
+class RelationshipNodeItem(QGraphicsRectItem):
+    WIDTH = 164.0
+    HEIGHT = 174.0
+
+    def __init__(self, row: dict, portrait: QPixmap, palette: Palette, on_move, on_drag):
+        super().__init__(0, 0, self.WIDTH, self.HEIGHT)
+        self.character_id = int(row["id"])
+        self.row = row
+        self.portrait = portrait
+        self.palette = palette
+        self.on_move = on_move
+        self.on_drag = on_drag
+        self.edges: list[RelationshipEdgeItem] = []
+        self.setZValue(2)
+        self.setFlags(
+            QGraphicsItem.GraphicsItemFlag.ItemIsMovable
+            | QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
+            | QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges
+        )
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.setToolTip(
+            f"{row['name'] or 'Personnage sans nom'}\n"
+            f"{row['role'] or 'Rôle à préciser'}\nGlisser pour déplacer"
+        )
+
+    def paint(self, painter, option, widget=None) -> None:
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        border = self.palette.accent if self.isSelected() else self.palette.border_strong
+        painter.setPen(QPen(QColor(border), 2.3 if self.isSelected() else 1.2))
+        painter.setBrush(QBrush(QColor(self.palette.surface)))
+        painter.drawRoundedRect(self.rect(), 13, 13)
+
+        portrait_rect = QRectF(42, 14, 80, 80)
+        painter.save()
+        clip = QPainterPath()
+        clip.addEllipse(portrait_rect)
+        painter.setClipPath(clip)
+        scaled = self.portrait.scaled(
+            QSize(80, 80),
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        source_x = max(0, (scaled.width() - 80) // 2)
+        source_y = max(0, (scaled.height() - 80) // 2)
+        painter.drawPixmap(portrait_rect.toRect(), scaled, QRectF(source_x, source_y, 80, 80).toRect())
+        painter.restore()
+        painter.setPen(QPen(QColor(self.palette.border), 1.0))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(portrait_rect)
+
+        name_font = QFont()
+        name_font.setPointSize(10)
+        name_font.setBold(True)
+        painter.setFont(name_font)
+        painter.setPen(QColor(self.palette.text))
+        painter.drawText(
+            QRectF(10, 101, 144, 28),
+            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
+            self.row["name"] or "Personnage sans nom",
+        )
+        role_font = QFont()
+        role_font.setPointSize(8)
+        painter.setFont(role_font)
+        painter.setPen(QColor(self.palette.muted))
+        secondary = self.row["role"] or "Rôle à préciser"
+        if self.row.get("group_names"):
+            secondary += f" · {self.row['group_names']}"
+        painter.drawText(
+            QRectF(9, 134, 146, 31),
+            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
+            secondary,
+        )
+
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
+            for edge in self.edges:
+                edge.update_path()
+            self.on_drag(self)
+        return super().itemChange(change, value)
+
+    def mousePressEvent(self, event) -> None:
+        self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        super().mouseReleaseEvent(event)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.on_move(self)
+
+
+class RelationshipEdgeItem(QGraphicsPathItem):
+    def __init__(
+        self,
+        row: dict,
+        source: RelationshipNodeItem,
+        target: RelationshipNodeItem,
+        palette: Palette,
+        on_select,
+        on_edit,
+        curve_offset: float = 0.0,
+    ):
+        super().__init__()
+        self.relation_id = int(row["id"])
+        self.row = row
+        self.source = source
+        self.target = target
+        self.palette = palette
+        self.on_select = on_select
+        self.on_edit = on_edit
+        self.curve_offset = curve_offset
+        self.color = QColor(row.get("color") or RELATIONSHIP_COLORS.get(row["relationship_type"], "#7A7D85"))
+        self.setZValue(1)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip(
+            f"{row['name_a']} → {row['name_b']}\n{row['relationship_type']}\n"
+            "Double-clique pour modifier"
+        )
+        source.edges.append(self)
+        target.edges.append(self)
+        self.update_path()
+
+    def boundingRect(self) -> QRectF:
+        return super().boundingRect().adjusted(-80, -48, 80, 48)
+
+    def update_path(self) -> None:
+        source_rect = self.source.sceneBoundingRect()
+        target_rect = self.target.sceneBoundingRect()
+        source_center = source_rect.center()
+        target_center = target_rect.center()
+        dx = target_center.x() - source_center.x()
+        dy = target_center.y() - source_center.y()
+        length = max(1.0, math.hypot(dx, dy))
+
+        def boundary_distance(rect: QRectF) -> float:
+            x_distance = rect.width() / (2 * abs(dx)) if abs(dx) > 0.01 else float("inf")
+            y_distance = rect.height() / (2 * abs(dy)) if abs(dy) > 0.01 else float("inf")
+            return min(x_distance, y_distance)
+
+        source_distance = boundary_distance(source_rect)
+        target_distance = boundary_distance(target_rect)
+        start = QPointF(source_center.x() + dx * source_distance, source_center.y() + dy * source_distance)
+        end = QPointF(target_center.x() - dx * target_distance, target_center.y() - dy * target_distance)
+        normal_x = -dy / length
+        normal_y = dx / length
+        middle = QPointF(
+            (start.x() + end.x()) / 2 + normal_x * self.curve_offset,
+            (start.y() + end.y()) / 2 + normal_y * self.curve_offset,
+        )
+        path = QPainterPath(start)
+        path.quadTo(middle, end)
+        self.prepareGeometryChange()
+        self.setPath(path)
+
+    def paint(self, painter, option, widget=None) -> None:
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        color = QColor(self.palette.accent) if self.isSelected() else self.color
+        painter.setPen(QPen(color, 3.0 if self.isSelected() else 2.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.setBrush(QBrush(color))
+        painter.drawPath(self.path())
+        end = self.path().pointAtPercent(1.0)
+        before = self.path().pointAtPercent(0.95)
+        angle = math.atan2(end.y() - before.y(), end.x() - before.x())
+        arrow_size = 10.0
+        left = QPointF(
+            end.x() - arrow_size * math.cos(angle - math.pi / 6),
+            end.y() - arrow_size * math.sin(angle - math.pi / 6),
+        )
+        right = QPointF(
+            end.x() - arrow_size * math.cos(angle + math.pi / 6),
+            end.y() - arrow_size * math.sin(angle + math.pi / 6),
+        )
+        painter.drawPolygon(QPolygonF([end, left, right]))
+
+        label = self.row["relationship_type"] or "Relation"
+        label_font = QFont()
+        label_font.setPointSize(8)
+        label_font.setBold(True)
+        painter.setFont(label_font)
+        metrics = painter.fontMetrics()
+        text_rect = metrics.boundingRect(label).adjusted(-8, -4, 8, 4)
+        midpoint = self.path().pointAtPercent(0.5)
+        text_rect.moveCenter(midpoint.toPoint())
+        painter.setPen(QPen(QColor(self.palette.border), 1.0))
+        painter.setBrush(QBrush(QColor(self.palette.surface_raised)))
+        painter.drawRoundedRect(text_rect, 7, 7)
+        painter.setPen(QColor(self.palette.text))
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, label)
+
+    def mousePressEvent(self, event) -> None:
+        self.on_select(self.relation_id)
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        self.on_edit(self.relation_id)
+        event.accept()
+
+
+class RelationshipMapView(QGraphicsView):
+    def __init__(self, palette: Palette, parent=None):
+        self.map_scene = QGraphicsScene(parent)
+        super().__init__(self.map_scene, parent)
+        self.palette = palette
+        self.node_items: dict[int, RelationshipNodeItem] = {}
+        self.edge_items: list[RelationshipEdgeItem] = []
+        self.grid_color = QColor(palette.border)
+        self.setObjectName("RelationshipMapCanvas")
+        self.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
+        self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.setBackgroundBrush(QBrush(QColor(palette.surface_raised)))
+        self.setSceneRect(-350, -280, 1900, 1250)
+        self.setMinimumHeight(470)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+
+    def drawBackground(self, painter, rect) -> None:
+        super().drawBackground(painter, rect)
+        grid = 32
+        left = math.floor(rect.left() / grid) * grid
+        top = math.floor(rect.top() / grid) * grid
+        painter.setPen(QPen(self.grid_color, 0.7))
+        x = left
+        while x < rect.right():
+            painter.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()))
+            x += grid
+        y = top
+        while y < rect.bottom():
+            painter.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
+            y += grid
+
+    def clear_map(self) -> None:
+        self.map_scene.clear()
+        self.node_items = {}
+        self.edge_items = []
+
+    def expand_for_nodes(self) -> None:
+        if not self.node_items:
+            return
+        rect = QRectF()
+        for node in self.node_items.values():
+            rect = rect.united(node.sceneBoundingRect()) if not rect.isNull() else node.sceneBoundingRect()
+        target = rect.adjusted(-320, -280, 320, 280)
+        self.setSceneRect(self.sceneRect().united(target))
+
+    def center_content(self) -> None:
+        self.resetTransform()
+        if self.node_items:
+            rect = QRectF()
+            for node in self.node_items.values():
+                rect = rect.united(node.sceneBoundingRect()) if not rect.isNull() else node.sceneBoundingRect()
+            self.centerOn(rect.center())
+        else:
+            self.centerOn(self.sceneRect().center())
+
+    def wheelEvent(self, event) -> None:
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            factor = 1.12 if event.angleDelta().y() > 0 else 0.89
+            self.scale(factor, factor)
+            event.accept()
+            return
+        super().wheelEvent(event)
+
+
+class RelationshipMapDialog(QDialog):
+    def __init__(self, parent, db: Database, project_id: int, palette: Palette, initial_character_id: int | None = None):
+        super().__init__(parent)
+        self.db = db
+        self.project_id = int(project_id)
+        self.palette = palette
+        self.initial_character_id = initial_character_id
+        self.current_map_id: int | None = None
+        self.selected_relation_id: int | None = None
+        self.default_map = self.db.ensure_relationship_map(self.project_id)
+        self.setWindowTitle("Carte des relations")
+        self.resize(1280, 820)
+        self.setMinimumSize(980, 680)
+        self._build_ui()
+        self._load_maps()
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 16, 18, 16)
+        root.setSpacing(10)
+        title_row = QHBoxLayout()
+        title_copy = QVBoxLayout()
+        title_copy.setSpacing(2)
+        title_copy.addWidget(make_label("V0.14 · DIAGRAMME DIRECTIONNEL", "Caption"))
+        title_copy.addWidget(make_label("Carte des relations", "SectionTitle"))
+        title_row.addLayout(title_copy)
+        title_row.addStretch()
+        title_row.addWidget(make_button("Fermer", "secondary", self.accept))
+        root.addLayout(title_row)
+
+        controls = make_card()
+        controls_box = QHBoxLayout(controls)
+        controls_box.setContentsMargins(12, 9, 12, 9)
+        controls_box.setSpacing(7)
+        controls_box.addWidget(make_label("CARTE", "Caption"))
+        self.map_selector = QComboBox()
+        self.map_selector.setMinimumWidth(190)
+        controls_box.addWidget(self.map_selector)
+        add_map_button = make_button("+ Carte", "secondary")
+        map_menu = QMenu(add_map_button)
+        map_menu.addAction("Carte libre…", self._add_map)
+        map_menu.addSeparator()
+        for label, map_type in (
+            ("Famille", "family"),
+            ("Travail", "work"),
+            ("Début de l’histoire", "start"),
+            ("Fin de l’histoire", "end"),
+        ):
+            map_menu.addAction(
+                label,
+                lambda _checked=False, name=label, kind=map_type: self._create_map(name, kind),
+            )
+        add_map_button.setMenu(map_menu)
+        controls_box.addWidget(add_map_button)
+        controls_box.addWidget(make_button("Renommer", "quiet", self._rename_map))
+        controls_box.addWidget(make_button("Supprimer", "quiet", self._delete_map))
+        controls_box.addSpacing(12)
+        controls_box.addWidget(make_label("PERSONNAGE", "Caption"))
+        self.character_filter = QComboBox()
+        self.character_filter.addItem("Tous", 0)
+        for row in self.db.q(
+            "SELECT id,name FROM characters WHERE project_id=? ORDER BY name COLLATE NOCASE,id",
+            (self.project_id,),
+        ):
+            self.character_filter.addItem(row["name"] or "Personnage sans nom", int(row["id"]))
+        controls_box.addWidget(self.character_filter)
+        controls_box.addWidget(make_label("GROUPE", "Caption"))
+        self.group_filter = QComboBox()
+        self.group_filter.addItem("Tous", 0)
+        for row in self.db.q(
+            "SELECT id,name FROM character_groups WHERE project_id=? ORDER BY name COLLATE NOCASE,id",
+            (self.project_id,),
+        ):
+            self.group_filter.addItem(row["name"] or "Groupe sans nom", int(row["id"]))
+        controls_box.addWidget(self.group_filter)
+        controls_box.addStretch()
+        self.relation_count = make_label("0 RELATION", "AccentPill")
+        controls_box.addWidget(self.relation_count)
+        controls_box.addWidget(make_button("Centrer", "secondary", self._center_map))
+        controls_box.addWidget(make_button("+ Relation", "primary", self._new_relation))
+        root.addWidget(controls)
+
+        self.map_view = RelationshipMapView(self.palette, self)
+        root.addWidget(self.map_view, 1)
+
+        detail = make_card()
+        detail_box = QHBoxLayout(detail)
+        detail_box.setContentsMargins(14, 10, 14, 10)
+        detail_copy = QVBoxLayout()
+        detail_copy.setSpacing(2)
+        self.detail_meta = make_label("AUCUNE RELATION SÉLECTIONNÉE", "Caption")
+        self.detail_title = make_label("Clique sur une flèche", "CardTitle")
+        self.detail_text = make_label(
+            "La direction, la tension, le secret et l’évolution apparaîtront ici.", "Muted", True
+        )
+        detail_copy.addWidget(self.detail_meta)
+        detail_copy.addWidget(self.detail_title)
+        detail_copy.addWidget(self.detail_text)
+        detail_box.addLayout(detail_copy, 1)
+        self.edit_relation_button = make_button("Modifier", "secondary", self._edit_selected_relation)
+        self.delete_relation_button = make_button("Supprimer", "danger", self._delete_selected_relation)
+        self.edit_relation_button.setEnabled(False)
+        self.delete_relation_button.setEnabled(False)
+        detail_box.addWidget(self.edit_relation_button)
+        detail_box.addWidget(self.delete_relation_button)
+        root.addWidget(detail)
+
+        self.map_selector.currentIndexChanged.connect(self._map_changed)
+        self.character_filter.currentIndexChanged.connect(self._render_map)
+        self.group_filter.currentIndexChanged.connect(self._render_map)
+
+    def _load_maps(self, select_id: int | None = None) -> None:
+        requested = select_id or self.current_map_id or int(
+            self.db.setting(f"relationship_map_{self.project_id}", self.default_map["id"])
+        )
+        rows = self.db.q(
+            "SELECT id,name,map_type FROM relationship_maps WHERE project_id=? ORDER BY id",
+            (self.project_id,),
+        )
+        self.map_selector.blockSignals(True)
+        self.map_selector.clear()
+        for row in rows:
+            self.map_selector.addItem(row["name"] or "Carte sans nom", int(row["id"]))
+        index = self.map_selector.findData(requested)
+        self.map_selector.setCurrentIndex(max(0, index))
+        self.map_selector.blockSignals(False)
+        self._map_changed()
+
+    def _map_changed(self, _index: int = -1) -> None:
+        map_id = self.map_selector.currentData()
+        if not map_id:
+            return
+        self.current_map_id = int(map_id)
+        self.db.set_setting(f"relationship_map_{self.project_id}", self.current_map_id)
+        self.selected_relation_id = None
+        self._ensure_node_positions()
+        self._render_map()
+        QTimer.singleShot(0, self._center_map)
+
+    def _ensure_node_positions(self) -> None:
+        if not self.current_map_id:
+            return
+        existing = {
+            int(row["character_id"])
+            for row in self.db.q(
+                "SELECT character_id FROM relationship_map_nodes WHERE map_id=?",
+                (self.current_map_id,),
+            )
+        }
+        characters = self.db.q(
+            "SELECT id FROM characters WHERE project_id=? ORDER BY name COLLATE NOCASE,id",
+            (self.project_id,),
+        )
+        columns = max(2, math.ceil(math.sqrt(max(1, len(characters)))))
+        with self.db.conn:
+            for index, character in enumerate(characters):
+                character_id = int(character["id"])
+                if character_id in existing:
+                    continue
+                x = 100.0 + (index % columns) * 260.0
+                y = 90.0 + (index // columns) * 235.0
+                self.db.conn.execute(
+                    """INSERT OR IGNORE INTO relationship_map_nodes(map_id,character_id,x,y)
+                    VALUES(?,?,?,?)""",
+                    (self.current_map_id, character_id, x, y),
+                )
+
+    def _character_rows(self) -> list[dict]:
+        return [
+            dict(row)
+            for row in self.db.q(
+                """SELECT character.id,character.name,character.role,character.portrait_data,
+                position.x,position.y,GROUP_CONCAT(group_row.name, ' · ') group_names
+                FROM characters character
+                JOIN relationship_map_nodes position
+                    ON position.character_id=character.id AND position.map_id=?
+                LEFT JOIN character_group_members member ON member.character_id=character.id
+                LEFT JOIN character_groups group_row ON group_row.id=member.group_id
+                WHERE character.project_id=? GROUP BY character.id
+                ORDER BY character.name COLLATE NOCASE,character.id""",
+                (self.current_map_id, self.project_id),
+            )
+        ]
+
+    def _relation_rows(self) -> list[dict]:
+        return [
+            dict(row)
+            for row in self.db.q(
+                """SELECT relation.*,a.name name_a,b.name name_b
+                FROM character_relationships relation
+                JOIN characters a ON a.id=relation.character_a_id
+                JOIN characters b ON b.id=relation.character_b_id
+                WHERE relation.project_id=? AND relation.map_id=? ORDER BY relation.id""",
+                (self.project_id, self.current_map_id),
+            )
+        ]
+
+    def _visible_character_ids(self, characters: list[dict], relations: list[dict]) -> set[int]:
+        visible = {int(row["id"]) for row in characters}
+        selected_character = int(self.character_filter.currentData() or 0)
+        if selected_character:
+            neighbours = {selected_character}
+            for relation in relations:
+                a_id = int(relation["character_a_id"])
+                b_id = int(relation["character_b_id"])
+                if a_id == selected_character:
+                    neighbours.add(b_id)
+                if b_id == selected_character:
+                    neighbours.add(a_id)
+            visible &= neighbours
+        selected_group = int(self.group_filter.currentData() or 0)
+        if selected_group:
+            members = {
+                int(row["character_id"])
+                for row in self.db.q(
+                    "SELECT character_id FROM character_group_members WHERE group_id=?",
+                    (selected_group,),
+                )
+            }
+            visible &= members
+        return visible
+
+    def _render_map(self, _value=None) -> None:
+        if not self.current_map_id:
+            return
+        characters = self._character_rows()
+        relations = self._relation_rows()
+        visible_ids = self._visible_character_ids(characters, relations)
+        self.map_view.clear_map()
+        parent_window = self.parent()
+        for row in characters:
+            character_id = int(row["id"])
+            if character_id not in visible_ids:
+                continue
+            portrait = QPixmap()
+            if not row["portrait_data"] or not portrait.loadFromData(bytes(row["portrait_data"])):
+                portrait = parent_window._character_default_pixmap()
+            node = RelationshipNodeItem(row, portrait, self.palette, self._save_node_position, self._node_dragged)
+            node.setPos(float(row["x"]), float(row["y"]))
+            self.map_view.map_scene.addItem(node)
+            self.map_view.node_items[character_id] = node
+
+        directed_pairs = {
+            (int(row["character_a_id"]), int(row["character_b_id"])) for row in relations
+        }
+        for row in relations:
+            a_id = int(row["character_a_id"])
+            b_id = int(row["character_b_id"])
+            if a_id not in self.map_view.node_items or b_id not in self.map_view.node_items:
+                continue
+            reverse_exists = (b_id, a_id) in directed_pairs
+            offset = 70.0 if reverse_exists else 0.0
+            edge = RelationshipEdgeItem(
+                row,
+                self.map_view.node_items[a_id],
+                self.map_view.node_items[b_id],
+                self.palette,
+                self._select_relation,
+                self._edit_relation,
+                offset,
+            )
+            self.map_view.map_scene.addItem(edge)
+            self.map_view.edge_items.append(edge)
+            if int(row["id"]) == self.selected_relation_id:
+                edge.setSelected(True)
+        self.map_view.expand_for_nodes()
+        count = len([edge for edge in self.map_view.edge_items])
+        self.relation_count.setText(f"{count} RELATION{'S' if count != 1 else ''}")
+        if self.selected_relation_id not in {int(row["id"]) for row in relations}:
+            self.selected_relation_id = None
+        self._render_relation_detail()
+
+    def _save_node_position(self, node: RelationshipNodeItem) -> None:
+        if not self.current_map_id:
+            return
+        self.db.run(
+            """UPDATE relationship_map_nodes SET x=?,y=? WHERE map_id=? AND character_id=?""",
+            (node.pos().x(), node.pos().y(), self.current_map_id, node.character_id),
+        )
+        self.map_view.expand_for_nodes()
+
+    def _node_dragged(self, _node: RelationshipNodeItem) -> None:
+        self.map_view.expand_for_nodes()
+
+    def _center_map(self, _checked: bool = False) -> None:
+        self.map_view.center_content()
+
+    def _add_map(self) -> None:
+        name, accepted = QInputDialog.getText(
+            self,
+            "Nouvelle carte",
+            "Nom de la carte :",
+            text="Famille, travail, début de l’histoire…",
+        )
+        if not accepted or not name.strip():
+            return
+        self._create_map(name.strip(), "custom")
+
+    def _create_map(self, name: str, map_type: str) -> None:
+        existing = self.db.one(
+            "SELECT id FROM relationship_maps WHERE project_id=? AND name=?",
+            (self.project_id, name),
+        )
+        if existing:
+            self._load_maps(int(existing["id"]))
+            return
+        try:
+            map_id = self.db.run(
+                """INSERT INTO relationship_maps(project_id,name,map_type,created_at,updated_at)
+                VALUES(?,?,?,?,?)""",
+                (self.project_id, name, map_type, NOW(), NOW()),
+            ).lastrowid
+        except Exception as exc:  # noqa: BLE001 - SQLite exposes several constraint subclasses.
+            QMessageBox.warning(self, "Carte impossible", f"Ce nom existe peut-être déjà.\n\n{exc}")
+            return
+        self._load_maps(int(map_id))
+
+    def _rename_map(self) -> None:
+        if not self.current_map_id:
+            return
+        current_name = self.map_selector.currentText()
+        name, accepted = QInputDialog.getText(self, "Renommer la carte", "Nouveau nom :", text=current_name)
+        if not accepted or not name.strip() or name.strip() == current_name:
+            return
+        try:
+            self.db.run(
+                "UPDATE relationship_maps SET name=?,updated_at=? WHERE id=?",
+                (name.strip(), NOW(), self.current_map_id),
+            )
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.warning(self, "Nom indisponible", str(exc))
+            return
+        self._load_maps(self.current_map_id)
+
+    def _delete_map(self) -> None:
+        if not self.current_map_id:
+            return
+        if self.map_selector.count() <= 1:
+            QMessageBox.information(self, "Carte conservée", "Le projet doit garder au moins une carte de relations.")
+            return
+        if QMessageBox.question(
+            self,
+            "Supprimer la carte",
+            f"Supprimer « {self.map_selector.currentText()} » et les relations propres à cette carte ?",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        map_id = self.current_map_id
+        with self.db.conn:
+            self.db.conn.execute("DELETE FROM character_relationships WHERE map_id=?", (map_id,))
+            self.db.conn.execute("DELETE FROM relationship_map_nodes WHERE map_id=?", (map_id,))
+            self.db.conn.execute("DELETE FROM relationship_maps WHERE id=?", (map_id,))
+        self.current_map_id = None
+        self._load_maps()
+
+    def _new_relation(self) -> None:
+        self._edit_relation()
+
+    def _edit_selected_relation(self) -> None:
+        if self.selected_relation_id:
+            self._edit_relation(self.selected_relation_id)
+
+    def _edit_relation(self, relation_id: int | None = None) -> None:
+        row = self.db.one("SELECT * FROM character_relationships WHERE id=?", (relation_id,)) if relation_id else None
+        characters = self.db.q(
+            "SELECT id,name FROM characters WHERE project_id=? ORDER BY name COLLATE NOCASE,id",
+            (self.project_id,),
+        )
+        if len(characters) < 2:
+            QMessageBox.information(self, "Relation impossible", "Ajoute au moins deux personnages.")
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Modifier la relation" if row else "Nouvelle relation directionnelle")
+        dialog.resize(720, 740)
+        box = QVBoxLayout(dialog)
+        box.setContentsMargins(22, 18, 22, 18)
+        box.setSpacing(7)
+        box.addWidget(make_label("DIRECTION DE LA FLÈCHE", "Caption"))
+        box.addWidget(make_label("Qui éprouve quoi envers qui ?", "SectionTitle"))
+        direction = QGridLayout()
+        source = QComboBox()
+        target = QComboBox()
+        for character in characters:
+            label = character["name"] or "Personnage sans nom"
+            source.addItem(label, int(character["id"]))
+            target.addItem(label, int(character["id"]))
+        source_id = int(row["character_a_id"]) if row else int(self.initial_character_id or characters[0]["id"])
+        source.setCurrentIndex(max(0, source.findData(source_id)))
+        target_id = int(row["character_b_id"]) if row else next(
+            int(character["id"]) for character in characters if int(character["id"]) != source_id
+        )
+        target.setCurrentIndex(max(0, target.findData(target_id)))
+        relation_type = QComboBox()
+        relation_type.setEditable(True)
+        relation_type.addItems(RELATIONSHIP_TYPES)
+        relation_type.setCurrentText(row["relationship_type"] if row else "Amitié")
+        direction.addWidget(make_label("DE", "Caption"), 0, 0)
+        direction.addWidget(make_label("VERS", "Caption"), 0, 1)
+        direction.addWidget(source, 1, 0)
+        direction.addWidget(target, 1, 1)
+        direction.addWidget(make_label("TYPE / NOM DE LA FLÈCHE", "Caption"), 2, 0)
+        direction.addWidget(relation_type, 3, 0)
+        color_button = make_button("Couleur de la flèche", "secondary")
+        direction.addWidget(color_button, 3, 1)
+        box.addLayout(direction)
+
+        description = make_editor(70, "Comment cette relation fonctionne-t-elle concrètement ?")
+        tension = make_editor(62, "Que veut chacun ? Qu’est-ce qui déséquilibre la relation ?")
+        secret = make_editor(62, "Quelle information cachée peut transformer la relation ?")
+        evolution = make_editor(62, "Comment la relation évolue-t-elle entre le début et la fin ?")
+        for editor in (description, tension, secret, evolution):
+            editor.setMaximumHeight(86)
+            editor.setProperty("characterField", True)
+        if row:
+            description.setPlainText(row["description"])
+            tension.setPlainText(row["tension"])
+            secret.setPlainText(row["secret"])
+            evolution.setPlainText(row["evolution"])
+        box.addWidget(make_label("DESCRIPTION", "Caption"))
+        box.addWidget(description)
+        box.addWidget(make_label("TENSION / DÉSÉQUILIBRE", "Caption"))
+        box.addWidget(tension)
+        box.addWidget(make_label("SECRET", "Caption"))
+        box.addWidget(secret)
+        box.addWidget(make_label("ÉVOLUTION", "Caption"))
+        box.addWidget(evolution)
+
+        selected_color = row["color"] if row and row["color"] else RELATIONSHIP_COLORS.get(
+            relation_type.currentText(), "#7A7D85"
+        )
+
+        def update_color_button() -> None:
+            color_button.setStyleSheet(
+                f"background:{selected_color}; color:white; border:1px solid {selected_color};"
+            )
+
+        def choose_color() -> None:
+            nonlocal selected_color
+            chosen = QColorDialog.getColor(QColor(selected_color), dialog, "Couleur de la relation")
+            if chosen.isValid():
+                selected_color = chosen.name()
+                update_color_button()
+
+        def type_changed(text: str) -> None:
+            nonlocal selected_color
+            selected_color = RELATIONSHIP_COLORS.get(text, selected_color)
+            update_color_button()
+
+        color_button.clicked.connect(choose_color)
+        relation_type.currentTextChanged.connect(type_changed)
+        update_color_button()
+        actions = QHBoxLayout()
+        actions.addStretch()
+        actions.addWidget(make_button("Annuler", "secondary", dialog.reject))
+        actions.addWidget(make_button("Enregistrer la relation", "primary", dialog.accept))
+        box.addLayout(actions)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        source_id = int(source.currentData())
+        target_id = int(target.currentData())
+        if source_id == target_id:
+            QMessageBox.warning(self, "Direction impossible", "Choisis deux personnages différents.")
+            return
+        values = (
+            self.project_id,
+            self.current_map_id,
+            source_id,
+            target_id,
+            relation_type.currentText().strip() or "Autre",
+            description.toPlainText().strip(),
+            tension.toPlainText().strip(),
+            secret.toPlainText().strip(),
+            evolution.toPlainText().strip(),
+            selected_color,
+        )
+        if relation_id:
+            self.db.run(
+                """UPDATE character_relationships SET project_id=?,map_id=?,character_a_id=?,character_b_id=?,
+                relationship_type=?,description=?,tension=?,secret=?,evolution=?,color=?,updated_at=? WHERE id=?""",
+                (*values, NOW(), relation_id),
+            )
+            self.selected_relation_id = relation_id
+        else:
+            self.selected_relation_id = self.db.run(
+                """INSERT INTO character_relationships(
+                project_id,map_id,character_a_id,character_b_id,relationship_type,description,tension,
+                secret,evolution,color,created_at,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (*values, NOW(), NOW()),
+            ).lastrowid
+        self._render_map()
+
+    def _select_relation(self, relation_id: int) -> None:
+        self.selected_relation_id = int(relation_id)
+        for edge in self.map_view.edge_items:
+            edge.setSelected(edge.relation_id == self.selected_relation_id)
+        self._render_relation_detail()
+
+    def _render_relation_detail(self) -> None:
+        if not self.selected_relation_id:
+            self.detail_meta.setText("AUCUNE RELATION SÉLECTIONNÉE")
+            self.detail_title.setText("Clique sur une flèche")
+            self.detail_text.setText("La direction, la tension, le secret et l’évolution apparaîtront ici.")
+            self.edit_relation_button.setEnabled(False)
+            self.delete_relation_button.setEnabled(False)
+            return
+        row = self.db.one(
+            """SELECT relation.*,a.name name_a,b.name name_b
+            FROM character_relationships relation
+            JOIN characters a ON a.id=relation.character_a_id
+            JOIN characters b ON b.id=relation.character_b_id WHERE relation.id=?""",
+            (self.selected_relation_id,),
+        )
+        if not row:
+            self.selected_relation_id = None
+            self._render_relation_detail()
+            return
+        self.detail_meta.setText((row["relationship_type"] or "RELATION").upper())
+        self.detail_title.setText(f"{row['name_a']} → {row['name_b']}")
+        parts = []
+        if row["description"]:
+            parts.append(row["description"])
+        if row["tension"]:
+            parts.append(f"Tension : {row['tension']}")
+        if row["secret"]:
+            parts.append(f"Secret : {row['secret']}")
+        if row["evolution"]:
+            parts.append(f"Évolution : {row['evolution']}")
+        self.detail_text.setText(" · ".join(parts) or "Aucun détail ajouté pour le moment.")
+        self.edit_relation_button.setEnabled(True)
+        self.delete_relation_button.setEnabled(True)
+
+    def _delete_selected_relation(self) -> None:
+        if not self.selected_relation_id:
+            return
+        if QMessageBox.question(
+            self,
+            "Supprimer la relation",
+            "Supprimer cette flèche et ses informations ?",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        self.db.run("DELETE FROM character_relationships WHERE id=?", (self.selected_relation_id,))
+        self.selected_relation_id = None
+        self._render_map()
+
+
+class TimelineEventItem(QGraphicsRectItem):
+    def __init__(self, row: dict, label: str, palette: Palette, on_select, on_edit, selected: bool = False):
+        super().__init__(0, 0, 210, 72)
+        self.event_id = int(row["id"])
+        self.row = row
+        self.label = label
+        self.palette = palette
+        self.on_select = on_select
+        self.on_edit = on_edit
+        category_colors = {
+            "Intrigue principale": palette.accent_soft,
+            "Backstory": "#F2E9FF" if palette is LIGHT else "#2B203A",
+            "Monde": "#E8F6ED" if palette is LIGHT else "#173126",
+            "Guerre": "#FCE9E7" if palette is LIGHT else "#3B1F20",
+            "Famille": "#FFF2D9" if palette is LIGHT else "#3A2D18",
+            "Relation": "#FCE8F2" if palette is LIGHT else "#3A1D2C",
+        }
+        track_color = QColor(row.get("track_color") or "")
+        fill = track_color.lighter(178) if track_color.isValid() and palette is LIGHT else (
+            track_color.darker(225) if track_color.isValid() else QColor(category_colors.get(row["category"], palette.surface_raised))
+        )
+        self.setBrush(QBrush(fill))
+        self.setPen(QPen(QColor(palette.accent if selected else palette.border_strong), 2.4 if selected else 1.2))
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("Clique pour voir la fiche · double-clique pour modifier")
+
+    def paint(self, painter, option, widget=None) -> None:
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(self.pen())
+        painter.setBrush(self.brush())
+        painter.drawRoundedRect(self.rect(), 10, 10)
+        caption_font = QFont()
+        caption_font.setPointSize(8)
+        caption_font.setBold(True)
+        painter.setFont(caption_font)
+        painter.setPen(QColor(self.palette.accent))
+        painter.drawText(QRectF(10, 6, 190, 18), Qt.AlignmentFlag.AlignLeft, self.label)
+        title_font = QFont()
+        title_font.setPointSize(10)
+        title_font.setBold(True)
+        painter.setFont(title_font)
+        painter.setPen(QColor(self.palette.text))
+        painter.drawText(
+            QRectF(10, 27, 190, 38),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
+            self.row["title"] or "Événement sans titre",
+        )
+
+    def mousePressEvent(self, event) -> None:
+        self.on_select(self.event_id)
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        self.on_edit(self.event_id)
+        event.accept()
+
+
+class TimelineView(QGraphicsView):
+    def __init__(self, palette: Palette, on_select, on_edit, parent=None):
+        self.timeline_scene = QGraphicsScene(parent)
+        super().__init__(self.timeline_scene, parent)
+        self.setObjectName("TimelineCanvas")
+        self.palette = palette
+        self.on_select = on_select
+        self.on_edit = on_edit
+        self.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
+        self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.setBackgroundBrush(QBrush(QColor(palette.surface_raised)))
+        self.setMinimumHeight(365)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.setToolTip("Clique et glisse le fond dans toutes les directions pour parcourir les timelines.")
+        self._initial_center_done = False
+        self._content_center = QPointF(525, 165)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        # Keep the compound QGraphicsView (viewport + both scrollbars) inside
+        # the same rounded outline as the surrounding interface.
+        outline = QPainterPath()
+        outline.addRoundedRect(QRectF(self.rect()).adjusted(0.0, 0.0, -1.0, -1.0), 14.0, 14.0)
+        self.setMask(QRegion(outline.toFillPolygon().toPolygon()))
+
+    @staticmethod
+    def relative_label(value: float, unit_key: str, explicit: str = "") -> str:
+        if explicit.strip():
+            return explicit.strip()
+        singular = TIMELINE_UNITS[unit_key][2]
+        if abs(value) < 0.0001:
+            return "Point 0"
+        rounded = round(value, 2)
+        number = f"{rounded:g}"
+        plural = "" if abs(rounded) == 1 or singular == "mois" else "s"
+        prefix = "+" if rounded > 0 else ""
+        return f"{prefix}{number} {singular}{plural}"
+
+    def set_events(
+        self,
+        events: list[dict],
+        unit_key: str,
+        selected_event_id: int | None = None,
+        available_tracks: list[dict] | None = None,
+    ) -> None:
+        self.timeline_scene.clear()
+        factor = TIMELINE_UNITS[unit_key][1]
+        rows = sorted(
+            events,
+            key=lambda row: (
+                int(row.get("track_position") or 0),
+                float(row["time_hours"]),
+                int(row["id"]),
+            ),
+        )
+        tracks: list[tuple[int, str, str]] = [
+            (
+                int(track["id"]),
+                track.get("name") or "Timeline",
+                track.get("color") or self.palette.accent,
+            )
+            for track in (available_tracks or [])
+        ]
+        if not rows and not tracks:
+            empty = self.timeline_scene.addText("Ajoute un premier événement pour faire apparaître la chronologie.")
+            empty.setDefaultTextColor(QColor(self.palette.muted))
+            empty.setPos(36, 36)
+            self.timeline_scene.setSceneRect(-420, -300, 1900, 1000)
+            self._content_center = QPointF(525, 165)
+            return
+
+        for row in rows:
+            track = (
+                int(row.get("track_id") or 0),
+                row.get("track_name") or row["category"] or "Timeline",
+                row.get("track_color") or self.palette.accent,
+            )
+            if track not in tracks:
+                tracks.append(track)
+
+        values = [float(row["time_hours"]) / factor for row in rows]
+        minimum = min(values) if values else 0.0
+        maximum = max(values) if values else 1.0
+        value_range = max(maximum - minimum, 1.0)
+        scale = min(180.0, max(0.08, 980.0 / value_range))
+        first_x = 210.0
+        top_padding = 240.0
+        lane_height = 150.0
+        last_x_by_track: dict[int, float] = {}
+        placements: list[tuple[dict, float, float, float]] = []
+        for row, value in zip(rows, values, strict=False):
+            raw_x = first_x + (value - minimum) * scale
+            track_id = int(row.get("track_id") or 0)
+            x = max(raw_x, last_x_by_track.get(track_id, -1000.0) + 224.0)
+            last_x_by_track[track_id] = x
+            track_index = next(index for index, track in enumerate(tracks) if track[0] == track_id)
+            y = top_padding + track_index * lane_height + 34.0
+            placements.append((row, value, x, y))
+
+        minimum_content_x = min((x for _row, _value, x, _y in placements), default=first_x)
+        maximum_content_x = max((x + 210.0 for _row, _value, x, _y in placements), default=first_x + 850.0)
+        viewport_width = float(max(1, self.viewport().width()))
+        viewport_height = float(max(1, self.viewport().height()))
+        # Keep a predictable reserve around the real content. The previous
+        # width was padded once for the axis, then a second time for the scene
+        # rectangle, which made the right side appear to grow after a refresh.
+        scene_left = min(-320.0, minimum_content_x - 300.0)
+        scene_right = max(
+            first_x + max(1200.0, viewport_width * 1.25),
+            maximum_content_x + 300.0,
+        )
+        scene_top = -220.0
+        scene_bottom = max(
+            780.0,
+            viewport_height * 1.45,
+            top_padding + len(tracks) * lane_height + 260.0,
+        )
+        axis_right = min(
+            scene_right - 120.0,
+            max(first_x + 900.0, maximum_content_x + 120.0),
+        )
+        self._content_center = QPointF(
+            (minimum_content_x + maximum_content_x) / 2.0,
+            top_padding + max(0, len(tracks) - 1) * lane_height / 2.0 + 55.0,
+        )
+        for track_index, (_track_id, track_name, track_color) in enumerate(tracks):
+            axis_y = top_padding + track_index * lane_height
+            color = QColor(track_color)
+            if not color.isValid():
+                color = QColor(self.palette.accent)
+            track_text = self.timeline_scene.addText(track_name)
+            track_text.setDefaultTextColor(color)
+            track_font = QFont()
+            track_font.setPointSize(10)
+            track_font.setBold(True)
+            track_text.setFont(track_font)
+            track_text.setTextWidth(176)
+            track_text.setPos(12, axis_y - 14)
+            axis = self.timeline_scene.addLine(first_x, axis_y, axis_right, axis_y)
+            axis.setPen(QPen(color, 2.2))
+
+        for row, value, x, y in placements:
+            track_id = int(row.get("track_id") or 0)
+            track_index = next(index for index, track in enumerate(tracks) if track[0] == track_id)
+            axis_y = top_padding + track_index * lane_height
+            marker = self.timeline_scene.addLine(x + 105, axis_y, x + 105, y)
+            marker.setPen(QPen(QColor(self.palette.border_strong), 1.2))
+            dot = self.timeline_scene.addEllipse(x + 100, axis_y - 5, 10, 10)
+            dot.setPen(QPen(QColor(self.palette.accent), 1.0))
+            dot.setBrush(QBrush(QColor(self.palette.accent)))
+            item = TimelineEventItem(
+                row,
+                self.relative_label(value, unit_key, row["display_label"]),
+                self.palette,
+                self.on_select,
+                self.on_edit,
+                selected=int(row["id"]) == selected_event_id,
+            )
+            item.setPos(x, y)
+            self.timeline_scene.addItem(item)
+        self.timeline_scene.setSceneRect(
+            scene_left,
+            scene_top,
+            scene_right - scene_left,
+            scene_bottom - scene_top,
+        )
+
+    def center_content(self) -> None:
+        self.resetTransform()
+        self.centerOn(self._content_center)
+
+    def select_event(self, event_id: int | None) -> None:
+        """Update selection without rebuilding items, so double-click remains possible."""
+        for item in self.timeline_scene.items():
+            if not isinstance(item, TimelineEventItem):
+                continue
+            selected = item.event_id == event_id
+            item.setPen(
+                QPen(
+                    QColor(self.palette.accent if selected else self.palette.border_strong),
+                    2.4 if selected else 1.2,
+                )
+            )
+            item.setSelected(selected)
+            item.update()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if not self._initial_center_done:
+            self._initial_center_done = True
+            QTimer.singleShot(80, self.center_content)
+
+    def wheelEvent(self, event) -> None:
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            self.scale(1.12 if event.angleDelta().y() > 0 else 0.89, 1.12 if event.angleDelta().y() > 0 else 0.89)
+            event.accept()
+            return
+        if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            bar = self.horizontalScrollBar()
+            bar.setValue(bar.value() - event.angleDelta().y())
+            event.accept()
+            return
+        super().wheelEvent(event)
+
+
+class CheckableListWidget(QListWidget):
+    """A checklist whose whole row toggles the check state."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._pressed_check_state: Qt.CheckState | None = None
+        self.itemPressed.connect(self._remember_check_state)
+        self.itemClicked.connect(self._toggle_clicked_row)
+
+    def _remember_check_state(self, item: QListWidgetItem) -> None:
+        self._pressed_check_state = item.checkState()
+
+    def _toggle_clicked_row(self, item: QListWidgetItem) -> None:
+        if not item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+            return
+        previous = self._pressed_check_state
+        self._pressed_check_state = None
+        if previous is None:
+            previous = item.checkState()
+        item.setCheckState(
+            Qt.CheckState.Unchecked
+            if previous == Qt.CheckState.Checked
+            else Qt.CheckState.Checked
+        )
+
+
+class SequenceListWidget(QListWidget):
+    order_changed = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("SequenceList")
+        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setSpacing(8)
+
+    def dropEvent(self, event) -> None:
+        super().dropEvent(event)
+        self.order_changed.emit()
+
+
+class OutlineTreeWidget(QTreeWidget):
+    structure_changed = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("OutlineTree")
+        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.setAlternatingRowColors(True)
+        self.setAnimated(True)
+        self.setIndentation(24)
+
+    def dropEvent(self, event) -> None:
+        super().dropEvent(event)
+        self.structure_changed.emit()
+
+
+class SequenceDragHandle(QLabel):
+    def __init__(self, list_widget: SequenceListWidget, item: QListWidgetItem):
+        super().__init__("≡")
+        self.list_widget = list_widget
+        self.item = item
+        self.press_position = QPoint()
+        self.setObjectName("SequenceHandle")
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setFixedWidth(34)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.setToolTip("Glisser pour déplacer cette séquence")
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.press_position = event.position().toPoint()
+            self.list_widget.setCurrentItem(self.item)
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if not event.buttons() & Qt.MouseButton.LeftButton:
+            return
+        distance = (event.position().toPoint() - self.press_position).manhattanLength()
+        if distance >= QApplication.startDragDistance():
+            self.list_widget.setCurrentItem(self.item)
+            self.list_widget.startDrag(Qt.DropAction.MoveAction)
+
+    def mouseReleaseEvent(self, event) -> None:
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        super().mouseReleaseEvent(event)
+
+
+class SequenceBlockWidget(QFrame):
+    def __init__(
+        self,
+        row,
+        number: int,
+        list_widget: SequenceListWidget,
+        item: QListWidgetItem,
+        on_save,
+        on_duplicate,
+        on_delete,
+    ):
+        super().__init__()
+        self.setObjectName("SequenceBlock")
+        self.block_id = int(row["id"])
+        self.save_timer = QTimer(self)
+        self.save_timer.setSingleShot(True)
+        self.save_timer.setInterval(450)
+        self.save_timer.timeout.connect(lambda: on_save(self.block_id, self))
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(14, 13, 14, 14)
+        root.setSpacing(8)
+
+        header = QHBoxLayout()
+        header.setSpacing(8)
+        header.addWidget(SequenceDragHandle(list_widget, item))
+        number_label = make_label(f"SÉQUENCE {number:02d}", "Caption")
+        number_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        header.addWidget(number_label)
+        self.title = QLineEdit(row["title"] or "")
+        self.title.setPlaceholderText("Titre de la séquence")
+        header.addWidget(self.title, 1)
+        duplicate = make_button("⧉", "quiet", lambda: on_duplicate(self.block_id))
+        duplicate.setFixedWidth(36)
+        duplicate.setToolTip("Créer une copie juste après cette séquence")
+        header.addWidget(duplicate)
+        delete = make_button("×", "quiet", lambda: on_delete(self.block_id))
+        delete.setFixedWidth(36)
+        delete.setToolTip("Supprimer cette séquence")
+        header.addWidget(delete)
+        root.addLayout(header)
+
+        purpose_row = QHBoxLayout()
+        purpose_row.setSpacing(10)
+        purpose_label = make_label("FONCTION", "Caption")
+        purpose_label.setFixedWidth(78)
+        purpose_row.addWidget(purpose_label)
+        self.purpose = QLineEdit(row["purpose"] or "")
+        self.purpose.setPlaceholderText("À quoi sert cette séquence dans l’histoire ?")
+        purpose_row.addWidget(self.purpose, 1)
+        root.addLayout(purpose_row)
+
+        content = QHBoxLayout()
+        content.setSpacing(10)
+        events_box = QVBoxLayout()
+        events_box.setSpacing(4)
+        events_box.addWidget(make_label("ÉVÉNEMENTS", "Caption"))
+        self.events = make_editor(76, "Que se passe-t-il, dans quel ordre, et quelles décisions sont prises ?")
+        self.events.setMaximumHeight(100)
+        events_box.addWidget(self.events)
+        content.addLayout(events_box, 3)
+        consequence_box = QVBoxLayout()
+        consequence_box.setSpacing(4)
+        consequence_box.addWidget(make_label("CONSÉQUENCE", "Caption"))
+        self.consequence = make_editor(76, "Qu’est-ce que cette séquence change pour la suivante ?")
+        self.consequence.setMaximumHeight(100)
+        consequence_box.addWidget(self.consequence)
+        content.addLayout(consequence_box, 2)
+        root.addLayout(content)
+
+        self.title.setText(row["title"] or "")
+        self.purpose.setText(row["purpose"] or "")
+        self.events.setPlainText(row["events"] or "")
+        self.consequence.setPlainText(row["consequence"] or "")
+        self.title.textChanged.connect(self._queue_save)
+        self.purpose.textChanged.connect(self._queue_save)
+        self.events.textChanged.connect(self._queue_save)
+        self.consequence.textChanged.connect(self._queue_save)
+
+    def _queue_save(self) -> None:
+        self.save_timer.start()
+
+    def values(self) -> tuple[str, str, str, str]:
+        return (
+            self.title.text().strip(),
+            self.purpose.text().strip(),
+            self.events.toPlainText().strip(),
+            self.consequence.toPlainText().strip(),
+        )
+
+    def hideEvent(self, event) -> None:
+        # The surrounding page saves all fields before navigation. Cancel a
+        # delayed field save so it cannot outlive a closed window/database.
+        self.save_timer.stop()
+        super().hideEvent(event)
+
+
+class AIWorker(QThread):
+    succeeded = Signal(str, object)
+    failed = Signal(str)
+
+    def __init__(self, api_key: str, model: str, prompt: str, context: str, history: list[dict]):
+        super().__init__()
+        self.api_key = api_key
+        self.model = model
+        self.prompt = prompt
+        self.context = context
+        self.history = history
+
+    def run(self) -> None:
+        try:
+            reply = ProfessorAI(self.api_key, self.model).ask(self.prompt, self.context, self.history)
+            self.succeeded.emit(reply.text, reply.response_id)
+        except Exception as exc:  # noqa: BLE001  # SDK failures share no stable base beyond Exception.
+            self.failed.emit(str(exc))
+
+
+class StoryForgeWindow(QMainWindow):
+    def __init__(self, db_path: Path = DB_PATH):
+        super().__init__()
+        self.db = Database(Path(db_path))
+        self._migrate_question_learning_flow()
+        self._migrate_guided_runs()
+        self._migrate_studio_appearance()
+        self.mode = self.db.setting("theme", "dark")
+        self.palette: Palette = self._resolved_palette()
+        self.editor_font_size = int(self.db.setting("editor_font_size", "15") or 15)
+        self.autosave_seconds = int(self.db.setting("autosave_seconds", "60") or 60)
+        self.active_project = int(self.db.setting("active_project", "0") or 0)
+        self.current_view = "home"
+        self._story_map_drag_item: StoryMapCardItem | None = None
+        self._location_pixmap_cache: dict[int, QPixmap] = {}
+        self._location_thumbnail_cache: dict[int, QPixmap] = {}
+        self.story_map_pan_timer = QTimer(self)
+        self.story_map_pan_timer.setInterval(24)
+        self.story_map_pan_timer.timeout.connect(self._apply_story_map_auto_pan)
+        self.api_key = os.environ.get("OPENAI_API_KEY", "")
+        self.ai_model = self.db.setting("ai_model", "gpt-5.6-sol")
+        self.ai_mode = self.db.setting("ai_mode", "coach")
+        self._ai_worker: AIWorker | None = None
+        self.setWindowTitle(f"{APP_NAME}  ·  v{APP_VERSION}")
+        self.resize(1480, 940)
+        self.setMinimumSize(1120, 720)
+        self._build_shell()
+        self._apply_appearance()
+        app = QApplication.instance()
+        if app and hasattr(app.styleHints(), "colorSchemeChanged"):
+            app.styleHints().colorSchemeChanged.connect(self._system_color_changed)
+        self.autosave_timer = QTimer(self)
+        self.autosave_timer.timeout.connect(self._autosave_current_view)
+        self._configure_autosave()
+        start_view = "home"
+        if self.db.setting("startup_view", "home") == "last":
+            candidate = self.db.setting("last_view", "home")
+            if candidate in self.nav_buttons and (candidate not in {"questions", "workshop", "rewrite"} or self.active_project):
+                start_view = candidate
+        getattr(self, f"show_{start_view}", self.show_home)()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        state = (self.width() < 1250, self.height() < 800)
+        previous = getattr(self, "_responsive_state", None)
+        self._responsive_state = state
+        if (
+            previous is not None
+            and previous != state
+            and getattr(self, "current_view", "") == "learning"
+            and getattr(self, "_guide_editor_open", False)
+            and getattr(self, "_guide_run_id", 0)
+        ):
+            run_id = self._guide_run_id
+            QTimer.singleShot(0, lambda: self.show_learning(run_id=run_id))
+
+    def _migrate_question_learning_flow(self) -> None:
+        """Move the two former final steps before inserting the new questions."""
+
+        marker = "learning_flow_question_by_question_v1"
+        if self.db.setting(marker, "0") == "1":
+            return
+        with self.db.conn:
+            for table in ("learning_work", "learning_answers"):
+                self.db.conn.execute(
+                    f"UPDATE {table} SET step_index=104 WHERE session_key=? AND step_index=4",
+                    (LEARNING_SESSION.key,),
+                )
+                self.db.conn.execute(
+                    f"UPDATE {table} SET step_index=105 WHERE session_key=? AND step_index=5",
+                    (LEARNING_SESSION.key,),
+                )
+                self.db.conn.execute(
+                    f"UPDATE {table} SET step_index=5 WHERE session_key=? AND step_index=104",
+                    (LEARNING_SESSION.key,),
+                )
+                self.db.conn.execute(
+                    f"UPDATE {table} SET step_index=13 WHERE session_key=? AND step_index=105",
+                    (LEARNING_SESSION.key,),
+                )
+            self.db.conn.execute(
+                "UPDATE progress SET step_index=CASE WHEN step_index>=5 THEN 6 WHEN step_index=4 THEN 5 ELSE step_index END, "
+                "status=CASE WHEN step_index>=5 THEN 'en cours' ELSE status END WHERE session_key=?",
+                (LEARNING_SESSION.key,),
+            )
+            self.db.conn.execute(
+                "INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (marker, "1"),
+            )
+
+    def _migrate_guided_runs(self) -> None:
+        """Preserve the original global seed session as the first independent guide run."""
+
+        marker = "guided_runs_v1"
+        if self.db.setting(marker, "0") == "1":
+            return
+        legacy_count = self.db.one(
+            "SELECT COUNT(*) FROM learning_work WHERE session_key=?",
+            (LEARNING_SESSION.key,),
+        )[0]
+        progress = self.db.one(
+            "SELECT * FROM progress WHERE session_key=?",
+            (LEARNING_SESSION.key,),
+        )
+        if legacy_count or progress:
+            pending_title = ""
+            pending_raw = self.db.setting("pending_guided_project", "")
+            if pending_raw:
+                try:
+                    pending_title = json.loads(pending_raw).get("title", "")
+                except (json.JSONDecodeError, AttributeError):
+                    pending_title = ""
+            run_id = self.db.create_guided_run(
+                "seed",
+                pending_title or "Ma première graine",
+                assistance_level="discovery",
+                legacy_session_key=LEARNING_SESSION.key,
+            )
+            for index, step in enumerate(LEARNING_SESSION.steps):
+                work = self.db.one(
+                    "SELECT draft,status FROM learning_work WHERE session_key=? AND step_index=?",
+                    (LEARNING_SESSION.key, index),
+                )
+                if work:
+                    self.db.save_guided_answer(
+                        run_id,
+                        step.key,
+                        index,
+                        work["draft"],
+                        "complete" if work["status"] == "terminé" else "draft",
+                    )
+            current_step = min(
+                progress["step_index"] if progress else 0,
+                len(LEARNING_SESSION.steps) - 1,
+            )
+            run_status = "completed" if progress and progress["status"] == "terminée" else "ongoing"
+            self.db.update_guided_run(run_id, current_step=current_step, status=run_status)
+            self.db.set_setting("current_guide_run", str(run_id))
+            if pending_raw:
+                self.db.set_setting("pending_guided_project_run", str(run_id))
+        self.db.set_setting(marker, "1")
+
+    def _migrate_studio_appearance(self) -> None:
+        """Activate the new compact studio appearance once for existing installs."""
+
+        marker = "studio_appearance_v1"
+        if self.db.setting(marker, "0") == "1":
+            return
+        self.db.set_setting("theme", "dark")
+        self.db.set_setting(marker, "1")
+
+    # ---------- Shell and reusable UI ----------
+
+    def _build_shell(self) -> None:
+        root = QWidget()
+        root.setObjectName("AppRoot")
+        self.setCentralWidget(root)
+        shell = QVBoxLayout(root)
+        shell.setContentsMargins(0, 0, 0, 0)
+        shell.setSpacing(0)
+
+        top_bar = QFrame()
+        top_bar.setObjectName("TopBar")
+        self.top_bar = top_bar
+        top_bar.setFixedHeight(58)
+        top = QHBoxLayout(top_bar)
+        top.setContentsMargins(16, 0, 14, 0)
+        top.setSpacing(10)
+        self.sidebar_toggle_button = make_button("◀", "quiet", self.toggle_sidebar)
+        self.sidebar_toggle_button.setObjectName("SidebarToggle")
+        self.sidebar_toggle_button.setFixedSize(32, 32)
+        self.sidebar_toggle_button.setAccessibleName("Afficher ou masquer la navigation")
+        top.addWidget(self.sidebar_toggle_button)
+        mark = make_label("⌘", "BrandMark")
+        mark.setFixedSize(18, 24)
+        mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        top.addWidget(mark)
+        top.addWidget(make_label("StoryForge", "Brand"))
+        top.addSpacing(8)
+        self.project_chip = QComboBox()
+        self.project_chip.setObjectName("ProjectChip")
+        self.project_chip.setMinimumHeight(34)
+        self.project_chip.setMinimumWidth(160)
+        self.project_chip.setMaximumWidth(260)
+        self.project_chip.setToolTip("Changer de projet actif")
+        self._refresh_sidebar_project_selector()
+        self.project_chip.currentIndexChanged.connect(self._sidebar_project_changed)
+        top.addWidget(self.project_chip)
+        self.guide_return_button = make_button(
+            "← Reprendre le guide", "secondary", self._return_to_learning
+        )
+        self.guide_return_button.setObjectName("GuideReturnButton")
+        self.guide_return_button.hide()
+        top.addWidget(self.guide_return_button)
+        top.addStretch()
+        self.save_state = make_label("", "Muted")
+        top.addWidget(self.save_state)
+        top.addWidget(make_button("Gérer les projets", "quiet", self.show_projects))
+        self.theme_button = make_button("", "quiet", self.toggle_theme)
+        self.theme_button.setFixedWidth(36)
+        self.theme_button.setToolTip("Changer l’apparence")
+        top.addWidget(self.theme_button)
+        self.top_title = make_label("", "TopTitle")
+        self.top_title.hide()
+        self.top_project = make_label(self._active_project_label(), "Muted")
+        self.top_project.hide()
+        shell.addWidget(top_bar)
+
+        workspace = QHBoxLayout()
+        workspace.setContentsMargins(0, 0, 0, 0)
+        workspace.setSpacing(0)
+
+        sidebar = QFrame()
+        sidebar.setObjectName("Sidebar")
+        sidebar.setFixedWidth(54)
+        side = QVBoxLayout(sidebar)
+        side.setContentsMargins(5, 7, 5, 7)
+        side.setSpacing(0)
+
+        nav_scroll = QScrollArea()
+        nav_scroll.setObjectName("NavScroll")
+        nav_scroll.setWidgetResizable(True)
+        nav_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        nav_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        nav_canvas = QWidget()
+        nav_canvas.setObjectName("SidebarNav")
+        nav = QVBoxLayout(nav_canvas)
+        nav.setContentsMargins(0, 0, 0, 0)
+        nav.setSpacing(7)
+        self.nav_canvas = nav_canvas
+
+        self.nav_group = QButtonGroup(self)
+        self.nav_group.setExclusive(True)
+        self.nav_buttons: dict[str, QPushButton] = {}
+        self.nav_metadata: dict[str, tuple[str, str]] = {}
+
+        def add_nav(key: str, icon: str, title: str, callback, child: bool = False) -> None:
+            button = NavigationButton(icon, title, child)
+            button.clicked.connect(callback)
+            self.nav_group.addButton(button)
+            self.nav_buttons[key] = button
+            self.nav_metadata[key] = (icon, title)
+            nav.addWidget(button, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        def add_nav_separator() -> None:
+            separator = make_separator()
+            separator.setObjectName("NavSeparator")
+            nav.addWidget(separator)
+
+        add_nav("home", "⌂", "Aujourd’hui", self.show_home)
+        add_nav("search", "⌕", "Rechercher", self.show_search)
+        add_nav_separator()
+        add_nav("ideas", "◇", "Idées", self.show_ideas)
+        add_nav("learning", "◉", "Guides d’écriture", self.show_guides)
+        add_nav("guide_runs", "◌", "Guides en cours", self.show_guide_runs, child=True)
+        add_nav_separator()
+        add_nav("projects", "▣", "Projets", self.show_projects)
+        add_nav("overview", "▦", "Vue d’ensemble", self.show_story_overview, child=True)
+        add_nav("development", "≡", "Construction", self.show_development, child=True)
+        add_nav("timeline", "↔", "Chronologie", self.show_timeline, child=True)
+        add_nav("universe", "◈", "Univers", self.show_universe, child=True)
+        add_nav("locations", "●", "Lieux", self.show_locations, child=True)
+        add_nav("characters", "♙", "Personnages", self.show_characters, child=True)
+        add_nav("arcs", "↗", "Arcs", self.show_arcs, child=True)
+        add_nav("promises", "✦", "Accroche et promesses", self.show_promises, child=True)
+        add_nav("theme", "T", "Thème", self.show_theme, child=True)
+        add_nav("conflicts", "×", "Conflits", self.show_conflicts, child=True)
+        add_nav("images", "▧", "Images", self.show_images)
+        add_nav_separator()
+        add_nav("script_editor", "▤", "Éditeur de scripts", self.show_script_editor)
+        add_nav("rewrite", "↺", "Réécriture", self.show_rewrite)
+        add_nav_separator()
+        add_nav("path", "◎", "Parcours", self.show_path)
+        add_nav("form_templates", "▥", "Modèles de fiches", self.show_form_templates)
+        add_nav("templates", "▦", "Templates", self.show_templates)
+        add_nav("glossary", "≡", "Glossaire", self.show_glossary)
+        add_nav_separator()
+        add_nav("settings", "⚙", "Paramètres", self.show_settings)
+        nav.addStretch()
+        # One row grows when active. Reserve that extra height so the final
+        # entries never overlap or disappear behind the project area.
+        nav_canvas.setMinimumHeight(nav.sizeHint().height() + 28)
+        nav_scroll.setWidget(nav_canvas)
+        side.addWidget(nav_scroll, 1)
+
+        self.sidebar = sidebar
+        self.sidebar_expanded = self.db.setting(
+            "sidebar_expanded",
+            self.db.setting("sidebar_open", "1"),
+        ) != "0"
+        self._sync_sidebar_toggle()
+        workspace.addWidget(sidebar)
+
+        main = QWidget()
+        main.setObjectName("PageHost")
+        main_layout = QVBoxLayout(main)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        self.page_host = QWidget()
+        self.page_host.setObjectName("PageHost")
+        self.page_host_layout = QVBoxLayout(self.page_host)
+        self.page_host_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(self.page_host, 1)
+        workspace.addWidget(main, 1)
+        shell.addLayout(workspace, 1)
+        sidebar_shortcut = QShortcut(QKeySequence("Ctrl+B"), self)
+        sidebar_shortcut.activated.connect(self.toggle_sidebar)
+        self.sidebar_shortcut = sidebar_shortcut
+        search_shortcut = QShortcut(QKeySequence("Ctrl+K"), self)
+        search_shortcut.activated.connect(self._focus_global_search)
+        self.search_shortcut = search_shortcut
+
+    def _sync_sidebar_toggle(self) -> None:
+        if not hasattr(self, "sidebar_toggle_button") or not hasattr(self, "sidebar"):
+            return
+        expanded = bool(getattr(self, "sidebar_expanded", True))
+        self.sidebar.setFixedWidth(236 if expanded else 54)
+        for button in getattr(self, "nav_buttons", {}).values():
+            if isinstance(button, NavigationButton):
+                button.set_expanded(expanded)
+        self.sidebar_toggle_button.setText("◀" if expanded else "☰")
+        self.sidebar_toggle_button.setToolTip(
+            "Replier le panneau latéral · Ctrl+B"
+            if expanded
+            else "Déplier le panneau latéral · Ctrl+B"
+        )
+
+    def toggle_sidebar(self) -> None:
+        if not hasattr(self, "sidebar"):
+            return
+        self.sidebar_expanded = not bool(getattr(self, "sidebar_expanded", True))
+        self.db.set_setting("sidebar_expanded", "1" if self.sidebar_expanded else "0")
+        self._sync_sidebar_toggle()
+
+    def _sync_guide_return_button(self) -> None:
+        button = getattr(self, "guide_return_button", None)
+        if not isinstance(button, QPushButton):
+            return
+        run_id = int(self.db.setting("learning_return_run", "0") or 0)
+        run = self.db.guided_run(run_id) if run_id else None
+        visible = bool(run and self.current_view not in {"learning", "guide_runs"})
+        button.setVisible(visible)
+        if visible:
+            session = GUIDE_SESSIONS.get(run["guide_key"], LEARNING_SESSION)
+            button.setText(f"← {session.title}")
+
+    def _return_to_learning(self, _checked: bool = False) -> None:
+        run_id = int(self.db.setting("learning_return_run", "0") or 0)
+        run = self.db.guided_run(run_id) if run_id else None
+        if not run:
+            self.db.set_setting("learning_return_run", "")
+            self.db.set_setting("learning_return_step", "")
+            self._sync_guide_return_button()
+            self.show_guides()
+            return
+        step_index = int(self.db.setting("learning_return_step", run["current_step"]) or 0)
+        self.db.update_guided_run(run_id, current_step=step_index)
+        self.db.set_setting("learning_return_run", "")
+        self.db.set_setting("learning_return_step", "")
+        self.show_learning(run_id=run_id)
+
+    def _resolved_palette(self) -> Palette:
+        if self.mode == "dark":
+            return DARK
+        if self.mode == "system":
+            app = QApplication.instance()
+            if app and app.styleHints().colorScheme() == Qt.ColorScheme.Dark:
+                return DARK
+        return LIGHT
+
+    def _apply_appearance(self) -> None:
+        app = QApplication.instance()
+        if app:
+            app.setStyleSheet(stylesheet(self.palette, self.editor_font_size))
+        if hasattr(self, "sidebar"):
+            self._sync_sidebar_toggle()
+        self.theme_button.setText("☀" if self.palette is DARK else "☾")
+
+    def toggle_theme(self) -> None:
+        self.mode = "light" if self.mode == "dark" else "dark"
+        self.db.set_setting("theme", self.mode)
+        self.palette = self._resolved_palette()
+        self._apply_appearance()
+
+    def _system_color_changed(self, _scheme) -> None:
+        if self.mode == "system":
+            self.palette = self._resolved_palette()
+            self._apply_appearance()
+
+    def _configure_autosave(self) -> None:
+        self.autosave_timer.stop()
+        if self.autosave_seconds > 0:
+            self.autosave_timer.start(self.autosave_seconds * 1000)
+
+    def _autosave_current_view(self) -> None:
+        try:
+            if self.current_view == "workshop" and hasattr(self, "doc_text"):
+                self._save_doc(silent=True)
+            elif (
+                self.current_view == "learning"
+                and getattr(self, "_guide_editor_open", False)
+                and hasattr(self, "learning_draft")
+            ):
+                self._save_learning_work(silent=True)
+            elif (
+                self.current_view == "development"
+                and getattr(self, "development_doc_type", "") == "story_map"
+                and getattr(self, "story_map_mode", "board") == "guide"
+            ):
+                self._save_story_map_step(silent=True)
+            elif self.current_view == "development" and getattr(self, "development_doc_type", "") == "synopsis":
+                if getattr(self, "synopsis_mode", "guide") == "final":
+                    self._save_synopsis_final(silent=True)
+                else:
+                    self._save_synopsis_step(silent=True)
+            elif self.current_view == "development" and getattr(self, "development_doc_type", "") == "outline":
+                self._save_sequence_board(silent=True)
+            elif self.current_view == "development" and getattr(self, "development_doc_type", "") == "scenes":
+                self._save_scene_list(silent=True)
+            elif self.current_view == "script_editor" and isinstance(
+                getattr(self, "script_text", None), QTextEdit
+            ):
+                self._save_script(silent=True)
+            elif self.current_view == "arcs" and getattr(self, "arc_character_id", 0):
+                self._save_character_arc(silent=True)
+            elif self.current_view == "promises":
+                self._save_promise_workspace(silent=True)
+            elif (
+                self.current_view == "development"
+                and getattr(self, "development_doc_type", "") not in {"story_map", "synopsis", "outline", "scenes", "script"}
+                and isinstance(getattr(self, "development_text", None), QTextEdit)
+            ):
+                self._save_development_document(silent=True)
+            else:
+                return
+            self.save_state.setText("Enregistré automatiquement")
+            QTimer.singleShot(2400, lambda: self.save_state.setText(""))
+        except RuntimeError:
+            return
+
+    def _active_project_label(self) -> str:
+        if not self.active_project:
+            return "Aucun projet"
+        row = self.db.one("SELECT title FROM projects WHERE id=? AND archived=0", (self.active_project,))
+        return row["title"] if row else "Aucun projet"
+
+    def _update_project_chips(self) -> None:
+        value = self._active_project_label()
+        self._refresh_sidebar_project_selector()
+        self.top_project.setText(value)
+
+    def _refresh_sidebar_project_selector(self) -> None:
+        combo = getattr(self, "project_chip", None)
+        if not isinstance(combo, QComboBox):
+            return
+        combo.blockSignals(True)
+        combo.clear()
+        rows = self.db.q(
+            "SELECT id,title FROM projects WHERE archived=0 ORDER BY title COLLATE NOCASE,id"
+        )
+        if not rows:
+            combo.addItem("Aucun projet", 0)
+            combo.setEnabled(False)
+        else:
+            for row in rows:
+                combo.addItem(row["title"], int(row["id"]))
+            index = combo.findData(self.active_project)
+            if index < 0:
+                self.active_project = int(rows[0]["id"])
+                self.db.set_setting("active_project", self.active_project)
+                index = 0
+            combo.setCurrentIndex(index)
+            combo.setEnabled(True)
+        combo.blockSignals(False)
+
+    def _sidebar_project_changed(self, _index: int) -> None:
+        project_id = self.project_chip.currentData()
+        if not project_id or int(project_id) == self.active_project:
+            return
+        self._autosave_current_view()
+        self._skip_page_leave_save = True
+        self.active_project = int(project_id)
+        self._location_pixmap_cache.clear()
+        self._location_thumbnail_cache.clear()
+        self.db.set_setting("active_project", self.active_project)
+        self._update_project_chips()
+        self._refresh_after_project_change()
+        self.save_state.setText(f"Projet actif · {self._active_project_label()}")
+        QTimer.singleShot(2200, lambda: self.save_state.setText(""))
+
+    def _refresh_after_project_change(self) -> None:
+        if self.current_view == "projects":
+            self.project_id = self.active_project
+            self.show_projects()
+            return
+        destinations = {
+            "home": self.show_home,
+            "search": self.show_search,
+            "learning": self.show_guides,
+            "guide_runs": self.show_guide_runs,
+            "overview": self.show_story_overview,
+            "development": self.show_development,
+            "timeline": self.show_timeline,
+            "universe": self.show_universe,
+            "locations": self.show_locations,
+            "arcs": self.show_arcs,
+            "promises": self.show_promises,
+            "theme": self.show_theme,
+            "conflicts": self.show_conflicts,
+            "questions": self.show_questions,
+            "characters": self.show_characters,
+            "images": self.show_images,
+            "script_editor": self.show_script_editor,
+            "workshop": self.show_workshop,
+            "rewrite": self.show_rewrite,
+            "form_templates": self.show_form_templates,
+            "templates": self.show_templates,
+            "glossary": self.show_glossary,
+        }
+        callback = destinations.get(self.current_view)
+        if callback:
+            callback()
+        else:
+            self._skip_page_leave_save = False
+
+    def _begin_page(
+        self,
+        top_title: str,
+        view: str,
+        scroll: bool = False,
+        compact: bool = False,
+    ) -> QVBoxLayout:
+        skip_leave_save = bool(getattr(self, "_skip_page_leave_save", False))
+        self._skip_page_leave_save = False
+        if (
+            self.current_view == "script_editor"
+            and view != "script_editor"
+            and bool(getattr(self, "script_focus_mode", False))
+        ):
+            self._set_script_focus_mode(False)
+        if (
+            not skip_leave_save
+            and
+            self.current_view == "learning"
+            and getattr(self, "_guide_editor_open", False)
+            and hasattr(self, "learning_draft")
+        ):
+            try:
+                self._save_learning_work(silent=True)
+            except RuntimeError:
+                pass
+        if self.current_view == "script_editor" and not skip_leave_save:
+            timer = getattr(self, "script_save_timer", None)
+            if isinstance(timer, QTimer):
+                timer.stop()
+            try:
+                self._save_script(silent=True)
+            except RuntimeError:
+                pass
+        if self.current_view == "arcs" and not skip_leave_save and getattr(self, "arc_character_id", 0):
+            try:
+                self._save_character_arc(silent=True, refresh=False)
+            except RuntimeError:
+                pass
+        if self.current_view == "promises" and not skip_leave_save:
+            try:
+                self._save_promise_workspace(silent=True)
+            except RuntimeError:
+                pass
+        self.current_view = view
+        self.db.set_setting("last_view", view)
+        self.top_title.setText(top_title)
+        self._sync_guide_return_button()
+        if view in self.nav_buttons:
+            self.nav_buttons[view].setChecked(True)
+        clear_layout(self.page_host_layout)
+
+        page = QWidget()
+        page.setObjectName("PageHost")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(6, 6, 6, 6) if compact else layout.setContentsMargins(22, 18, 22, 22)
+        layout.setSpacing(0)
+        if scroll:
+            area = QScrollArea()
+            area.setWidgetResizable(True)
+            area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            area.setWidget(page)
+            self.page_host_layout.addWidget(area)
+            QTimer.singleShot(0, lambda target=area: target.horizontalScrollBar().setValue(0))
+        else:
+            self.page_host_layout.addWidget(page)
+        return layout
+
+    def _page_header(self, layout: QVBoxLayout, kicker: str, title: str, subtitle: str) -> None:
+        layout.addWidget(make_label(kicker.upper(), "Kicker"))
+        layout.addSpacing(5)
+        layout.addWidget(make_label(title, "PageTitle"))
+        layout.addSpacing(5)
+        copy = make_label(subtitle, "Muted", True)
+        copy.setMaximumWidth(920)
+        layout.addWidget(copy)
+        layout.addSpacing(18)
+
+    def _need_project(self) -> bool:
+        if self.active_project and self.db.one(
+            "SELECT id FROM projects WHERE id=? AND archived=0", (self.active_project,)
+        ):
+            return True
+        QMessageBox.information(self, "Projet nécessaire", "Crée ou active d’abord un projet dans l’espace Projets.")
+        self.show_projects()
+        return False
+
+    # ---------- Today ----------
+
+    def show_home(self) -> None:
+        page = self._begin_page("Aujourd’hui", "home", scroll=True)
+        self._page_header(page, "StoryForge", "Une chose utile, maintenant.", "L’application rassemble le reste. Toi, tu avances par une décision et une réécriture à la fois.")
+
+        metrics = QHBoxLayout()
+        metrics.setSpacing(12)
+        data = [
+            ("Idées", self.db.one("SELECT COUNT(*) c FROM ideas")[0]),
+            ("Projets", self.db.one("SELECT COUNT(*) c FROM projects WHERE archived=0")[0]),
+            ("Versions", self.db.one("SELECT COUNT(*) c FROM doc_versions")[0]),
+            ("Notions acquises", self.db.one("SELECT COUNT(*) c FROM concept_mastery WHERE status='acquis'")[0]),
+        ]
+        for name, value in data:
+            card = make_card()
+            card.setMinimumHeight(106)
+            box = QVBoxLayout(card)
+            box.setContentsMargins(20, 16, 20, 16)
+            box.addWidget(make_label(str(value), "Metric"))
+            box.addWidget(make_label(name, "Muted"))
+            metrics.addWidget(card, 1)
+        page.addLayout(metrics)
+        page.addSpacing(16)
+
+        current_run_id = int(self.db.setting("current_guide_run", "0") or 0)
+        current_run = self.db.guided_run(current_run_id) if current_run_id else None
+        current_session = GUIDE_SESSIONS.get(current_run["guide_key"], LEARNING_SESSION) if current_run else LEARNING_SESSION
+        step = min(int(current_run["current_step"] or 0), len(current_session.steps) - 1) if current_run else 0
+        completed = bool(current_run and current_run["status"] == "completed")
+        focus = make_card()
+        focus_layout = QVBoxLayout(focus)
+        focus_layout.setContentsMargins(24, 21, 24, 22)
+        focus_layout.setSpacing(8)
+        focus_head = QHBoxLayout()
+        copy = QVBoxLayout()
+        copy.setSpacing(6)
+        pill = make_label("GUIDE TERMINÉ" if completed else f"PROCHAINE ÉTAPE · {step + 1} SUR {len(current_session.steps)}", "AccentPill")
+        pill.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        copy.addWidget(pill)
+        copy.addWidget(make_label(f"{current_session.title} · {current_session.steps[step].title}", "SectionTitle"))
+        copy.addWidget(make_label(current_session.steps[step].question, "Muted", True))
+        focus_head.addLayout(copy, 1)
+        focus_head.addWidget(make_button("Revoir" if completed else "Continuer", "primary", self.show_learning), 0, Qt.AlignmentFlag.AlignVCenter)
+        focus_layout.addLayout(focus_head)
+        completed_steps = self.db.one(
+            "SELECT COUNT(*) FROM guided_answers WHERE run_id=? AND status='complete'",
+            (current_run_id,),
+        )[0] if current_run else 0
+        progress_bar = QProgressBar()
+        progress_bar.setRange(0, len(current_session.steps))
+        progress_bar.setValue(completed_steps)
+        progress_bar.setTextVisible(False)
+        progress_bar.setFixedHeight(7)
+        focus_layout.addWidget(progress_bar)
+        page.addWidget(focus)
+        page.addSpacing(16)
+
+        project = self.db.one(
+            "SELECT * FROM projects WHERE id=? AND archived=0", (self.active_project,)
+        ) if self.active_project else None
+        decision = make_card()
+        decision_box = QHBoxLayout(decision)
+        decision_box.setContentsMargins(22, 18, 22, 18)
+        decision_copy = QVBoxLayout()
+        decision_copy.setSpacing(5)
+        decision_copy.addWidget(make_label("PROJET", "Caption"))
+        if project:
+            next_text = project["next_decision"].strip() or project["main_problem"].strip() or "Clarifie la prochaine décision de travail dans l’espace Projets."
+            decision_copy.addWidget(make_label(project["title"], "CardTitle"))
+            decision_copy.addWidget(make_label(next_text, "Muted", True))
+            decision_button = make_button("Ouvrir le projet", "secondary", self.show_projects)
+        else:
+            decision_copy.addWidget(make_label("Aucun projet actif", "CardTitle"))
+            decision_copy.addWidget(make_label("Quand une graine mérite d’être développée, transforme-la en projet sans chercher à tout remplir.", "Muted", True))
+            decision_button = make_button("Créer un projet", "secondary", self.show_projects)
+        decision_box.addLayout(decision_copy, 1)
+        decision_box.addWidget(decision_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        page.addWidget(decision)
+        page.addStretch()
+
+    # ---------- Learning ----------
+
+    def show_guides(self) -> None:
+        self._show_guides_page(runs_only=False)
+
+    def _show_guides_page(self, runs_only: bool) -> None:
+        page = self._begin_page(
+            "Guides en cours" if runs_only else "Guides d’écriture",
+            "guide_runs" if runs_only else "learning",
+            scroll=True,
+        )
+        self._guide_editor_open = False
+        self._page_header(
+            page,
+            "Travaux guidés" if runs_only else "Écrire en avançant",
+            "Reprendre un guide commencé" if runs_only else "Un guide pour le problème du moment",
+            (
+                "Chaque travail conserve ses propres réponses et son niveau d’assistance."
+                if runs_only
+                else "Choisis un besoin concret. Chaque guide fonctionne localement, sans IA ni abonnement."
+            ),
+        )
+
+        runs = self.db.q(
+            """SELECT run.*, project.title project_title
+            FROM guided_runs run LEFT JOIN projects project ON project.id=run.project_id
+            WHERE run.status<>'archived' ORDER BY run.updated_at DESC,run.id DESC"""
+        )
+        active_card = make_card()
+        active_box = QVBoxLayout(active_card)
+        active_box.setContentsMargins(20, 18, 20, 18)
+        active_box.setSpacing(10)
+        active_head = QHBoxLayout()
+        active_copy = QVBoxLayout()
+        active_copy.setSpacing(3)
+        active_copy.addWidget(make_label("GUIDES EN COURS", "Caption"))
+        active_copy.addWidget(make_label("Reprendre un travail commencé", "CardTitle"))
+        active_head.addLayout(active_copy, 1)
+        self.guide_run_count_badge = make_label(str(len(runs)), "AccentPill")
+        self.guide_run_count_badge.setSizePolicy(
+            QSizePolicy.Policy.Maximum,
+            QSizePolicy.Policy.Fixed,
+        )
+        self.guide_run_count_badge.setFixedHeight(
+            self.guide_run_count_badge.sizeHint().height()
+        )
+        active_head.addWidget(
+            self.guide_run_count_badge,
+            0,
+            Qt.AlignmentFlag.AlignVCenter,
+        )
+        active_box.addLayout(active_head)
+
+        self.guide_run_tree = QTreeWidget()
+        self.guide_run_tree.setObjectName("ProjectTree")
+        self.guide_run_tree.setHeaderLabels(["Guide", "Projet", "Progression", "Aide", "État"])
+        self.guide_run_tree.setRootIsDecorated(False)
+        self.guide_run_tree.setAlternatingRowColors(False)
+        self.guide_run_tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.guide_run_tree.setMinimumHeight(150)
+        self.guide_run_tree.setMaximumHeight(230)
+        run_header = self.guide_run_tree.header()
+        run_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        run_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        run_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        run_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        run_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        for run in runs:
+            session = GUIDE_SESSIONS.get(run["guide_key"], LEARNING_SESSION)
+            completed_steps = self.db.one(
+                "SELECT COUNT(*) FROM guided_answers WHERE run_id=? AND status='complete'",
+                (run["id"],),
+            )[0]
+            state = "Appliqué" if run["applied_at"] else (
+                "Terminé" if run["status"] == "completed" else "En cours"
+            )
+            item = QTreeWidgetItem(
+                [
+                    f"{session.title}\n{run['title']}",
+                    run["project_title"] or "Sans projet",
+                    f"{completed_steps}/{len(session.steps)}",
+                    GUIDE_LEVELS.get(run["assistance_level"], "Découverte"),
+                    state,
+                ]
+            )
+            item.setData(0, Qt.ItemDataRole.UserRole, run["id"])
+            self.guide_run_tree.addTopLevelItem(item)
+        if self.guide_run_tree.topLevelItemCount():
+            self.guide_run_tree.setCurrentItem(self.guide_run_tree.topLevelItem(0))
+        self.guide_run_tree.itemDoubleClicked.connect(lambda *_args: self._resume_selected_guide())
+        active_box.addWidget(self.guide_run_tree)
+        active_actions = QHBoxLayout()
+        active_actions.addStretch()
+        archive_button = make_button("Archiver", "secondary", self._archive_selected_guide)
+        archive_button.setEnabled(bool(runs))
+        active_actions.addWidget(archive_button)
+        resume_button = make_button("Reprendre →", "primary", self._resume_selected_guide)
+        resume_button.setEnabled(bool(runs))
+        active_actions.addWidget(resume_button)
+        active_box.addLayout(active_actions)
+        catalog_card = make_card()
+        catalog_box = QVBoxLayout(catalog_card)
+        catalog_box.setContentsMargins(20, 18, 20, 18)
+        catalog_box.setSpacing(10)
+        catalog_box.addWidget(make_label("COMMENCER UN GUIDE", "Caption"))
+        catalog_box.addWidget(make_label("Choisis un seul besoin concret", "CardTitle"))
+        self.guide_catalog_tree = QTreeWidget()
+        self.guide_catalog_tree.setObjectName("ProjectTree")
+        self.guide_catalog_tree.setHeaderLabels(["Guide", "À utiliser quand…", "Livrable"])
+        self.guide_catalog_tree.setRootIsDecorated(False)
+        self.guide_catalog_tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.guide_catalog_tree.setMinimumHeight(220)
+        catalog_header = self.guide_catalog_tree.header()
+        catalog_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        catalog_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        catalog_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        for guide_key in GUIDE_ORDER:
+            session = GUIDE_SESSIONS[guide_key]
+            item = QTreeWidgetItem([session.title, session.description, session.deliverable])
+            item.setData(0, Qt.ItemDataRole.UserRole, guide_key)
+            self.guide_catalog_tree.addTopLevelItem(item)
+        self.guide_catalog_tree.setCurrentItem(self.guide_catalog_tree.topLevelItem(0))
+        self.guide_catalog_tree.itemDoubleClicked.connect(lambda *_args: self._start_selected_guide())
+        catalog_box.addWidget(self.guide_catalog_tree)
+        catalog_actions = QHBoxLayout()
+        local_note = make_label(
+            "Les guides sont locaux et fonctionnent sans IA ni abonnement.", "Muted"
+        )
+        local_note.setWordWrap(False)
+        local_note.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        catalog_actions.addWidget(local_note, 1)
+        catalog_actions.addWidget(make_button("Commencer →", "primary", self._start_selected_guide))
+        catalog_box.addLayout(catalog_actions)
+        if not runs_only:
+            page.addWidget(catalog_card)
+            page.addSpacing(12)
+            mastery_card = make_card()
+            mastery_box = QHBoxLayout(mastery_card)
+            mastery_box.setContentsMargins(20, 16, 20, 16)
+            mastery_box.setSpacing(18)
+            mastery_copy = QVBoxLayout()
+            mastery_copy.setSpacing(4)
+            mastery_copy.addWidget(make_label("PROGRESSION DES NOTIONS", "Caption"))
+            mastery_copy.addWidget(
+                make_label(
+                    "Comprendre ne suffit pas : une notion devient acquise après son application dans un vrai projet.",
+                    "CardTitle",
+                    True,
+                )
+            )
+            mastery_box.addLayout(mastery_copy, 2)
+            mastery_counts = {
+                row["status"]: int(row["total"])
+                for row in self.db.q(
+                    "SELECT status,COUNT(*) total FROM concept_mastery GROUP BY status"
+                )
+            }
+            for key, label in (
+                ("découverte", "Découvertes"),
+                ("en pratique", "En pratique"),
+                ("acquis", "Acquises"),
+                ("à revoir", "À revoir"),
+            ):
+                metric = QVBoxLayout()
+                metric.setSpacing(1)
+                value = make_label(str(mastery_counts.get(key, 0)), "Metric")
+                value.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                metric.addWidget(value)
+                caption = make_label(label, "Muted")
+                caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                metric.addWidget(caption)
+                mastery_box.addLayout(metric, 1)
+            page.addWidget(mastery_card)
+        elif runs:
+            page.addWidget(active_card)
+        else:
+            empty = make_card()
+            empty_box = QHBoxLayout(empty)
+            empty_box.setContentsMargins(20, 18, 20, 18)
+            empty_copy = QVBoxLayout()
+            empty_copy.addWidget(make_label("AUCUN GUIDE EN COURS", "Caption"))
+            empty_copy.addWidget(make_label("Commence un guide quand une histoire te pose un problème précis.", "CardTitle", True))
+            empty_box.addLayout(empty_copy, 1)
+            empty_box.addWidget(make_button("Commencer un guide →", "primary", self.show_guides))
+            page.addWidget(empty)
+        page.addStretch()
+
+    def show_guide_runs(self) -> None:
+        self._show_guides_page(runs_only=True)
+
+    def _resume_selected_guide(self) -> None:
+        tree = getattr(self, "guide_run_tree", None)
+        selected = tree.selectedItems() if isinstance(tree, QTreeWidget) else []
+        if not selected:
+            return
+        self.show_learning(run_id=int(selected[0].data(0, Qt.ItemDataRole.UserRole)))
+
+    def _archive_selected_guide(self) -> None:
+        tree = getattr(self, "guide_run_tree", None)
+        selected = tree.selectedItems() if isinstance(tree, QTreeWidget) else []
+        if not selected:
+            return
+        run_id = int(selected[0].data(0, Qt.ItemDataRole.UserRole))
+        self.db.update_guided_run(run_id, status="archived")
+        if self.db.setting("current_guide_run", "") == str(run_id):
+            self.db.set_setting("current_guide_run", "")
+        self.show_guide_runs()
+        self.save_state.setText("Guide archivé · ses réponses sont conservées")
+
+    def _start_selected_guide(self) -> None:
+        tree = getattr(self, "guide_catalog_tree", None)
+        selected = tree.selectedItems() if isinstance(tree, QTreeWidget) else []
+        if not selected:
+            return
+        self._start_guide(str(selected[0].data(0, Qt.ItemDataRole.UserRole)))
+
+    def _start_guide(
+        self,
+        guide_key: str,
+        title: str | None = None,
+        assistance_level: str | None = None,
+    ) -> int | None:
+        session = GUIDE_SESSIONS[guide_key]
+        project = None
+        if session.requires_project:
+            if not self._need_project():
+                return None
+            project = self.db.one("SELECT * FROM projects WHERE id=?", (self.active_project,))
+        if title is None or assistance_level is None:
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Commencer un guide")
+            dialog.resize(520, 300)
+            box = QVBoxLayout(dialog)
+            box.setContentsMargins(24, 22, 24, 20)
+            box.setSpacing(10)
+            box.addWidget(make_label(session.title, "SectionTitle"))
+            box.addWidget(make_label(session.deliverable, "Muted", True))
+            box.addSpacing(5)
+            box.addWidget(make_label("NOM DU PARCOURS", "Caption"))
+            name_field = QLineEdit()
+            name_field.setText(title or (project["title"] if project else "Nouvelle graine"))
+            box.addWidget(name_field)
+            box.addWidget(make_label("NIVEAU D’AIDE", "Caption"))
+            level_box = QComboBox()
+            for key, label in GUIDE_LEVELS.items():
+                level_box.addItem(label, key)
+            default_level = assistance_level or self.db.setting("guide_assistance_level", "discovery")
+            level_box.setCurrentIndex(max(0, level_box.findData(default_level)))
+            box.addWidget(level_box)
+            box.addStretch()
+            actions = QHBoxLayout()
+            actions.addStretch()
+            actions.addWidget(make_button("Annuler", "secondary", dialog.reject))
+            actions.addWidget(make_button("Commencer →", "primary", dialog.accept))
+            box.addLayout(actions)
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return None
+            title = name_field.text().strip()
+            assistance_level = str(level_box.currentData())
+        title = title.strip() if title else session.title
+        assistance_level = assistance_level if assistance_level in GUIDE_LEVELS else "discovery"
+        legacy_key = ""
+        if guide_key == "seed" and not self.db.one(
+            "SELECT id FROM guided_runs WHERE legacy_session_key=?",
+            (LEARNING_SESSION.key,),
+        ):
+            legacy_key = LEARNING_SESSION.key
+        run_id = self.db.create_guided_run(
+            guide_key,
+            title or session.title,
+            project_id=self.active_project if project else None,
+            assistance_level=assistance_level,
+            legacy_session_key=legacy_key,
+        )
+        self.db.set_setting("guide_assistance_level", assistance_level)
+        self.db.set_setting("current_guide_run", str(run_id))
+        self.show_learning(run_id=run_id)
+        return run_id
+
+    def _ensure_current_guide_run(self) -> int:
+        current = int(self.db.setting("current_guide_run", "0") or 0)
+        row = self.db.guided_run(current) if current else None
+        if row and row["status"] != "archived":
+            return current
+        latest = self.db.one(
+            "SELECT id FROM guided_runs WHERE status<>'archived' ORDER BY updated_at DESC,id DESC LIMIT 1"
+        )
+        if latest:
+            self.db.set_setting("current_guide_run", str(latest["id"]))
+            return int(latest["id"])
+        run_id = self.db.create_guided_run(
+            "seed",
+            "Nouvelle graine",
+            assistance_level="discovery",
+            legacy_session_key=LEARNING_SESSION.key,
+        )
+        self.db.set_setting("current_guide_run", str(run_id))
+        return int(run_id)
+
+    def show_learning(self, _checked: bool = False, run_id: int | None = None) -> None:
+        run_id = int(run_id or self._ensure_current_guide_run())
+        run = self.db.guided_run(run_id)
+        if not run:
+            self.show_guides()
+            return
+        self.db.set_setting("current_guide_run", str(run_id))
+        session = GUIDE_SESSIONS.get(run["guide_key"], LEARNING_SESSION)
+        page = self._begin_page(session.title, "learning")
+        self._guide_run_id = run_id
+        self._guide_session = session
+        self._guide_editor_open = True
+        self._page_header(page, run["title"], session.title, session.subtitle)
+        idx = min(int(run["current_step"] or 0), len(session.steps) - 1)
+        self._learning_idx = idx
+        step = session.steps[idx]
+        work_row = self.db.ensure_guided_answer(run_id, step.key, idx)
+        answer = work_row["answer"]
+
+        body = QHBoxLayout()
+        body.setSpacing(16)
+
+        step_panel = make_card()
+        step_panel.setFixedWidth(236)
+        step_box = QVBoxLayout(step_panel)
+        step_box.setContentsMargins(12, 14, 12, 14)
+        step_box.setSpacing(8)
+        progress_head = QHBoxLayout()
+        progress_head.addWidget(make_label("ÉTAPES", "Caption"))
+        progress_head.addStretch()
+        progress_head.addWidget(make_label(f"{idx + 1}/{len(session.steps)}", "Muted"))
+        step_box.addLayout(progress_head)
+        progress_bar = QProgressBar()
+        progress_bar.setRange(0, len(session.steps))
+        progress_bar.setValue(idx + 1)
+        progress_bar.setTextVisible(False)
+        progress_bar.setFixedHeight(6)
+        step_box.addWidget(progress_bar)
+
+        step_scroll = QScrollArea()
+        step_scroll.setObjectName("PanelScroll")
+        step_scroll.setWidgetResizable(True)
+        step_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        step_list = QWidget()
+        step_list.setObjectName("PanelCanvas")
+        step_list_box = QVBoxLayout(step_list)
+        step_list_box.setContentsMargins(0, 2, 0, 2)
+        step_list_box.setSpacing(2)
+        group = QButtonGroup(self)
+        group.setExclusive(True)
+        for number, lesson_step in enumerate(session.steps):
+            saved = self.db.one(
+                "SELECT status FROM guided_answers WHERE run_id=? AND step_key=?",
+                (run_id, lesson_step.key),
+            )
+            mark = "✓" if saved and saved["status"] == "complete" else ("●" if number == idx else "○")
+            button = QPushButton(f"{mark}   {number + 1}. {lesson_step.title}")
+            button.setProperty("segment", True)
+            button.setCheckable(True)
+            button.setChecked(number == idx)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(lambda _checked=False, n=number: self._learning_step(n))
+            group.addButton(button)
+            step_list_box.addWidget(button)
+        step_list_box.addStretch()
+        step_scroll.setWidget(step_list)
+        step_box.addWidget(step_scroll, 1)
+        body.addWidget(step_panel)
+
+        right_widget = QWidget()
+        right_widget.setObjectName("PageHost")
+        right = QVBoxLayout(right_widget)
+        right.setContentsMargins(0, 0, 0, 0)
+        right.setSpacing(12)
+        compact_height = self.height() < 800
+        brief = make_card()
+        if run["assistance_level"] == "discovery":
+            brief.setMinimumHeight(205 if compact_height else 220)
+        brief_box = QVBoxLayout(brief)
+        brief_box.setContentsMargins(20, 14 if compact_height else 18, 20, 15 if compact_height else 19)
+        brief_box.setSpacing(5 if compact_height else 7)
+        brief_head = QHBoxLayout()
+        brief_head.addWidget(make_label(f"ÉTAPE {idx + 1} · {step.title.upper()}", "Caption"))
+        brief_head.addStretch()
+        self.guide_level = QComboBox()
+        self.guide_level.setToolTip("Quantité d’aide affichée")
+        for level_key, level_label in GUIDE_LEVELS.items():
+            self.guide_level.addItem(level_label, level_key)
+        self.guide_level.setCurrentIndex(max(0, self.guide_level.findData(run["assistance_level"])))
+        self.guide_level.currentIndexChanged.connect(self._change_guide_level)
+        brief_head.addWidget(self.guide_level)
+        concept = make_label(step.concept_label.upper(), "AccentPill")
+        concept.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        brief_head.addWidget(concept)
+        brief_box.addLayout(brief_head)
+        question_label = make_label(
+            step.question,
+            "CardTitle" if compact_height else "SectionTitle",
+            True,
+        )
+        if compact_height:
+            question_label.setMinimumHeight(42)
+        brief_box.addWidget(question_label)
+        level = run["assistance_level"]
+        if level == "autonomous":
+            if session.deliverable:
+                brief_box.addWidget(make_label(f"Livrable · {session.deliverable}", "Muted", True))
+        elif level == "guided":
+            reminder = step.why.split(".", 1)[0].strip()
+            if reminder:
+                reminder += "."
+            brief_box.addWidget(make_label("REPÈRE", "Caption"))
+            brief_box.addWidget(make_label(reminder, "Muted", True))
+        elif compact_height:
+            brief_box.addWidget(make_label("OBJECTIF / DÉFINITION", "Caption"))
+            brief_box.addWidget(make_label(step.why, "Muted", True))
+            example = step.example if len(step.example) <= 150 else step.example[:147].rstrip() + "…"
+            brief_box.addWidget(make_label("EXEMPLE", "Caption"))
+            brief_box.addWidget(make_label(example, "Body", True))
+            brief_box.addWidget(
+                make_label(f"REPÈRES · {' · '.join(step.tips[:2])}", "Muted", True)
+            )
+        else:
+            brief_box.addSpacing(2)
+            brief_box.addWidget(make_label("OBJECTIF / DÉFINITION", "Caption"))
+            brief_box.addWidget(make_label(step.why, "Muted", True))
+            brief_box.addSpacing(4)
+            details = QHBoxLayout()
+            details.setSpacing(28)
+            example_box = QVBoxLayout()
+            example_box.setSpacing(4)
+            example_box.addWidget(make_label("EXEMPLE", "Caption"))
+            example_box.addWidget(make_label(step.example, "Body", True))
+            details.addLayout(example_box, 2)
+            tips_box = QVBoxLayout()
+            tips_box.setSpacing(4)
+            tips_box.addWidget(make_label("REPÈRES", "Caption"))
+            tips_box.addWidget(make_label("\n".join(f"• {tip}" for tip in step.tips), "Muted", True))
+            details.addLayout(tips_box, 1)
+            brief_box.addLayout(details)
+        if session.key == LEARNING_SESSION.key and step.key == "seed" and not compact_height:
+            recap = self._learning_seed_recap()
+            if recap:
+                brief_box.addWidget(make_separator())
+                brief_box.addWidget(make_label("TES RÉPONSES UTILES", "Caption"))
+                brief_box.addWidget(make_label(recap, "Muted", True))
+        right.addWidget(brief)
+
+        answer_head = QHBoxLayout()
+        answer_head.addWidget(make_label("TA RÉPONSE", "Caption"))
+        answer_head.addStretch()
+        answer_head.addWidget(make_label("Zone longue · ascenseur toujours visible", "Muted"))
+        right.addLayout(answer_head)
+        self.learning_draft = make_editor(140 if compact_height else 220, step.placeholder)
+        self.learning_draft.setObjectName("LearningAnswer")
+        self.learning_draft.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.learning_draft.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.learning_draft.setPlainText(answer)
+        right.addWidget(self.learning_draft, 1)
+
+        self._add_learning_application_card(right, run, step)
+
+        action_bar = QWidget()
+        action_bar.setObjectName("LearningActions")
+        action_bar.setFixedHeight(52)
+        actions = QHBoxLayout(action_bar)
+        actions.setContentsMargins(0, 4, 0, 0)
+        actions.setSpacing(10)
+        previous_button = make_button("← Précédent", "secondary", lambda: self._move_learning(max(idx - 1, 0)))
+        previous_button.setEnabled(idx > 0)
+        actions.addWidget(previous_button)
+        actions.addWidget(make_button("Enregistrer", "secondary", self._save_learning_work))
+        actions.addWidget(
+            make_button("Pas terminé", "secondary", self._mark_learning_incomplete)
+        )
+        actions.addStretch()
+        learning_complete = run["status"] == "completed"
+        if idx == len(session.steps) - 1 and learning_complete:
+            if run["guide_key"] == "seed":
+                next_text = "Créer le projet →"
+                next_action = self._create_project_from_learning
+            else:
+                next_text = "Prévisualiser →"
+                next_action = self._preview_apply_guide
+        elif idx == len(session.steps) - 1:
+            next_text = "Terminer" if self.width() < 1250 else "Terminer le guide"
+            next_action = self._complete_learning_step
+        else:
+            next_text = "Terminer →" if self.width() < 1250 else "Terminer et continuer →"
+            next_action = self._complete_learning_step
+        actions.addWidget(make_button(next_text, "primary", next_action))
+        right.addWidget(action_bar)
+        body.addWidget(right_widget, 1)
+        page.addLayout(body, 1)
+
+    def _learning_tool_link(self, run, step):
+        return LEARNING_TOOL_LINKS.get(run["guide_key"], {}).get(step.key)
+
+    def _learning_target_rows(self, project_id: int, target_type: str):
+        queries = {
+            "character": (
+                "SELECT id,name,role FROM characters WHERE project_id=? ORDER BY name COLLATE NOCASE,id",
+                lambda row: f"{row['name'] or 'Personnage sans nom'} · {row['role'] or 'rôle à préciser'}",
+            ),
+            "scene": (
+                "SELECT id,position,title FROM scene_rows WHERE project_id=? ORDER BY position,id",
+                lambda row: f"{int(row['position']) + 1:02d} · {row['title'] or 'Scène sans titre'}",
+            ),
+            "conflict": (
+                "SELECT id,title,nature FROM conflicts WHERE project_id=? ORDER BY position,id",
+                lambda row: f"{row['title'] or 'Conflit sans titre'} · {row['nature'] or 'nature à préciser'}",
+            ),
+            "promise": (
+                "SELECT id,title,promise_type FROM story_promises WHERE project_id=? ORDER BY position,id",
+                lambda row: f"{row['title'] or 'Promesse sans titre'} · {row['promise_type'] or 'concept'}",
+            ),
+        }
+        spec = queries.get(target_type)
+        if not spec:
+            return []
+        query, formatter = spec
+        return [(int(row["id"]), formatter(row)) for row in self.db.q(query, (project_id,))]
+
+    def _add_learning_application_card(self, layout: QVBoxLayout, run, step) -> None:
+        link = self._learning_tool_link(run, step)
+        if not link:
+            return
+        view, document, destination, target_type, target_field, instruction = link
+        project_id = int(run["project_id"] or 0)
+        application = self.db.guided_application(run["id"], step.key)
+        mastery = self.db.one(
+            "SELECT status FROM concept_mastery WHERE concept_key=?",
+            (step.concept_key,),
+        )
+        status = mastery["status"] if mastery else ("en pratique" if application else "découverte")
+
+        card = make_card()
+        card.setObjectName("LearningConnection")
+        box = QHBoxLayout(card)
+        box.setContentsMargins(16, 10, 14, 10)
+        box.setSpacing(12)
+        copy = QVBoxLayout()
+        copy.setSpacing(3)
+        head = QHBoxLayout()
+        head.addWidget(make_label("APPLICATION AU PROJET", "Caption"))
+        state = make_label(status.upper(), "AccentPill" if status == "acquis" else "Muted")
+        state.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        head.addWidget(state)
+        head.addStretch()
+        copy.addLayout(head)
+        copy.addWidget(make_label(destination, "CardTitle"))
+        if project_id:
+            copy.addWidget(make_label(instruction, "Muted", True))
+        else:
+            copy.addWidget(
+                make_label(
+                    "Cette notion sera reliée à son outil dès que la graine deviendra un projet.",
+                    "Muted",
+                    True,
+                )
+            )
+        box.addLayout(copy, 1)
+
+        self.learning_target_combo = None
+        target_rows = self._learning_target_rows(project_id, target_type) if project_id else []
+        if project_id and target_type != "project":
+            target_combo = QComboBox()
+            target_combo.setObjectName("LearningTargetCombo")
+            target_combo.setMinimumWidth(190)
+            target_combo.addItem("Tout l’outil", 0)
+            for target_id, label in target_rows:
+                target_combo.addItem(label, target_id)
+            if application:
+                index = target_combo.findData(int(application["target_id"] or 0))
+                target_combo.setCurrentIndex(max(0, index))
+            self.learning_target_combo = target_combo
+            box.addWidget(target_combo, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        if project_id:
+            open_button = make_button(
+                "Ouvrir l’outil →", "primary", self._open_learning_tool
+            )
+            box.addWidget(open_button, 0, Qt.AlignmentFlag.AlignVCenter)
+            if application:
+                mastery_actions = QVBoxLayout()
+                mastery_actions.setSpacing(4)
+                mastery_actions.addWidget(
+                    make_button(
+                        "Marquer acquis",
+                        "secondary",
+                        lambda: self._set_learning_mastery("acquis"),
+                    )
+                )
+                mastery_actions.addWidget(
+                    make_button(
+                        "À revoir",
+                        "tertiary",
+                        lambda: self._set_learning_mastery("à revoir"),
+                    )
+                )
+                box.addLayout(mastery_actions)
+        layout.addWidget(card)
+
+    def _set_learning_mastery(self, status: str) -> None:
+        run = self.db.guided_run(self._guide_run_id)
+        if not run:
+            return
+        step = self._guide_session.steps[self._learning_idx]
+        application = self.db.guided_application(run["id"], step.key)
+        if status == "acquis" and not application:
+            QMessageBox.information(
+                self,
+                "Application nécessaire",
+                "Ouvre d’abord l’outil du projet et confronte ta réponse au travail réel.",
+            )
+            return
+        self._save_learning_work(silent=True)
+        evidence = self.learning_draft.toPlainText().strip()
+        self.db.set_concept_mastery(step.concept_key, step.concept_label, status, evidence)
+        if application:
+            self.db.save_guided_application(
+                run["id"],
+                step.key,
+                int(application["project_id"]),
+                application["target_type"],
+                int(application["target_id"] or 0),
+                application["target_field"],
+                status,
+                evidence,
+            )
+        self.save_state.setText(f"Notion · {status}")
+        self.show_learning(run_id=run["id"])
+
+    def _open_learning_tool(self, _checked: bool = False) -> None:
+        run = self.db.guided_run(self._guide_run_id)
+        if not run or not run["project_id"]:
+            return
+        step = self._guide_session.steps[self._learning_idx]
+        link = self._learning_tool_link(run, step)
+        if not link:
+            return
+        view, document, _destination, target_type, target_field, _instruction = link
+        self._save_learning_work(silent=True)
+        target_combo = getattr(self, "learning_target_combo", None)
+        target_id = int(target_combo.currentData() or 0) if isinstance(target_combo, QComboBox) else 0
+        evidence = self.learning_draft.toPlainText().strip()
+        self.db.save_guided_application(
+            run["id"],
+            step.key,
+            int(run["project_id"]),
+            target_type,
+            target_id,
+            target_field,
+            "en pratique",
+            evidence,
+        )
+        self.db.set_concept_mastery(step.concept_key, step.concept_label, "en pratique", evidence)
+        self.db.set_setting("learning_return_run", str(run["id"]))
+        self.db.set_setting("learning_return_step", str(self._learning_idx))
+        self.active_project = int(run["project_id"])
+        self.db.set_setting("active_project", str(self.active_project))
+        self._update_project_chips()
+        self._navigate_learning_destination(view, document, target_type, target_id, target_field)
+
+    def _navigate_learning_destination(
+        self,
+        view: str,
+        document: str,
+        target_type: str,
+        target_id: int,
+        target_field: str,
+    ) -> None:
+        if view == "development":
+            self.db.set_setting(f"last_development_doc_{self.active_project}", document)
+            if target_type == "scene" and target_id:
+                self._pending_scene_focus = target_id
+            self.show_development()
+        elif view == "characters":
+            if target_id:
+                self.db.set_setting(f"last_character_{self.active_project}", target_id)
+            self.show_characters()
+        elif view == "conflicts":
+            self.show_conflicts()
+            if target_id:
+                self._load_conflict(target_id)
+        elif view == "promises":
+            self.show_promises()
+            if target_id:
+                self.promise_tabs.setCurrentIndex(1)
+                self._load_story_promise(target_id)
+        else:
+            self.show_projects()
+        QTimer.singleShot(
+            0,
+            lambda: self._focus_learning_destination(view, target_field),
+        )
+
+    def _focus_learning_destination(self, view: str, target_field: str) -> None:
+        if view == "characters" and hasattr(self, "character_fields"):
+            if target_field in {"desire", "objective", "need", "fear", "conflict"}:
+                self.character_tabs.setCurrentIndex(1)
+            elif target_field in {"arc", "start_situation", "end_situation"}:
+                self.character_tabs.setCurrentIndex(2)
+            field = self.character_fields.get(target_field)
+            if field:
+                field.setFocus()
+        elif view == "conflicts" and hasattr(self, "conflict_fields"):
+            field = self.conflict_fields.get(target_field)
+            if field:
+                field.setFocus()
+        elif view == "promises" and hasattr(self, "story_promise_fields"):
+            self.promise_tabs.setCurrentIndex(1)
+            field = self.story_promise_fields.get(target_field)
+            if field:
+                field.setFocus()
+        elif view == "development" and getattr(self, "development_doc_type", "") == "scenes":
+            field = getattr(self, "scene_detail_fields", {}).get(target_field)
+            if field:
+                field.setFocus()
+            elif target_field == "title" and hasattr(self, "scene_table"):
+                self.scene_table.setFocus()
+        elif view == "development":
+            editor = getattr(self, "development_text", None)
+            if isinstance(editor, QTextEdit):
+                editor.setFocus()
+
+    def _learning_step(self, idx: int) -> None:
+        if hasattr(self, "learning_draft"):
+            self._save_learning_work(silent=True)
+        self.db.update_guided_run(self._guide_run_id, current_step=idx, status="ongoing")
+        self._mirror_legacy_guide_progress(idx, "en cours")
+        self.show_learning(run_id=self._guide_run_id)
+
+    def _move_learning(self, target: int) -> None:
+        self._save_learning_work(silent=True)
+        self._learning_step(target)
+
+    def _save_learning_work(self, _checked: bool = False, silent: bool = False, status: str | None = None) -> None:
+        idx = self._learning_idx
+        session = self._guide_session
+        step = session.steps[idx]
+        draft = self.learning_draft.toPlainText().strip()
+        saved = self.db.ensure_guided_answer(self._guide_run_id, step.key, idx)
+        requested = {"terminé": "complete", "brouillon": "draft"}.get(status or "", status)
+        inferred = requested or ("complete" if saved["status"] == "complete" else "draft")
+        self.db.save_guided_answer(self._guide_run_id, step.key, idx, draft, inferred)
+        current_mastery = self.db.one(
+            "SELECT status,evidence FROM concept_mastery WHERE concept_key=?",
+            (step.concept_key,),
+        )
+        if (
+            current_mastery
+            and current_mastery["status"] == "acquis"
+            and current_mastery["evidence"] == draft
+        ):
+            mastery_status = "acquis"
+        else:
+            mastery_status = "en pratique" if draft else "découverte"
+        self.db.set_concept_mastery(
+            step.concept_key, step.concept_label, mastery_status, draft
+        )
+        run = self.db.guided_run(self._guide_run_id)
+        if run and run["legacy_session_key"]:
+            legacy = self.db.ensure_learning_work(run["legacy_session_key"], idx, step.concept_key)
+            self.db.save_learning_work(
+                run["legacy_session_key"],
+                idx,
+                step.concept_key,
+                draft,
+                legacy["feedback"],
+                legacy["revision"],
+                legacy["takeaway"],
+                legacy["mastery"],
+                "terminé" if inferred == "complete" else "brouillon",
+            )
+
+        if not silent:
+            self.save_state.setText("Réponse enregistrée localement")
+            QTimer.singleShot(2200, lambda: self.save_state.setText(""))
+
+    def _mark_learning_incomplete(self) -> None:
+        self._save_learning_work(silent=True, status="brouillon")
+        self.db.update_guided_run(
+            self._guide_run_id,
+            current_step=self._learning_idx,
+            status="ongoing",
+        )
+        self._mirror_legacy_guide_progress(self._learning_idx, "en cours")
+        self.save_state.setText("Étape enregistrée comme non terminée")
+        self.show_learning(run_id=self._guide_run_id)
+
+    def _complete_learning_step(self) -> None:
+        if not self.learning_draft.toPlainText().strip():
+            QMessageBox.information(self, "Une réponse suffit", "Écris simplement une réponse avant de continuer. Elle peut rester provisoire.")
+            return
+        self._save_learning_work(silent=True, status="terminé")
+        finish = self._learning_idx == len(self._guide_session.steps) - 1
+        target = self._learning_idx if finish else self._learning_idx + 1
+        self.db.update_guided_run(
+            self._guide_run_id,
+            current_step=target,
+            status="completed" if finish else "ongoing",
+        )
+        self._mirror_legacy_guide_progress(target, "terminée" if finish else "en cours")
+        if finish and self._guide_session.key == LEARNING_SESSION.key:
+            manual_path = BASE_DIR / "Mon manuel d’écriture & storytelling.pdf"
+            export_manual_pdf(manual_path, "StoryForge — Manuel cumulatif", self._manual_sections())
+        self.show_learning(run_id=self._guide_run_id)
+        if finish:
+            QTimer.singleShot(0, self._show_learning_summary)
+
+    def _change_guide_level(self) -> None:
+        level = str(self.guide_level.currentData())
+        run = self.db.guided_run(self._guide_run_id)
+        if not run or level == run["assistance_level"]:
+            return
+        self._save_learning_work(silent=True)
+        self.db.update_guided_run(self._guide_run_id, assistance_level=level)
+        self.db.set_setting("guide_assistance_level", level)
+        self.show_learning(run_id=self._guide_run_id)
+
+    def _mirror_legacy_guide_progress(self, step_index: int, status: str) -> None:
+        run = self.db.guided_run(self._guide_run_id)
+        if not run or not run["legacy_session_key"]:
+            return
+        self.db.run(
+            """INSERT INTO progress(session_key,step_index,status,updated_at)
+            VALUES(?,?,?,?) ON CONFLICT(session_key) DO UPDATE SET
+            step_index=excluded.step_index,status=excluded.status,updated_at=excluded.updated_at""",
+            (run["legacy_session_key"], step_index, status, NOW()),
+        )
+
+    def _learning_seed_recap(self) -> str:
+        labels = {
+            "protagonist": "Protagoniste",
+            "objective": "Objectif",
+            "opposition": "Opposition",
+            "stakes": "Enjeux",
+        }
+        lines = []
+        for key, label in labels.items():
+            row = self.db.one(
+                "SELECT answer FROM guided_answers WHERE run_id=? AND step_key=?",
+                (self._guide_run_id, key),
+            )
+            if row and row["answer"].strip():
+                answer = " ".join(row["answer"].split())
+                if len(answer) > 110:
+                    answer = answer[:107].rstrip() + "…"
+                lines.append(f"{label} : {answer}")
+        return "\n".join(lines)
+
+    def _learning_summary_text(self) -> str:
+        session = self._guide_session
+        blocks = []
+        for step in session.steps:
+            row = self.db.one(
+                "SELECT answer FROM guided_answers WHERE run_id=? AND step_key=?",
+                (self._guide_run_id, step.key),
+            )
+            blocks.append(
+                f"{step.title.upper()}\n{row['answer'].strip() if row and row['answer'].strip() else '—'}"
+            )
+        return "\n\n".join(blocks)
+
+    def _show_learning_summary(self) -> None:
+        dialog = QDialog(self)
+        run = self.db.guided_run(self._guide_run_id)
+        session = self._guide_session
+        dialog.setWindowTitle(f"Résultat · {session.title}")
+        dialog.resize(760, 680)
+        box = QVBoxLayout(dialog)
+        box.setContentsMargins(26, 24, 26, 22)
+        box.setSpacing(10)
+        box.addWidget(make_label("Guide terminé", "Kicker"))
+        box.addWidget(make_label(session.title, "SectionTitle"))
+        box.addWidget(make_label("Relis le résultat avant de l’appliquer. Toutes les réponses restent modifiables.", "Muted", True))
+        summary = make_editor(430)
+        summary.setObjectName("LearningAnswer")
+        summary.setReadOnly(True)
+        summary.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        summary.setPlainText(self._learning_summary_text())
+        box.addWidget(summary, 1)
+        actions = QHBoxLayout()
+        actions.addWidget(make_button("Continuer à modifier", "secondary", dialog.reject))
+        actions.addStretch()
+        if run and run["guide_key"] == "seed":
+            action_label = "Créer le projet →"
+        else:
+            action_label = session.apply_label or "Prévisualiser →"
+        create_button = make_button(action_label, "primary")
+        actions.addWidget(create_button)
+        box.addLayout(actions)
+
+        def create() -> None:
+            dialog.accept()
+            if run and run["guide_key"] == "seed":
+                self._create_project_from_learning()
+            else:
+                self._preview_apply_guide()
+
+        create_button.clicked.connect(create)
+        dialog.exec()
+
+    def _guide_answers(self, run_id: int) -> dict[str, str]:
+        return {
+            row["step_key"]: row["answer"].strip()
+            for row in self.db.q(
+                "SELECT step_key,answer FROM guided_answers WHERE run_id=?",
+                (run_id,),
+            )
+        }
+
+    def _preview_apply_guide(self) -> None:
+        run = self.db.guided_run(self._guide_run_id)
+        if not run or run["guide_key"] == "seed":
+            return
+        if not run["project_id"]:
+            QMessageBox.information(
+                self,
+                "Projet nécessaire",
+                "Ce guide n’est plus relié à un projet actif. Recommence-le depuis le projet concerné.",
+            )
+            return
+        answers = self._guide_answers(run["id"])
+        guide_key = run["guide_key"]
+        if guide_key == "strengthen_idea":
+            document = self.db.ensure_doc(run["project_id"], "premise", "Prémisse / Concept")
+            destination = "Construction · Prémisse / Concept"
+            current = document["content"].strip() or "— aucune prémisse —"
+            proposed = answers.get("strengthened_premise", "")
+        elif guide_key == "find_ending":
+            project = self.db.one("SELECT ending FROM projects WHERE id=?", (run["project_id"],))
+            destination = "Projet · Fin provisoire et résolution de la carte"
+            current = project["ending"].strip() if project and project["ending"].strip() else "— aucune fin —"
+            proposed = answers.get("provisional_ending", "")
+        elif guide_key == "prepare_scene":
+            destination = "Construction · Liste de scènes"
+            target = self.db.one(
+                "SELECT * FROM scene_rows WHERE id=? AND project_id=?",
+                (run["applied_target_id"], run["project_id"]),
+            ) if run["applied_target_id"] else None
+            current = (
+                f"{target['title']}\nObjectif · {target['objective']}\n"
+                f"Opposition · {target['opposition']}\nChangement · {target['change_note']}"
+                if target else "— nouvelle scène —"
+            )
+            proposed = (
+                f"{answers.get('scene_title', 'Scène sans titre')}\n"
+                f"Situation · {answers.get('scene_situation', '—')}\n"
+                f"Objectif · {answers.get('scene_objective', '—')}\n"
+                f"Opposition · {answers.get('scene_opposition', '—')}\n"
+                f"Changement · {answers.get('scene_change', '—')}"
+            )
+        else:
+            return
+        if not proposed.strip():
+            QMessageBox.information(self, "Résultat manquant", "Termine la dernière réponse du guide avant de l’appliquer.")
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Prévisualiser l’application")
+        dialog.resize(760, 660)
+        box = QVBoxLayout(dialog)
+        box.setContentsMargins(26, 24, 26, 22)
+        box.setSpacing(9)
+        box.addWidget(make_label("AVANT D’APPLIQUER", "Kicker"))
+        box.addWidget(make_label(destination, "SectionTitle"))
+        box.addWidget(
+            make_label(
+                "Rien n’est remplacé avant ta confirmation. L’ancien contenu reste protégé par une version lorsque c’est nécessaire.",
+                "Muted",
+                True,
+            )
+        )
+        preview = make_editor(430)
+        preview.setObjectName("LearningAnswer")
+        preview.setReadOnly(True)
+        preview.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        preview.setPlainText(f"VERSION ACTUELLE\n\n{current}\n\n\nPROPOSITION DU GUIDE\n\n{proposed}")
+        box.addWidget(preview, 1)
+        actions = QHBoxLayout()
+        actions.addWidget(make_button("Retour au guide", "secondary", dialog.reject))
+        actions.addStretch()
+        apply_button = make_button("Appliquer au projet →", "primary")
+        actions.addWidget(apply_button)
+        box.addLayout(actions)
+
+        def apply() -> None:
+            self._apply_guide_result(run["id"])
+            dialog.accept()
+            self.show_guides()
+
+        apply_button.clicked.connect(apply)
+        dialog.exec()
+
+    def _apply_guide_result(self, run_id: int) -> None:
+        run = self.db.guided_run(run_id)
+        if not run or not run["project_id"]:
+            return
+        answers = self._guide_answers(run_id)
+        project_id = int(run["project_id"])
+        target_id = int(run["applied_target_id"] or 0)
+        if run["guide_key"] == "strengthen_idea":
+            proposed = answers.get("strengthened_premise", "").strip()
+            document = self.db.ensure_doc(project_id, "premise", "Prémisse / Concept")
+            if document["content"].strip() and document["content"].strip() != proposed:
+                self.db.snapshot(project_id, "premise", document["content"], "Avant le guide Renforcer une idée")
+            self.db.save_doc(project_id, "premise", proposed)
+            self.db.run(
+                "INSERT OR REPLACE INTO development_status(project_id,doc_type,status,updated_at) VALUES(?,?,?,?)",
+                (project_id, "premise", "draft", NOW()),
+            )
+        elif run["guide_key"] == "find_ending":
+            proposed = answers.get("provisional_ending", "").strip()
+            self.db.run("UPDATE projects SET ending=?,updated_at=? WHERE id=?", (proposed, NOW(), project_id))
+            self.db.run(
+                """INSERT INTO project_questions(project_id,question_key,answer,updated_at)
+                VALUES(?,?,?,?) ON CONFLICT(project_id,question_key) DO UPDATE SET
+                answer=excluded.answer,updated_at=excluded.updated_at""",
+                (project_id, "ending", proposed, NOW()),
+            )
+            self.db.save_story_map_answer(project_id, "resolution_change", proposed)
+        elif run["guide_key"] == "prepare_scene":
+            values = (
+                answers.get("scene_title", "").strip() or "Scène sans titre",
+                answers.get("scene_objective", "").strip(),
+                answers.get("scene_opposition", "").strip(),
+                answers.get("scene_change", "").strip(),
+            )
+            existing = self.db.one(
+                "SELECT id FROM scene_rows WHERE id=? AND project_id=?",
+                (target_id, project_id),
+            ) if target_id else None
+            if existing:
+                self.db.run(
+                    "UPDATE scene_rows SET title=?,objective=?,opposition=?,change_note=?,updated_at=? WHERE id=?",
+                    (*values, NOW(), target_id),
+                )
+            else:
+                position = self.db.one(
+                    "SELECT COALESCE(MAX(position),-1)+1 FROM scene_rows WHERE project_id=?",
+                    (project_id,),
+                )[0]
+                target_id = self.db.run(
+                    """INSERT INTO scene_rows(
+                    project_id,position,title,duration,objective,opposition,change_note,created_at,updated_at
+                    ) VALUES(?,?,?,0,?,?,?,?,?)""",
+                    (project_id, position, *values, NOW(), NOW()),
+                ).lastrowid
+        self.db.update_guided_run(run_id, applied_at=NOW(), applied_target_id=target_id)
+        self.save_state.setText("Résultat appliqué au projet")
+        QTimer.singleShot(2600, lambda: self.save_state.setText(""))
+
+    def _create_project_from_learning(self, _checked: bool = False, title: str | None = None) -> None:
+        pending_values = None
+        guide_run_id = int(getattr(self, "_guide_run_id", 0) or 0)
+        guide_run = self.db.guided_run(guide_run_id) if guide_run_id else None
+        pending_raw = self.db.setting("pending_guided_project", "")
+        pending_run_id = int(self.db.setting("pending_guided_project_run", "0") or 0)
+        if pending_raw and (not pending_run_id or pending_run_id == guide_run_id):
+            try:
+                pending_values = json.loads(pending_raw)
+            except json.JSONDecodeError:
+                pending_values = None
+        answers: dict[str, str] = {}
+        for index, step in enumerate(LEARNING_SESSION.steps):
+            if guide_run and guide_run["guide_key"] == "seed":
+                row = self.db.one(
+                    "SELECT answer FROM guided_answers WHERE run_id=? AND step_key=?",
+                    (guide_run_id, step.key),
+                )
+                answers[step.key] = row["answer"].strip() if row else ""
+            else:
+                row = self.db.one(
+                    "SELECT draft FROM learning_work WHERE session_key=? AND step_index=?",
+                    (LEARNING_SESSION.key, index),
+                )
+                answers[step.key] = row["draft"].strip() if row else ""
+
+        if title is None and pending_values:
+            title = pending_values.get("title", "Nouveau projet")
+        elif title is None:
+            idea = " ".join(answers.get("idea", "").split())
+            suggested = idea[:52].rstrip(" .,:;!?") or "Nouveau projet"
+            title, accepted = QInputDialog.getText(self, "Créer le projet", "Titre provisoire", text=suggested)
+            if not accepted:
+                return
+        title = title.strip() or "Projet sans titre"
+
+        project_values = pending_values or {
+            "project_type": "film",
+            "story_format": "short",
+            "target_duration": 20,
+            "start_mode": "guided",
+        }
+
+        project_id = self.db.run(
+            """INSERT INTO projects(
+            created_at,title,stage,protagonist,desire,objective,opposition,stakes,change_note,ending,
+            next_decision,project_type,story_format,target_duration,start_mode,project_status,archived,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                NOW(),
+                title,
+                "Noyau",
+                answers.get("protagonist", ""),
+                answers.get("desire", ""),
+                answers.get("objective", ""),
+                answers.get("opposition", ""),
+                answers.get("stakes", ""),
+                answers.get("change", ""),
+                answers.get("ending", ""),
+                "Ouvrir la première étape de Construction à partir de la graine.",
+                project_values.get("project_type", "film"),
+                project_values.get("story_format", "short"),
+                int(project_values.get("target_duration", 20) or 0),
+                "guided",
+                "ongoing",
+                0,
+                NOW(),
+            ),
+        ).lastrowid
+        for step_key, question_key in LEARNING_QUESTION_KEYS.items():
+            self.db.run(
+                "INSERT INTO project_questions(project_id,question_key,answer,updated_at) VALUES(?,?,?,?)",
+                (project_id, question_key, answers.get(step_key, ""), NOW()),
+            )
+        self.db.ensure_doc(project_id, "premise", "Prémisse / Concept")
+        self.db.save_doc(project_id, "premise", answers.get("seed", ""))
+        if answers.get("seed", "").strip():
+            self.db.run(
+                "INSERT OR REPLACE INTO development_status(project_id,doc_type,status,updated_at) VALUES(?,?,?,?)",
+                (project_id, "premise", "complete", NOW()),
+            )
+        self.active_project = project_id
+        self.project_id = project_id
+        self.db.set_setting("active_project", str(project_id))
+        if pending_values:
+            self.db.set_setting("pending_guided_project", "")
+            self.db.set_setting("pending_guided_project_run", "")
+        if guide_run and guide_run["guide_key"] == "seed":
+            self.db.update_guided_run(guide_run_id, project_id=project_id, applied_at=NOW())
+        self.db.set_setting(f"last_development_doc_{project_id}", "premise")
+        self._update_project_chips()
+        self.show_projects()
+        self.save_state.setText("Projet créé à partir de la graine")
+        QTimer.singleShot(2600, lambda: self.save_state.setText(""))
+
+    # ---------- Universal questions ----------
+
+    def show_questions(self) -> None:
+        if not self._need_project():
+            return
+        page = self._begin_page("Questions universelles", "questions", scroll=True)
+        self._page_header(page, "Développement", "Quatre angles pour clarifier l’histoire", "Réponds seulement au groupe qui correspond à ton problème actuel. Les réponses restent provisoires.")
+        self.question_fields: dict[str, QTextEdit] = {}
+        question_map = dict(UNIVERSAL_QUESTIONS)
+        groups = [
+            ("01 · CENTRE DE GRAVITÉ", "Ce qui t’intéresse et la personne à travers qui l’histoire sera vécue.", ["interest", "center"]),
+            ("02 · DIRECTION", "Ce que cette personne veut et pourquoi le résultat compte.", ["desire", "objective", "stakes"]),
+            ("03 · CONFLIT ET CAUSALITÉ", "Ce qui résiste, les actions entreprises et leurs conséquences.", ["opposition", "action", "consequence", "progression"]),
+            ("04 · CHOIX ET ARRIVÉE", "Les décisions difficiles, le changement possible et la destination de l’histoire.", ["choice", "change", "ending"]),
+        ]
+        for title, subtitle, keys in groups:
+            card = make_card()
+            box = QVBoxLayout(card)
+            box.setContentsMargins(24, 19, 24, 22)
+            box.setSpacing(7)
+            box.addWidget(make_label(title, "Caption"))
+            box.addWidget(make_label(subtitle, "Muted", True))
+            box.addSpacing(5)
+            for key in keys:
+                box.addWidget(make_label(question_map[key], "CardTitle", True))
+                editor = make_editor(78)
+                editor.setMaximumHeight(96)
+                row = self.db.one("SELECT answer FROM project_questions WHERE project_id=? AND question_key=?", (self.active_project, key))
+                editor.setPlainText(row[0] if row else "")
+                box.addWidget(editor)
+                box.addSpacing(9)
+                self.question_fields[key] = editor
+            page.addWidget(card)
+            page.addSpacing(12)
+        page.addWidget(make_button("Enregistrer les réponses", "primary", self._save_questions), 0, Qt.AlignmentFlag.AlignLeft)
+        page.addStretch()
+
+    def _save_questions(self) -> None:
+        for key, editor in self.question_fields.items():
+            self.db.run(
+                "INSERT INTO project_questions(project_id,question_key,answer,updated_at) VALUES(?,?,?,?) "
+                "ON CONFLICT(project_id,question_key) DO UPDATE SET answer=excluded.answer,updated_at=excluded.updated_at",
+                (self.active_project, key, editor.toPlainText().strip(), NOW()),
+            )
+        QMessageBox.information(self, "Enregistré", "Tes réponses de développement sont enregistrées.")
+
+    # ---------- Development documents ----------
+
+    def _completed_development_documents(self, project_id: int) -> set[str]:
+        return {
+            row["doc_type"]
+            for row in self.db.q(
+                "SELECT doc_type FROM development_status WHERE project_id=? AND status='complete'",
+                (project_id,),
+            )
+        }
+
+    def _development_step_status(self, doc_type: str) -> str:
+        row = self.db.one(
+            "SELECT status FROM development_status WHERE project_id=? AND doc_type=?",
+            (self.active_project, doc_type),
+        )
+        return row["status"] if row else "draft"
+
+    def _development_has_material(self, doc_type: str) -> bool:
+        if doc_type == "story_map":
+            answers = self.db.one(
+                "SELECT COUNT(*) FROM story_map_answers WHERE project_id=? AND TRIM(answer)<>''",
+                (self.active_project,),
+            )[0]
+            cards = self.db.one(
+                "SELECT COUNT(*) FROM story_map_nodes WHERE project_id=? "
+                "AND (TRIM(content)<>'' OR (TRIM(title)<>'' AND title<>'Carte sans titre'))",
+                (self.active_project,),
+            )[0]
+            return bool(answers or cards)
+        if doc_type == "outline":
+            return bool(
+                self.db.one(
+                    "SELECT COUNT(*) FROM sequence_blocks WHERE project_id=? "
+                    "AND (TRIM(title)<>'' OR TRIM(purpose)<>'' OR TRIM(events)<>'' OR TRIM(consequence)<>'')",
+                    (self.active_project,),
+                )[0]
+            )
+        if doc_type == "scenes":
+            return bool(
+                self.db.one(
+                    "SELECT COUNT(*) FROM scene_rows WHERE project_id=? AND TRIM(title)<>''",
+                    (self.active_project,),
+                )[0]
+            )
+        row = self.db.one(
+            "SELECT content FROM project_docs WHERE project_id=? AND doc_type=?",
+            (self.active_project, doc_type),
+        )
+        return bool(row and row["content"].strip())
+
+    def _save_current_development_step(self) -> None:
+        if self.development_doc_type == "story_map":
+            if getattr(self, "story_map_mode", "board") == "guide":
+                self._save_story_map_step(silent=True)
+        elif self.development_doc_type == "synopsis":
+            if getattr(self, "synopsis_mode", "guide") == "final":
+                self._save_synopsis_final(silent=True)
+            else:
+                self._save_synopsis_step(silent=True)
+        elif self.development_doc_type == "outline":
+            self._save_sequence_board(silent=True)
+        elif self.development_doc_type == "scenes":
+            self._save_scene_list(silent=True)
+        elif self.development_doc_type != "script":
+            self._save_development_document(silent=True)
+
+    def _set_development_step_status(self, status: str) -> None:
+        self._save_current_development_step()
+        if status == "complete" and not self._development_has_material(self.development_doc_type):
+            QMessageBox.information(
+                self,
+                "Étape encore vide",
+                "Ajoute au moins une réponse, une carte ou un passage avant de marquer cette étape terminée.",
+            )
+            return
+        self.db.run(
+            """INSERT INTO development_status(project_id,doc_type,status,updated_at)
+            VALUES(?,?,?,?)
+            ON CONFLICT(project_id,doc_type) DO UPDATE SET
+            status=excluded.status,updated_at=excluded.updated_at""",
+            (self.active_project, self.development_doc_type, status, NOW()),
+        )
+        self.save_state.setText(
+            "Étape marquée terminée" if status == "complete" else "Étape conservée à reprendre"
+        )
+        self.show_development()
+
+    def _project_context_card(self, callback, description: str) -> QFrame:
+        card = make_card()
+        card.setObjectName("ProjectSelector")
+        box = QHBoxLayout(card)
+        box.setContentsMargins(16, 10, 12, 10)
+        box.setSpacing(10)
+        box.addWidget(make_label(description.upper(), "Caption"))
+        combo = QComboBox()
+        rows = self.db.q("SELECT id,title FROM projects WHERE archived=0 ORDER BY title COLLATE NOCASE")
+        for row in rows:
+            combo.addItem(row["title"], int(row["id"]))
+        current_index = combo.findData(self.active_project)
+        combo.setCurrentIndex(max(0, current_index))
+        combo.setMinimumWidth(230)
+        combo.setEnabled(bool(rows))
+        box.addWidget(combo)
+        box.addStretch()
+        box.addWidget(make_button("Gérer les projets", "quiet", self.show_projects))
+        combo.currentIndexChanged.connect(
+            lambda _index, selector=combo, destination=callback: self._change_project_context(
+                selector,
+                destination,
+            )
+        )
+        self.project_context_combo = combo
+        return card
+
+    def _change_project_context(self, combo: QComboBox, callback) -> None:
+        project_id = combo.currentData()
+        if not project_id or int(project_id) == self.active_project:
+            return
+        self._autosave_current_view()
+        self._skip_page_leave_save = True
+        self.active_project = int(project_id)
+        self.db.set_setting("active_project", self.active_project)
+        self._update_project_chips()
+        callback()
+
+    def show_development(self) -> None:
+        page = self._begin_page("Construction", "development")
+        project_rows = self.db.q("SELECT id FROM projects WHERE archived=0 ORDER BY updated_at DESC,id DESC")
+        if project_rows and not self.db.one(
+            "SELECT id FROM projects WHERE id=? AND archived=0", (self.active_project,)
+        ):
+            self.active_project = int(project_rows[0]["id"])
+            self.db.set_setting("active_project", self.active_project)
+            self._update_project_chips()
+        project = None
+        if self.active_project:
+            project = self.db.one("SELECT * FROM projects WHERE id=? AND archived=0", (self.active_project,))
+        self._page_header(
+            page,
+            "Développer",
+            "Construction de l’histoire",
+            (
+                f"Projet actif · {project['title']}"
+                if project
+                else "Choisis un projet pour développer son histoire, du noyau jusqu’au scénario."
+            ),
+        )
+        if not project:
+            empty = make_card()
+            empty_box = QVBoxLayout(empty)
+            empty_box.setContentsMargins(30, 28, 30, 30)
+            empty_box.setSpacing(9)
+            empty_box.addWidget(make_label("AUCUN PROJET ACTIF", "Caption"))
+            empty_box.addWidget(make_label("Commence par choisir ton histoire.", "SectionTitle"))
+            empty_box.addWidget(
+                make_label(
+                    "Les documents resteront liés au projet afin que chaque version soit enregistrée au bon endroit.",
+                    "Muted",
+                    True,
+                )
+            )
+            empty_box.addSpacing(8)
+            empty_box.addWidget(make_button("Ouvrir les projets", "primary", self.show_projects), 0, Qt.AlignmentFlag.AlignLeft)
+            empty_box.addStretch()
+            page.addWidget(empty, 1)
+            return
+
+        setting_key = f"last_development_doc_{self.active_project}"
+        selected_key = self.db.setting(setting_key, self.db.setting("development_document", DEVELOPMENT_DOCUMENTS[0][0]))
+        if selected_key == "short_summary":
+            selected_key = "summary"
+        document_names = dict(DEVELOPMENT_DOCUMENTS)
+        if selected_key not in document_names:
+            selected_key = DEVELOPMENT_DOCUMENTS[0][0]
+        self.development_doc_type = selected_key
+        self.db.set_setting(setting_key, selected_key)
+
+        completed = self._completed_development_documents(self.active_project)
+
+        body = QHBoxLayout()
+        body.setSpacing(14)
+
+        navigation = make_card()
+        navigation.setFixedWidth(260 if self.width() < 1250 else 286)
+        navigation_box = QVBoxLayout(navigation)
+        navigation_box.setContentsMargins(12, 14, 12, 14)
+        navigation_box.setSpacing(4)
+        navigation_box.addWidget(make_label("ORDRE DE TRAVAIL", "Caption"))
+        navigation_box.addSpacing(4)
+
+        document_scroll = QScrollArea()
+        document_scroll.setWidgetResizable(True)
+        document_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        document_list = QWidget()
+        document_list.setObjectName("PanelCanvas")
+        document_list_box = QVBoxLayout(document_list)
+        document_list_box.setContentsMargins(0, 0, 5, 0)
+        document_list_box.setSpacing(2)
+        group = QButtonGroup(self)
+        group.setExclusive(True)
+        for index, (key, title) in enumerate(DEVELOPMENT_DOCUMENTS, start=1):
+            completion = "   ✓" if key in completed else ""
+            button = QPushButton(f"{index:02d}   {title}{completion}")
+            button.setProperty("segment", True)
+            button.setCheckable(True)
+            button.setChecked(key == selected_key)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(lambda _checked=False, document_key=key: self._switch_development_document(document_key))
+            group.addButton(button)
+            document_list_box.addWidget(button)
+        document_list_box.addStretch()
+        document_scroll.setWidget(document_list)
+        navigation_box.addWidget(document_scroll, 1)
+        navigation_box.addWidget(make_separator())
+        navigation_box.addWidget(make_label("ÉTAT DE L’ÉTAPE", "Caption"))
+        step_status = self._development_step_status(selected_key)
+        navigation_box.addWidget(
+            make_label(
+                "TERMINÉE ✓" if step_status == "complete" else "À REPRENDRE",
+                "AccentPill" if step_status == "complete" else "Muted",
+            )
+        )
+        status_actions = QHBoxLayout()
+        status_actions.setSpacing(6)
+        status_actions.addWidget(
+            make_button(
+                "Pas fini",
+                "secondary",
+                lambda: self._set_development_step_status("draft"),
+            )
+        )
+        status_actions.addWidget(
+            make_button(
+                "Terminé",
+                "primary",
+                lambda: self._set_development_step_status("complete"),
+            )
+        )
+        navigation_box.addLayout(status_actions)
+        body.addWidget(navigation)
+
+        workspace = QWidget()
+        workspace.setObjectName("PageHost")
+        workspace_box = QVBoxLayout(workspace)
+        workspace_box.setContentsMargins(0, 0, 0, 0)
+        workspace_box.setSpacing(10)
+
+        if selected_key == "story_map":
+            # A text editor from the previously displayed document may already
+            # be scheduled for deletion by Qt. Do not retain its Python wrapper
+            # while the visual map is active.
+            self.development_text = None
+            self.story_map_mode = self.db.setting(f"story_map_mode_{self.active_project}", "board")
+            if self.story_map_mode == "guide":
+                self._build_story_map_workspace(workspace_box, project)
+            else:
+                self._build_story_map_board(workspace_box)
+        elif selected_key == "synopsis":
+            self.development_text = None
+            self.synopsis_mode = self.db.setting(f"synopsis_mode_{self.active_project}", "guide")
+            if self.synopsis_mode == "final":
+                self._build_synopsis_final_workspace(workspace_box)
+            else:
+                self._build_synopsis_guide_workspace(workspace_box, project)
+        elif selected_key == "outline":
+            self.development_text = None
+            self._build_outline_workspace(workspace_box)
+        elif selected_key == "scenes":
+            self.development_text = None
+            self._build_scene_list_workspace(workspace_box)
+        elif selected_key == "script":
+            self.development_text = None
+            self._build_script_summary_workspace(workspace_box, project)
+        else:
+            self._build_development_document_workspace(workspace_box, selected_key, document_names)
+        body.addWidget(workspace, 1)
+
+        page.addLayout(body, 1)
+
+    def _build_development_document_workspace(
+        self,
+        workspace_box: QVBoxLayout,
+        selected_key: str,
+        document_names: dict[str, str],
+    ) -> None:
+        guide = DEVELOPMENT_GUIDES[selected_key]
+        selected_index = [key for key, _title in DEVELOPMENT_DOCUMENTS].index(selected_key)
+        document = self.db.ensure_doc(self.active_project, selected_key, document_names[selected_key])
+        compact_height = self.height() < 800
+
+        brief = make_card()
+        brief_box = QVBoxLayout(brief)
+        brief_box.setContentsMargins(
+            16 if compact_height else 22,
+            11 if compact_height else 17,
+            16 if compact_height else 22,
+            12 if compact_height else 18,
+        )
+        brief_box.setSpacing(4 if compact_height else 6)
+        brief_head = QHBoxLayout()
+        brief_head.addWidget(make_label(f"ÉTAPE {selected_index + 1:02d} · {document_names[selected_key].upper()}", "Caption"))
+        brief_head.addStretch()
+        explicit_status = self._development_step_status(selected_key)
+        state_text = (
+            "TERMINÉE"
+            if explicit_status == "complete"
+            else "EN COURS"
+            if document["content"].strip()
+            else "À COMMENCER"
+        )
+        state = make_label(state_text, "AccentPill")
+        state.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        brief_head.addWidget(state)
+        brief_box.addLayout(brief_head)
+        brief_box.addWidget(make_label(guide["objective"], "CardTitle" if self.width() < 1250 else "SectionTitle", True))
+        if compact_height:
+            compact_guidance = guide.get("how") or guide["definition"]
+            brief_box.addWidget(make_label(compact_guidance, "Muted", True))
+        else:
+            brief_box.addSpacing(2)
+            brief_box.addWidget(make_label("OBJECTIF / DÉFINITION", "Caption"))
+            brief_box.addWidget(make_label(guide["definition"], "Body", True))
+            if guide.get("how"):
+                brief_box.addWidget(make_label("COMMENT FAIRE", "Caption"))
+                brief_box.addWidget(make_label(guide["how"], "Muted", True))
+            brief_box.addWidget(make_label(guide["format"], "Muted", True))
+        workspace_box.addWidget(brief)
+
+        editor_head = QHBoxLayout()
+        editor_head.addWidget(make_label("TON DOCUMENT", "Caption"))
+        editor_head.addStretch()
+        editor_head.addWidget(make_label("Zone longue · ascenseur toujours visible", "Muted"))
+        workspace_box.addLayout(editor_head)
+
+        self.development_text = make_editor(
+            150 if self.height() < 800 else 230,
+            guide["prompt"],
+        )
+        self.development_text.setObjectName("LearningAnswer")
+        self.development_text.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.development_text.setPlainText(document["content"])
+        workspace_box.addWidget(self.development_text, 1)
+
+        action_bar = QWidget()
+        action_bar.setFixedHeight(52)
+        actions = QHBoxLayout(action_bar)
+        actions.setContentsMargins(0, 4, 0, 0)
+        actions.setSpacing(8)
+        compact = self.width() < 1250
+        previous = make_button("←" if compact else "← Précédent", "secondary", self._previous_development_document)
+        previous.setEnabled(selected_index > 0)
+        actions.addWidget(previous)
+        actions.addWidget(make_button("Enregistrer", "secondary", self._save_development_document))
+        if selected_key == "beats":
+            actions.addWidget(make_button("Utiliser un template", "secondary", self._insert_beat_template))
+        actions.addWidget(
+            make_button("Version" if compact else "Créer une version", "secondary", self._snapshot_development_document)
+        )
+        actions.addStretch()
+        if selected_index < len(DEVELOPMENT_DOCUMENTS) - 1:
+            actions.addWidget(
+                make_button("Continuer →" if compact else "Enregistrer et continuer →", "primary", self._continue_development_document)
+            )
+        else:
+            actions.addWidget(make_button("Enregistrer", "primary", self._save_development_document))
+        workspace_box.addWidget(action_bar)
+
+    def _build_outline_workspace(self, workspace_box: QVBoxLayout) -> None:
+        self._migrate_legacy_outline_if_needed()
+        self._sync_outline_sources()
+        mode = self.db.setting(f"outline_mode_{self.active_project}", "global")
+        if mode == "sequences":
+            self._build_sequence_workspace(workspace_box)
+            return
+
+        rows = self._outline_rows()
+        diagnostics = self._outline_diagnostics(rows)
+        brief = make_card()
+        brief_box = QVBoxLayout(brief)
+        brief_box.setContentsMargins(20, 15, 20, 16)
+        brief_box.setSpacing(5)
+        head = QHBoxLayout()
+        head.addWidget(make_label("PLAN GLOBAL DE L’HISTOIRE", "Caption"))
+        head.addStretch()
+        self.outline_diagnostic_pill = make_label(
+            f"{len(diagnostics)} À REVOIR" if diagnostics else "PLAN LISIBLE",
+            "AccentPill",
+        )
+        head.addWidget(self.outline_diagnostic_pill)
+        self.outline_count_pill = make_label(f"{len(rows)} ÉLÉMENTS", "AccentPill")
+        head.addWidget(self.outline_count_pill)
+        brief_box.addLayout(head)
+        brief_box.addWidget(
+            make_label(
+                "Vois toute l’histoire, puis replie les parties dont tu n’as pas besoin.",
+                "CardTitle",
+                True,
+            )
+        )
+        brief_box.addWidget(
+            make_label(
+                "Sections, séquences, beats et scènes restent libres : les actes ne sont jamais imposés.",
+                "Muted",
+                True,
+            )
+        )
+        workspace_box.addWidget(brief)
+
+        view_bar = QHBoxLayout()
+        self.outline_search = QLineEdit()
+        self.outline_search.setPlaceholderText("Rechercher dans le plan…")
+        self.outline_search.setClearButtonEnabled(True)
+        self.outline_search.setMaximumWidth(310)
+        view_bar.addWidget(self.outline_search, 1)
+        view_bar.addStretch()
+        view_bar.addWidget(make_button("Diagnostic", "quiet", self._show_outline_diagnostics))
+        self.outline_view_combo = QComboBox()
+        self.outline_view_combo.addItem("Vue compacte", "compact")
+        self.outline_view_combo.addItem("Vue détaillée", "detailed")
+        view_mode = self.db.setting(f"outline_view_{self.active_project}", "detailed")
+        self.outline_view_combo.setCurrentIndex(max(0, self.outline_view_combo.findData(view_mode)))
+        view_bar.addWidget(self.outline_view_combo)
+        view_bar.addWidget(make_button("−", "quiet", lambda: self._change_outline_zoom(-10)))
+        self.outline_zoom_label = make_label("100 %", "Muted")
+        view_bar.addWidget(self.outline_zoom_label)
+        view_bar.addWidget(make_button("+", "quiet", lambda: self._change_outline_zoom(10)))
+        workspace_box.addLayout(view_bar)
+
+        self.outline_tree = OutlineTreeWidget()
+        self.outline_tree.setColumnCount(6)
+        self.outline_tree.setHeaderLabels(
+            ("TYPE", "TITRE", "CONTENU / OPPOSITION", "FONCTION / OBJECTIF", "CONSÉQUENCE / CHANGEMENT", "SOURCE")
+        )
+        self.outline_tree.header().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.outline_tree.setColumnWidth(0, 180)
+        self.outline_tree.setColumnWidth(1, 250)
+        self.outline_tree.setColumnWidth(2, 290)
+        self.outline_tree.setColumnWidth(3, 245)
+        self.outline_tree.setColumnWidth(4, 265)
+        self.outline_tree.setColumnWidth(5, 115)
+        self.outline_tree.setMinimumHeight(330)
+        workspace_box.addWidget(self.outline_tree, 1)
+
+        compact_outline_actions = self.width() < 1500
+        primary_actions = QHBoxLayout()
+        self.outline_add_type = QComboBox()
+        self.outline_add_type.addItem("Section libre", "section")
+        self.outline_add_type.addItem("Séquence", "sequence")
+        self.outline_add_type.addItem("Beat", "beat")
+        self.outline_add_type.addItem("Scène", "scene")
+        primary_actions.addWidget(self.outline_add_type)
+        primary_actions.addWidget(make_button("+ Ajouter", "primary", self._add_outline_item))
+        primary_actions.addWidget(make_button("Dupliquer", "secondary", self._duplicate_outline_item))
+        primary_actions.addWidget(make_button("Supprimer", "danger", self._delete_outline_item))
+        primary_actions.addStretch()
+        primary_actions.addWidget(
+            make_button(
+                "Séquencier détaillé →",
+                "secondary",
+                lambda: self._set_outline_mode("sequences"),
+            )
+            if not compact_outline_actions
+            else make_button(
+                "Séquencier →",
+                "secondary",
+                lambda: self._set_outline_mode("sequences"),
+            )
+        )
+        workspace_box.addLayout(primary_actions)
+        secondary_actions = QHBoxLayout()
+        secondary_actions.addWidget(
+            make_button("←" if compact_outline_actions else "← Niveau", "quiet", lambda: self._change_outline_level(-1))
+        )
+        secondary_actions.addWidget(
+            make_button("→" if compact_outline_actions else "Niveau →", "quiet", lambda: self._change_outline_level(1))
+        )
+        secondary_actions.addWidget(
+            make_button("→ Scène" if compact_outline_actions else "Transformer en scène", "quiet", self._convert_outline_item_to_scene)
+        )
+        secondary_actions.addWidget(
+            make_button("Lier carte" if compact_outline_actions else "Lier à une carte", "quiet", self._link_outline_item_to_card)
+        )
+        secondary_actions.addWidget(
+            make_button("Ouvrir" if compact_outline_actions else "Ouvrir la source", "quiet", self._open_outline_source)
+        )
+        secondary_actions.addStretch()
+        secondary_actions.addWidget(
+            make_button("Replier" if compact_outline_actions else "Tout replier", "quiet", lambda: self._outline_set_all_collapsed(True))
+        )
+        secondary_actions.addWidget(
+            make_button("Déplier" if compact_outline_actions else "Tout déplier", "quiet", lambda: self._outline_set_all_collapsed(False))
+        )
+        workspace_box.addLayout(secondary_actions)
+
+        self.outline_loading = False
+        self._fill_outline_tree(rows)
+        self.outline_tree.structure_changed.connect(self._outline_tree_reordered)
+        self.outline_tree.itemChanged.connect(self._outline_item_changed)
+        self.outline_tree.itemExpanded.connect(lambda item: self._outline_collapse_changed(item, False))
+        self.outline_tree.itemCollapsed.connect(lambda item: self._outline_collapse_changed(item, True))
+        self.outline_tree.itemDoubleClicked.connect(self._edit_outline_cell)
+        self.outline_search.textChanged.connect(self._filter_outline_tree)
+        self.outline_view_combo.currentIndexChanged.connect(self._outline_view_changed)
+        self._apply_outline_view(view_mode)
+        zoom = int(self.db.setting(f"outline_zoom_{self.active_project}", 100) or 100)
+        self._apply_outline_zoom(zoom)
+
+    def _outline_rows(self):
+        return self.db.q(
+            "SELECT * FROM outline_items WHERE project_id=? ORDER BY parent_id,position,id",
+            (self.active_project,),
+        )
+
+    def _outline_next_position(self, parent_id=None) -> int:
+        return int(
+            self.db.one(
+                "SELECT COALESCE(MAX(position),-1)+1 FROM outline_items WHERE project_id=? AND parent_id IS ?",
+                (self.active_project, parent_id),
+            )[0]
+        )
+
+    def _sync_outline_sources(self) -> None:
+        if not self.active_project:
+            return
+        rows = self._outline_rows()
+        by_sequence = {int(row["source_sequence_id"]): row for row in rows if row["source_sequence_id"]}
+        by_scene = {int(row["source_scene_id"]): row for row in rows if row["source_scene_id"]}
+        sequence_rows = self.db.q(
+            "SELECT * FROM sequence_blocks WHERE project_id=? ORDER BY position,id",
+            (self.active_project,),
+        )
+        valid_sequences = {int(row["id"]) for row in sequence_rows}
+        for sequence in sequence_rows:
+            source_id = int(sequence["id"])
+            existing = by_sequence.get(source_id)
+            values = (
+                sequence["title"], sequence["events"], sequence["purpose"],
+                sequence["consequence"], int(sequence["source_node_id"] or 0),
+            )
+            if existing:
+                current = (
+                    existing["title"], existing["summary"], existing["function_note"],
+                    existing["consequence"], int(existing["source_node_id"] or 0),
+                )
+                if current != values:
+                    self.db.run(
+                        """UPDATE outline_items SET item_type='sequence',title=?,summary=?,function_note=?,
+                        consequence=?,source_node_id=?,updated_at=? WHERE id=?""",
+                        (*values, NOW(), int(existing["id"])),
+                    )
+            else:
+                outline_id = self.db.create_outline_item(
+                    self.active_project,
+                    self._outline_next_position(),
+                    "sequence",
+                    sequence["title"],
+                    sequence["events"],
+                    sequence["purpose"],
+                    sequence["consequence"],
+                    source_sequence_id=source_id,
+                    source_node_id=int(sequence["source_node_id"] or 0),
+                )
+                by_sequence[source_id] = self.db.one("SELECT * FROM outline_items WHERE id=?", (outline_id,))
+
+        scene_rows = self.db.q(
+            "SELECT * FROM scene_rows WHERE project_id=? ORDER BY position,id",
+            (self.active_project,),
+        )
+        valid_scenes = {int(row["id"]) for row in scene_rows}
+        for scene in scene_rows:
+            source_id = int(scene["id"])
+            existing = by_scene.get(source_id)
+            values = (scene["title"], scene["opposition"], scene["objective"], scene["change_note"])
+            if existing:
+                current = (
+                    existing["title"], existing["summary"],
+                    existing["function_note"], existing["consequence"],
+                )
+                if current != values:
+                    self.db.run(
+                        """UPDATE outline_items SET item_type='scene',title=?,summary=?,function_note=?,
+                        consequence=?,updated_at=? WHERE id=?""",
+                        (*values, NOW(), int(existing["id"])),
+                    )
+            else:
+                parent = by_sequence.get(int(scene["source_sequence_id"] or 0))
+                parent_id = int(parent["id"]) if parent else None
+                self.db.create_outline_item(
+                    self.active_project,
+                    self._outline_next_position(parent_id),
+                    "scene",
+                    scene["title"],
+                    scene["opposition"],
+                    scene["objective"],
+                    scene["change_note"],
+                    parent_id=parent_id,
+                    source_scene_id=source_id,
+                )
+
+        for row in rows:
+            sequence_id = int(row["source_sequence_id"] or 0)
+            scene_id = int(row["source_scene_id"] or 0)
+            if sequence_id and sequence_id not in valid_sequences:
+                self.db.run("UPDATE outline_items SET source_sequence_id=0 WHERE id=?", (int(row["id"]),))
+            if scene_id and scene_id not in valid_scenes:
+                self.db.run("UPDATE outline_items SET source_scene_id=0 WHERE id=?", (int(row["id"]),))
+
+    def _fill_outline_tree(self, rows, select_id: int | None = None) -> None:
+        self.outline_loading = True
+        self.outline_tree.clear()
+        self.outline_item_widgets = {}
+        row_by_id = {int(row["id"]): row for row in rows}
+        children = {}
+        for row in rows:
+            parent_id = int(row["parent_id"]) if row["parent_id"] else None
+            if parent_id not in row_by_id:
+                parent_id = None
+            children.setdefault(parent_id, []).append(row)
+        for bucket in children.values():
+            bucket.sort(key=lambda row: (int(row["position"]), int(row["id"])))
+        visited = set()
+
+        def add_row(row, parent_widget=None):
+            item_id = int(row["id"])
+            if item_id in visited:
+                return
+            visited.add(item_id)
+            source = (
+                "SCÈNE" if row["source_scene_id"]
+                else "SÉQUENCE" if row["source_sequence_id"]
+                else "CARTE" if row["source_node_id"]
+                else "LIBRE"
+            )
+            item = QTreeWidgetItem(
+                [
+                    OUTLINE_TYPES.get(row["item_type"], row["item_type"].upper()),
+                    row["title"], row["summary"], row["function_note"], row["consequence"], source,
+                ]
+            )
+            item.setData(0, Qt.ItemDataRole.UserRole, item_id)
+            item.setData(0, Qt.ItemDataRole.UserRole + 1, row["item_type"])
+            item.setData(0, Qt.ItemDataRole.UserRole + 2, int(row["source_sequence_id"] or 0))
+            item.setData(0, Qt.ItemDataRole.UserRole + 3, int(row["source_scene_id"] or 0))
+            item.setData(0, Qt.ItemDataRole.UserRole + 4, int(row["source_node_id"] or 0))
+            item.setFlags(
+                item.flags() | Qt.ItemFlag.ItemIsEditable | Qt.ItemFlag.ItemIsDragEnabled | Qt.ItemFlag.ItemIsDropEnabled
+            )
+            if parent_widget is None:
+                self.outline_tree.addTopLevelItem(item)
+            else:
+                parent_widget.addChild(item)
+            item.setExpanded(not bool(row["collapsed"]))
+            self.outline_item_widgets[item_id] = item
+            for child in children.get(item_id, []):
+                add_row(child, item)
+
+        for row in children.get(None, []):
+            add_row(row)
+        for row in rows:
+            if int(row["id"]) not in visited:
+                add_row(row)
+        if select_id and select_id in self.outline_item_widgets:
+            selected = self.outline_item_widgets[select_id]
+            self.outline_tree.setCurrentItem(selected)
+            self.outline_tree.scrollToItem(selected)
+        self.outline_loading = False
+
+    def _refresh_outline_tree(self, select_id: int | None = None) -> None:
+        tree = getattr(self, "outline_tree", None)
+        if not isinstance(tree, QTreeWidget):
+            return
+        rows = self._outline_rows()
+        self._fill_outline_tree(rows, select_id)
+        diagnostics = self._outline_diagnostics(rows)
+        self.outline_count_pill.setText(f"{len(rows)} ÉLÉMENTS")
+        self.outline_diagnostic_pill.setText(f"{len(diagnostics)} À REVOIR" if diagnostics else "PLAN LISIBLE")
+        self._apply_outline_view(self.db.setting(f"outline_view_{self.active_project}", "detailed"))
+
+    def _edit_outline_cell(self, item: QTreeWidgetItem, column: int) -> None:
+        if column in (1, 2, 3, 4):
+            self.outline_tree.editItem(item, column)
+
+    def _outline_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
+        if self.outline_loading or column not in (1, 2, 3, 4):
+            return
+        item_id = int(item.data(0, Qt.ItemDataRole.UserRole))
+        item_type = item.data(0, Qt.ItemDataRole.UserRole + 1)
+        title, summary, function_note, consequence = (item.text(index).strip() for index in range(1, 5))
+        self.db.update_outline_item(item_id, title, summary, function_note, consequence, item_type)
+        sequence_id = int(item.data(0, Qt.ItemDataRole.UserRole + 2) or 0)
+        scene_id = int(item.data(0, Qt.ItemDataRole.UserRole + 3) or 0)
+        if sequence_id:
+            self.db.update_sequence_block(sequence_id, title, function_note, summary, consequence)
+        if scene_id:
+            self.db.run(
+                """UPDATE scene_rows SET title=?,objective=?,opposition=?,change_note=?,updated_at=?
+                WHERE id=? AND project_id=?""",
+                (title, function_note, summary, consequence, NOW(), scene_id, self.active_project),
+            )
+        self._save_outline_document_copy()
+
+    def _outline_tree_reordered(self) -> None:
+        if self.outline_loading:
+            return
+        buckets = {}
+
+        def visit(item, visual_parent=None):
+            item_id = int(item.data(0, Qt.ItemDataRole.UserRole))
+            item_type = item.data(0, Qt.ItemDataRole.UserRole + 1)
+            parent_id = int(visual_parent.data(0, Qt.ItemDataRole.UserRole)) if visual_parent else None
+            parent_type = visual_parent.data(0, Qt.ItemDataRole.UserRole + 1) if visual_parent else None
+            if (
+                item_type == "section"
+                or (item_type == "sequence" and parent_type != "section")
+                or (item_type in ("beat", "scene") and parent_type not in ("section", "sequence"))
+            ):
+                parent_id = None
+            buckets.setdefault(parent_id, []).append(item_id)
+            for index in range(item.childCount()):
+                visit(item.child(index), item)
+
+        for index in range(self.outline_tree.topLevelItemCount()):
+            visit(self.outline_tree.topLevelItem(index))
+        placements = [
+            (item_id, parent_id, position)
+            for parent_id, item_ids in buckets.items()
+            for position, item_id in enumerate(item_ids)
+        ]
+        self.db.save_outline_structure(self.active_project, placements)
+        selected = self.outline_tree.currentItem()
+        selected_id = int(selected.data(0, Qt.ItemDataRole.UserRole)) if selected else None
+        self._save_outline_document_copy()
+        self._refresh_outline_tree(selected_id)
+        self.save_state.setText("Nouvel ordre enregistré")
+        QTimer.singleShot(2200, lambda: self.save_state.setText(""))
+
+    def _outline_collapse_changed(self, item: QTreeWidgetItem, collapsed: bool) -> None:
+        if self.outline_loading:
+            return
+        item_id = int(item.data(0, Qt.ItemDataRole.UserRole))
+        self.db.run(
+            "UPDATE outline_items SET collapsed=?,updated_at=? WHERE id=?",
+            (int(collapsed), NOW(), item_id),
+        )
+
+    def _outline_set_all_collapsed(self, collapsed: bool) -> None:
+        self.outline_loading = True
+        self.db.run(
+            "UPDATE outline_items SET collapsed=?,updated_at=? WHERE project_id=?",
+            (int(collapsed), NOW(), self.active_project),
+        )
+        if collapsed:
+            self.outline_tree.collapseAll()
+        else:
+            self.outline_tree.expandAll()
+        self.outline_loading = False
+
+    def _filter_outline_tree(self, query: str) -> None:
+        needle = query.strip().casefold()
+
+        def visit(item):
+            child_match = any(visit(item.child(index)) for index in range(item.childCount()))
+            own_match = not needle or needle in " ".join(item.text(column) for column in range(6)).casefold()
+            visible = own_match or child_match
+            item.setHidden(not visible)
+            if needle and child_match:
+                item.setExpanded(True)
+            return visible
+
+        for index in range(self.outline_tree.topLevelItemCount()):
+            visit(self.outline_tree.topLevelItem(index))
+
+    def _outline_view_changed(self) -> None:
+        mode = self.outline_view_combo.currentData() or "detailed"
+        self.db.set_setting(f"outline_view_{self.active_project}", mode)
+        self._apply_outline_view(mode)
+
+    def _apply_outline_view(self, mode: str) -> None:
+        compact = mode == "compact"
+        for column in (2, 3, 4):
+            self.outline_tree.setColumnHidden(column, compact)
+        self.outline_tree.setColumnWidth(0, 180)
+        self.outline_tree.setColumnWidth(1, 470 if compact else 250)
+
+    def _change_outline_zoom(self, delta: int) -> None:
+        current = int(self.db.setting(f"outline_zoom_{self.active_project}", 100) or 100)
+        zoom = min(140, max(80, current + delta))
+        self.db.set_setting(f"outline_zoom_{self.active_project}", zoom)
+        self._apply_outline_zoom(zoom)
+
+    def _apply_outline_zoom(self, zoom: int) -> None:
+        font = QFont(self.outline_tree.font())
+        base = QApplication.font().pointSizeF()
+        if base <= 0:
+            base = 10.0
+        font.setPointSizeF(base * zoom / 100)
+        self.outline_tree.setFont(font)
+        self.outline_zoom_label.setText(f"{zoom} %")
+
+    def _outline_parent_for_new_item(self, item_type: str):
+        selected = self.outline_tree.currentItem()
+        if item_type == "section" or selected is None:
+            return None
+        selected_type = selected.data(0, Qt.ItemDataRole.UserRole + 1)
+        if item_type == "sequence":
+            return int(selected.data(0, Qt.ItemDataRole.UserRole)) if selected_type == "section" else None
+        if selected_type in ("section", "sequence"):
+            return int(selected.data(0, Qt.ItemDataRole.UserRole))
+        parent = selected.parent()
+        return int(parent.data(0, Qt.ItemDataRole.UserRole)) if parent else None
+
+    def _add_outline_item(self) -> None:
+        item_type = self.outline_add_type.currentData() or "beat"
+        parent_id = self._outline_parent_for_new_item(item_type)
+        position = self._outline_next_position(parent_id)
+        titles = {
+            "section": "Nouvelle partie",
+            "sequence": "Séquence sans titre",
+            "beat": "Nouveau moment",
+            "scene": "Nouvelle scène",
+        }
+        source_sequence_id = 0
+        source_scene_id = 0
+        if item_type == "sequence":
+            source_sequence_id = self.db.create_sequence_block(
+                self.active_project,
+                self.db.one("SELECT COUNT(*) FROM sequence_blocks WHERE project_id=?", (self.active_project,))[0],
+                titles[item_type],
+            )
+        elif item_type == "scene":
+            source_scene_id = self.db.run(
+                """INSERT INTO scene_rows(project_id,position,title,duration,created_at,updated_at)
+                VALUES(?,?,?,?,?,?)""",
+                (
+                    self.active_project,
+                    self.db.one("SELECT COUNT(*) FROM scene_rows WHERE project_id=?", (self.active_project,))[0],
+                    titles[item_type], 0, NOW(), NOW(),
+                ),
+            ).lastrowid
+        item_id = self.db.create_outline_item(
+            self.active_project, position, item_type, titles[item_type], parent_id=parent_id,
+            source_sequence_id=source_sequence_id, source_scene_id=source_scene_id,
+        )
+        self._save_outline_document_copy()
+        self._refresh_outline_tree(item_id)
+        QTimer.singleShot(0, lambda: self._edit_outline_cell(self.outline_tree.currentItem(), 1))
+
+    def _duplicate_outline_item(self) -> None:
+        item = self.outline_tree.currentItem()
+        if not item:
+            return
+        item_id = int(item.data(0, Qt.ItemDataRole.UserRole))
+        row = self.db.one("SELECT * FROM outline_items WHERE id=? AND project_id=?", (item_id, self.active_project))
+        if not row:
+            return
+        parent_id = int(row["parent_id"]) if row["parent_id"] else None
+        source_sequence_id = 0
+        source_scene_id = 0
+        if row["item_type"] == "sequence":
+            source_sequence_id = self.db.create_sequence_block(
+                self.active_project,
+                self.db.one("SELECT COUNT(*) FROM sequence_blocks WHERE project_id=?", (self.active_project,))[0],
+                f"{row['title'] or 'Séquence sans titre'} — copie",
+                row["function_note"], row["summary"], row["consequence"], 0,
+            )
+        elif row["item_type"] == "scene":
+            source_scene_id = self.db.run(
+                """INSERT INTO scene_rows(
+                project_id,position,title,duration,objective,opposition,change_note,created_at,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?)""",
+                (
+                    self.active_project,
+                    self.db.one("SELECT COUNT(*) FROM scene_rows WHERE project_id=?", (self.active_project,))[0],
+                    f"{row['title'] or 'Scène sans titre'} — copie", 0,
+                    row["function_note"], row["summary"], row["consequence"], NOW(), NOW(),
+                ),
+            ).lastrowid
+        duplicate_id = self.db.create_outline_item(
+            self.active_project,
+            self._outline_next_position(parent_id),
+            row["item_type"],
+            f"{row['title'] or OUTLINE_TYPES.get(row['item_type'], 'Élément').title()} — copie",
+            row["summary"], row["function_note"], row["consequence"], parent_id=parent_id,
+            source_sequence_id=source_sequence_id, source_scene_id=source_scene_id,
+            source_node_id=0,
+        )
+        self._save_outline_document_copy()
+        self._refresh_outline_tree(duplicate_id)
+
+    def _delete_outline_item(self) -> None:
+        item = self.outline_tree.currentItem()
+        if not item:
+            return
+        item_id = int(item.data(0, Qt.ItemDataRole.UserRole))
+        answer = QMessageBox.question(
+            self,
+            "Retirer du plan",
+            f"Retirer « {item.text(1) or 'cet élément'} » du plan ?\n\nLa séquence ou scène liée restera conservée dans son outil.",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.db.run("DELETE FROM outline_items WHERE id=? AND project_id=?", (item_id, self.active_project))
+        self._save_outline_document_copy()
+        self._refresh_outline_tree()
+
+    def _change_outline_level(self, direction: int) -> None:
+        item = self.outline_tree.currentItem()
+        if not item:
+            return
+        if direction > 0:
+            parent = item.parent()
+            index = parent.indexOfChild(item) if parent else self.outline_tree.indexOfTopLevelItem(item)
+            if index <= 0:
+                return
+            previous = parent.child(index - 1) if parent else self.outline_tree.topLevelItem(index - 1)
+            item_type = item.data(0, Qt.ItemDataRole.UserRole + 1)
+            previous_type = previous.data(0, Qt.ItemDataRole.UserRole + 1)
+            allowed = previous_type == "section" if item_type == "sequence" else previous_type in ("section", "sequence")
+            if item_type == "section" or not allowed:
+                return
+            if parent:
+                parent.takeChild(index)
+            else:
+                self.outline_tree.takeTopLevelItem(index)
+            previous.addChild(item)
+            previous.setExpanded(True)
+        else:
+            parent = item.parent()
+            if not parent:
+                return
+            grandparent = parent.parent()
+            index = parent.indexOfChild(item)
+            parent.takeChild(index)
+            if grandparent:
+                grandparent.insertChild(grandparent.indexOfChild(parent) + 1, item)
+            else:
+                self.outline_tree.insertTopLevelItem(self.outline_tree.indexOfTopLevelItem(parent) + 1, item)
+        self.outline_tree.setCurrentItem(item)
+        self._outline_tree_reordered()
+
+    def _convert_outline_item_to_scene(self) -> None:
+        item = self.outline_tree.currentItem()
+        if not item:
+            return
+        item_id = int(item.data(0, Qt.ItemDataRole.UserRole))
+        row = self.db.one("SELECT * FROM outline_items WHERE id=?", (item_id,))
+        if not row or row["item_type"] != "beat":
+            QMessageBox.information(self, "Conversion", "Sélectionne un beat libre à transformer en scène.")
+            return
+        scene_id = self.db.run(
+            """INSERT INTO scene_rows(
+            project_id,position,title,duration,objective,opposition,change_note,created_at,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?)""",
+            (
+                self.active_project,
+                self.db.one("SELECT COUNT(*) FROM scene_rows WHERE project_id=?", (self.active_project,))[0],
+                row["title"], 0, row["function_note"], row["summary"], row["consequence"], NOW(), NOW(),
+            ),
+        ).lastrowid
+        self.db.run(
+            "UPDATE outline_items SET item_type='scene',source_scene_id=?,updated_at=? WHERE id=?",
+            (scene_id, NOW(), item_id),
+        )
+        self._save_outline_document_copy()
+        self._refresh_outline_tree(item_id)
+
+    def _link_outline_item_to_card(self) -> None:
+        item = self.outline_tree.currentItem()
+        if not item:
+            return
+        nodes = self.db.q(
+            "SELECT id,title,content FROM story_map_nodes WHERE project_id=? ORDER BY x,y,id",
+            (self.active_project,),
+        )
+        if not nodes:
+            QMessageBox.information(self, "Aucune carte", "La carte de l’histoire ne contient encore aucun élément.")
+            return
+        labels = []
+        for node in nodes:
+            preview = " ".join(node["content"].split())
+            labels.append(f"{node['title'] or 'Carte sans titre'} — {preview[:70]}" if preview else (node["title"] or "Carte sans titre"))
+        selected, accepted = QInputDialog.getItem(self, "Lier à une carte", "Carte de l’histoire :", labels, 0, False)
+        if not accepted:
+            return
+        node_id = int(nodes[labels.index(selected)]["id"])
+        item_id = int(item.data(0, Qt.ItemDataRole.UserRole))
+        self.db.run("UPDATE outline_items SET source_node_id=?,updated_at=? WHERE id=?", (node_id, NOW(), item_id))
+        sequence_id = int(item.data(0, Qt.ItemDataRole.UserRole + 2) or 0)
+        if sequence_id:
+            self.db.run("UPDATE sequence_blocks SET source_node_id=?,updated_at=? WHERE id=?", (node_id, NOW(), sequence_id))
+        self._refresh_outline_tree(item_id)
+
+    def _open_outline_source(self) -> None:
+        item = self.outline_tree.currentItem()
+        if not item:
+            return
+        sequence_id = int(item.data(0, Qt.ItemDataRole.UserRole + 2) or 0)
+        scene_id = int(item.data(0, Qt.ItemDataRole.UserRole + 3) or 0)
+        node_id = int(item.data(0, Qt.ItemDataRole.UserRole + 4) or 0)
+        if sequence_id:
+            self._pending_sequence_focus = sequence_id
+            self._set_outline_mode("sequences")
+        elif scene_id:
+            self.db.set_setting(f"last_development_doc_{self.active_project}", "scenes")
+            self._pending_scene_focus = scene_id
+            self.show_development()
+        elif node_id:
+            self.db.set_setting(f"last_development_doc_{self.active_project}", "story_map")
+            self.show_development()
+        else:
+            QMessageBox.information(self, "Élément libre", "Cet élément n’est encore relié à aucune carte, séquence ou scène.")
+
+    def _outline_diagnostics(self, rows=None) -> list[str]:
+        rows = rows if rows is not None else self._outline_rows()
+        issues = []
+        for row in rows:
+            title = row["title"].strip() or OUTLINE_TYPES.get(row["item_type"], "Élément").title()
+            if not row["title"].strip():
+                issues.append(f"{title} : titre manquant")
+            if row["item_type"] == "sequence":
+                if not row["summary"].strip():
+                    issues.append(f"{title} : événements à préciser")
+                if not row["consequence"].strip():
+                    issues.append(f"{title} : conséquence à préciser")
+            elif row["item_type"] == "beat" and not row["consequence"].strip():
+                issues.append(f"{title} : effet sur la suite à préciser")
+            elif row["item_type"] == "scene":
+                if not row["function_note"].strip():
+                    issues.append(f"{title} : objectif de scène à préciser")
+                if not row["summary"].strip():
+                    issues.append(f"{title} : opposition à préciser")
+                if not row["consequence"].strip():
+                    issues.append(f"{title} : changement de sortie à préciser")
+        return issues
+
+    def _show_outline_diagnostics(self) -> None:
+        issues = self._outline_diagnostics()
+        if not issues:
+            QMessageBox.information(
+                self,
+                "Diagnostic du plan",
+                "Le plan ne présente aucun manque élémentaire. Vérifie maintenant la causalité et la progression à la lecture.",
+            )
+            return
+        shown = "\n".join(f"• {issue}" for issue in issues[:14])
+        suffix = f"\n\n… et {len(issues) - 14} autre(s)." if len(issues) > 14 else ""
+        QMessageBox.information(self, "Diagnostic du plan", shown + suffix)
+
+    def _save_outline_document_copy(self) -> None:
+        if not self.active_project:
+            return
+        rows = self._outline_rows()
+        row_by_id = {int(row["id"]): row for row in rows}
+        children = {}
+        for row in rows:
+            parent_id = int(row["parent_id"]) if row["parent_id"] and int(row["parent_id"]) in row_by_id else None
+            children.setdefault(parent_id, []).append(row)
+        for bucket in children.values():
+            bucket.sort(key=lambda row: (int(row["position"]), int(row["id"])))
+        lines = []
+
+        def write(row, depth=0):
+            title = row["title"].strip() or OUTLINE_TYPES.get(row["item_type"], "Élément").title()
+            lines.append(f"{'  ' * depth}{OUTLINE_TYPES.get(row['item_type'], 'ÉLÉMENT')} · {title}")
+            for label, key in (("Contenu", "summary"), ("Fonction", "function_note"), ("Conséquence", "consequence")):
+                if row[key].strip():
+                    lines.append(f"{'  ' * (depth + 1)}{label} : {row[key].strip()}")
+            for child in children.get(int(row["id"]), []):
+                write(child, depth + 1)
+
+        for row in children.get(None, []):
+            write(row)
+        self.db.ensure_doc(self.active_project, "outline", "Plan global")
+        self.db.save_doc(self.active_project, "outline", "\n".join(lines))
+        self.db.run("UPDATE projects SET current_document='outline' WHERE id=?", (self.active_project,))
+
+    def _set_outline_mode(self, mode: str) -> None:
+        self.db.set_setting(f"outline_mode_{self.active_project}", mode)
+        self.show_development()
+
+    def _build_sequence_workspace(self, workspace_box: QVBoxLayout) -> None:
+        self._migrate_legacy_outline_if_needed()
+        rows = self.db.q(
+            "SELECT * FROM sequence_blocks WHERE project_id=? ORDER BY position,id",
+            (self.active_project,),
+        )
+
+        brief = make_card()
+        brief_box = QVBoxLayout(brief)
+        brief_box.setContentsMargins(20, 15, 20, 16)
+        brief_box.setSpacing(5)
+        brief_head = QHBoxLayout()
+        brief_head.addWidget(make_label("SÉQUENCIER VISUEL", "Caption"))
+        brief_head.addStretch()
+        self.sequence_tag_filter = QComboBox()
+        self.sequence_tag_filter.addItem("Tous les tags", 0)
+        for tag in self.db.q(
+            "SELECT id,name FROM tags WHERE project_id=? ORDER BY name COLLATE NOCASE",
+            (self.active_project,),
+        ):
+            self.sequence_tag_filter.addItem(f"#{tag['name']}", int(tag["id"]))
+        self.sequence_tag_filter.currentIndexChanged.connect(
+            lambda _index: self._refresh_sequence_list()
+        )
+        brief_head.addWidget(self.sequence_tag_filter)
+        brief_head.addWidget(make_button("← Plan global", "quiet", lambda: self._set_outline_mode("global")))
+        count = make_label(f"{len(rows)} SÉQUENCE{'S' if len(rows) != 1 else ''}", "AccentPill")
+        count.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        brief_head.addWidget(count)
+        brief_box.addLayout(brief_head)
+        brief_box.addWidget(
+            make_label(
+                "Organise les grands mouvements de l’histoire, une séquence par bloc.",
+                "CardTitle",
+                True,
+            )
+        )
+        brief_box.addWidget(
+            make_label(
+                "Saisis sa fonction, ses événements et ce qu’elle change. Utilise la poignée ≡ pour déplacer un bloc.",
+                "Muted",
+                True,
+            )
+        )
+        workspace_box.addWidget(brief)
+
+        self.sequence_empty_state = make_label(
+            "Le séquencier est vide. Ajoute une première séquence, transforme les cartes de l’histoire ou pars d’un template.",
+            "Muted",
+            True,
+        )
+        self.sequence_empty_state.setVisible(not rows)
+        workspace_box.addWidget(self.sequence_empty_state)
+
+        self.sequence_list = SequenceListWidget()
+        self.sequence_list.setMinimumHeight(280)
+        self.sequence_list.order_changed.connect(self._sequence_order_changed)
+        workspace_box.addWidget(self.sequence_list, 1)
+        self._fill_sequence_list(rows)
+
+        action_bar = QWidget()
+        action_bar.setFixedHeight(52)
+        actions = QHBoxLayout(action_bar)
+        actions.setContentsMargins(0, 4, 0, 0)
+        actions.setSpacing(8)
+        actions.addWidget(make_button("+ Séquence", "primary", self._add_sequence_block))
+        import_label = "Depuis les cartes" if self.width() < 1250 else "Importer les cartes"
+        actions.addWidget(make_button(import_label, "secondary", self._import_story_cards_to_sequences))
+        actions.addWidget(make_button("Enregistrer", "secondary", self._save_sequence_board))
+        actions.addStretch()
+        template_label = "Templates" if self.width() < 1250 else "Voir les templates"
+        actions.addWidget(make_button(template_label, "secondary", self.show_templates))
+        workspace_box.addWidget(action_bar)
+
+    def _migrate_legacy_outline_if_needed(self) -> None:
+        existing = self.db.one(
+            "SELECT COUNT(*) FROM sequence_blocks WHERE project_id=?",
+            (self.active_project,),
+        )[0]
+        if existing:
+            return
+        legacy = self.db.one(
+            "SELECT content FROM project_docs WHERE project_id=? AND doc_type='outline'",
+            (self.active_project,),
+        )
+        if legacy and legacy["content"].strip():
+            self.db.create_sequence_block(
+                self.active_project,
+                0,
+                "Séquence importée",
+                "Contenu de l’ancien outline",
+                legacy["content"].strip(),
+                "",
+            )
+
+    def _fill_sequence_list(self, rows) -> None:
+        self.sequence_list.clear()
+        for number, row in enumerate(rows, start=1):
+            item = QListWidgetItem()
+            item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+            item.setFlags(
+                item.flags()
+                | Qt.ItemFlag.ItemIsDragEnabled
+                | Qt.ItemFlag.ItemIsDropEnabled
+            )
+            self.sequence_list.addItem(item)
+            widget = SequenceBlockWidget(
+                row,
+                number,
+                self.sequence_list,
+                item,
+                self._save_sequence_widget,
+                self._duplicate_sequence_block,
+                self._delete_sequence_block,
+            )
+            widget.setMinimumHeight(226)
+            # Only the height is fixed. Keeping the widget's natural width in
+            # the item hint would clip its right-side actions in a narrow
+            # window instead of letting the row contract to the viewport.
+            item_hint = widget.sizeHint()
+            item_hint.setWidth(0)
+            item.setSizeHint(item_hint)
+            self.sequence_list.setItemWidget(item, widget)
+        pending = int(getattr(self, "_pending_sequence_focus", 0) or 0)
+        if pending:
+            self._pending_sequence_focus = 0
+            for index in range(self.sequence_list.count()):
+                item = self.sequence_list.item(index)
+                if int(item.data(Qt.ItemDataRole.UserRole)) == pending:
+                    self.sequence_list.setCurrentItem(item)
+                    QTimer.singleShot(0, lambda target=item: self.sequence_list.scrollToItem(target))
+                    break
+
+    def _refresh_sequence_list(self, scroll_to_bottom: bool = False) -> None:
+        sequence_list = getattr(self, "sequence_list", None)
+        if not isinstance(sequence_list, QListWidget):
+            return
+        try:
+            rows = self.db.q(
+                "SELECT * FROM sequence_blocks WHERE project_id=? ORDER BY position,id",
+                (self.active_project,),
+            )
+            tag_id = int(self.sequence_tag_filter.currentData() or 0)
+            if tag_id:
+                tagged_ids = {
+                    int(row["entity_id"])
+                    for row in self.db.q(
+                        """SELECT entity_id FROM entity_tags
+                        WHERE tag_id=? AND target_type='sequence'""",
+                        (tag_id,),
+                    )
+                }
+                rows = [row for row in rows if int(row["id"]) in tagged_ids]
+            self._fill_sequence_list(rows)
+            self.sequence_empty_state.setVisible(not rows)
+            if scroll_to_bottom:
+                QTimer.singleShot(0, self.sequence_list.scrollToBottom)
+        except RuntimeError:
+            return
+
+    def _sequence_order_changed(self) -> None:
+        ordered_ids = [
+            int(self.sequence_list.item(index).data(Qt.ItemDataRole.UserRole))
+            for index in range(self.sequence_list.count())
+        ]
+        self.db.reorder_sequence_blocks(self.active_project, ordered_ids)
+        self._save_sequence_document_copy()
+        QTimer.singleShot(0, self._refresh_sequence_list)
+        self.save_state.setText("Ordre du séquencier enregistré")
+        QTimer.singleShot(2400, lambda: self.save_state.setText(""))
+
+    def _save_sequence_widget(self, block_id: int, widget: SequenceBlockWidget) -> None:
+        try:
+            self.db.update_sequence_block(block_id, *widget.values())
+        except RuntimeError:
+            return
+        self._save_sequence_document_copy()
+
+    def _save_sequence_board(self, _checked: bool = False, silent: bool = False) -> None:
+        sequence_list = getattr(self, "sequence_list", None)
+        if not self.active_project or not isinstance(sequence_list, QListWidget):
+            return
+        try:
+            ordered_ids = []
+            for index in range(sequence_list.count()):
+                item = sequence_list.item(index)
+                block_id = int(item.data(Qt.ItemDataRole.UserRole))
+                ordered_ids.append(block_id)
+                widget = sequence_list.itemWidget(item)
+                if isinstance(widget, SequenceBlockWidget):
+                    widget.save_timer.stop()
+                    self.db.update_sequence_block(block_id, *widget.values())
+            self.db.reorder_sequence_blocks(self.active_project, ordered_ids)
+        except RuntimeError:
+            return
+        self._save_sequence_document_copy()
+        if not silent:
+            self.save_state.setText("Séquencier enregistré localement")
+            QTimer.singleShot(2400, lambda: self.save_state.setText(""))
+
+    def _save_sequence_document_copy(self) -> None:
+        if not self.active_project:
+            return
+        self._sync_outline_sources()
+        self._save_outline_document_copy()
+
+    def _add_sequence_block(self) -> None:
+        position = self.db.one(
+            "SELECT COUNT(*) FROM sequence_blocks WHERE project_id=?",
+            (self.active_project,),
+        )[0]
+        self.db.create_sequence_block(
+            self.active_project,
+            position,
+            "Séquence sans titre",
+        )
+        self._save_sequence_document_copy()
+        self._refresh_sequence_list(scroll_to_bottom=True)
+
+    def _duplicate_sequence_block(self, block_id: int) -> None:
+        rows = self.db.q(
+            "SELECT * FROM sequence_blocks WHERE project_id=? ORDER BY position,id",
+            (self.active_project,),
+        )
+        source = next((row for row in rows if int(row["id"]) == block_id), None)
+        if not source:
+            return
+        duplicate_id = self.db.create_sequence_block(
+            self.active_project,
+            int(source["position"]) + 1,
+            f"{source['title'] or 'Séquence sans titre'} — copie",
+            source["purpose"],
+            source["events"],
+            source["consequence"],
+            0,
+        )
+        self.db.set_entity_tags(
+            self.active_project,
+            "sequence",
+            duplicate_id,
+            self.db.entity_tag_names(self.active_project, "sequence", block_id),
+        )
+        ordered_ids = [int(row["id"]) for row in rows]
+        source_index = ordered_ids.index(block_id)
+        ordered_ids.insert(source_index + 1, duplicate_id)
+        self.db.reorder_sequence_blocks(self.active_project, ordered_ids)
+        self._save_sequence_document_copy()
+        self._refresh_sequence_list()
+
+    def _delete_sequence_block(self, block_id: int) -> None:
+        row = self.db.one("SELECT title FROM sequence_blocks WHERE id=?", (block_id,))
+        if not row:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Supprimer la séquence",
+            f"Supprimer « {row['title'] or 'Séquence sans titre'} » ?",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self._delete_entity_tag_links("sequence", block_id)
+        self.db.run("DELETE FROM sequence_blocks WHERE id=?", (block_id,))
+        remaining = self.db.q(
+            "SELECT id FROM sequence_blocks WHERE project_id=? ORDER BY position,id",
+            (self.active_project,),
+        )
+        self.db.reorder_sequence_blocks(self.active_project, [int(item["id"]) for item in remaining])
+        self._save_sequence_document_copy()
+        self._refresh_sequence_list()
+
+    def _ordered_story_nodes_for_sequences(self):
+        nodes = self.db.q(
+            "SELECT * FROM story_map_nodes WHERE project_id=? "
+            "AND (TRIM(content)<>'' OR (TRIM(title)<>'' AND title<>'Carte sans titre'))",
+            (self.active_project,),
+        )
+        if not nodes:
+            return []
+        node_by_id = {int(row["id"]): row for row in nodes}
+        outgoing = {node_id: [] for node_id in node_by_id}
+        indegree = {node_id: 0 for node_id in node_by_id}
+        for link in self.db.q(
+            "SELECT source_id,target_id FROM story_map_links WHERE project_id=?",
+            (self.active_project,),
+        ):
+            source_id = int(link["source_id"])
+            target_id = int(link["target_id"])
+            if source_id in node_by_id and target_id in node_by_id:
+                outgoing[source_id].append(target_id)
+                indegree[target_id] += 1
+
+        def spatial_key(node_id: int):
+            row = node_by_id[node_id]
+            return (float(row["x"]), float(row["y"]), node_id)
+
+        queue = sorted((node_id for node_id, degree in indegree.items() if degree == 0), key=spatial_key)
+        ordered_ids = []
+        while queue:
+            node_id = queue.pop(0)
+            ordered_ids.append(node_id)
+            for target_id in sorted(outgoing[node_id], key=spatial_key):
+                indegree[target_id] -= 1
+                if indegree[target_id] == 0:
+                    queue.append(target_id)
+                    queue.sort(key=spatial_key)
+        ordered_ids.extend(sorted((node_id for node_id in node_by_id if node_id not in ordered_ids), key=spatial_key))
+        return [(node_by_id[node_id], outgoing[node_id], node_by_id) for node_id in ordered_ids]
+
+    def _import_story_cards_to_sequences(self) -> None:
+        ordered_nodes = self._ordered_story_nodes_for_sequences()
+        if not ordered_nodes:
+            QMessageBox.information(
+                self,
+                "Aucune carte à importer",
+                "Ajoute d’abord du contenu à la carte de l’histoire.",
+            )
+            return
+        imported = {
+            int(row["source_node_id"])
+            for row in self.db.q(
+                "SELECT source_node_id FROM sequence_blocks WHERE project_id=? AND source_node_id<>0",
+                (self.active_project,),
+            )
+        }
+        position = self.db.one(
+            "SELECT COUNT(*) FROM sequence_blocks WHERE project_id=?",
+            (self.active_project,),
+        )[0]
+        kind_names = dict(STORY_CARD_KINDS)
+        added = 0
+        for node, target_ids, node_by_id in ordered_nodes:
+            node_id = int(node["id"])
+            if node_id in imported:
+                continue
+            targets = [node_by_id[target_id]["title"].strip() for target_id in target_ids]
+            consequence = f"Conduit à : {', '.join(title for title in targets if title)}" if targets else ""
+            title = node["title"].strip() or kind_names.get(node["kind"], "Séquence")
+            self.db.create_sequence_block(
+                self.active_project,
+                position,
+                title,
+                f"Développer ce moment de type {kind_names.get(node['kind'], 'idée').lower()}",
+                node["content"].strip(),
+                consequence,
+                node_id,
+            )
+            position += 1
+            added += 1
+        if not added:
+            QMessageBox.information(
+                self,
+                "Cartes déjà importées",
+                "Toutes les cartes renseignées sont déjà présentes dans le séquencier.",
+            )
+            return
+        self._save_sequence_document_copy()
+        self._refresh_sequence_list(scroll_to_bottom=True)
+        self.save_state.setText(f"{added} carte{'s' if added != 1 else ''} transformée{'s' if added != 1 else ''} en séquences")
+        QTimer.singleShot(3000, lambda: self.save_state.setText(""))
+
+    def _build_scene_list_workspace(self, workspace_box: QVBoxLayout) -> None:
+        self._migrate_legacy_scenes_if_needed()
+        rows = self.db.q(
+            "SELECT * FROM scene_rows WHERE project_id=? ORDER BY position,id",
+            (self.active_project,),
+        )
+        self.scene_location_rows = list(
+            self.db.q(
+                "SELECT id,name FROM locations WHERE project_id=? ORDER BY position,name,id",
+                (self.active_project,),
+            )
+        )
+        self.scene_character_rows = list(
+            self.db.q(
+                "SELECT id,name,role FROM characters WHERE project_id=? ORDER BY name,id",
+                (self.active_project,),
+            )
+        )
+        self.scene_sequence_rows = list(
+            self.db.q(
+                "SELECT id,position,title FROM sequence_blocks WHERE project_id=? ORDER BY position,id",
+                (self.active_project,),
+            )
+        )
+        self.scene_location_names = {
+            int(row["id"]): row["name"] or "Lieu sans nom" for row in self.scene_location_rows
+        }
+
+        brief = make_card()
+        brief_box = QVBoxLayout(brief)
+        brief_box.setContentsMargins(20, 15, 20, 16)
+        brief_box.setSpacing(5)
+        head = QHBoxLayout()
+        head.addWidget(make_label("SCÈNES CONNECTÉES", "Caption"))
+        head.addStretch()
+        self.scene_tag_filter = QComboBox()
+        self.scene_tag_filter.addItem("Tous les tags", 0)
+        for tag in self.db.q(
+            "SELECT id,name FROM tags WHERE project_id=? ORDER BY name COLLATE NOCASE",
+            (self.active_project,),
+        ):
+            self.scene_tag_filter.addItem(f"#{tag['name']}", int(tag["id"]))
+        head.addWidget(self.scene_tag_filter)
+        total_duration = sum(float(row["duration"] or 0) for row in rows)
+        self.scene_summary = make_label("", "AccentPill")
+        self.scene_summary.setText(
+            f"{len(rows)} SCÈNE{'S' if len(rows) != 1 else ''} · {total_duration:g} MIN"
+        )
+        head.addWidget(self.scene_summary)
+        brief_box.addLayout(head)
+        brief_box.addWidget(
+            make_label(
+                "Construis chaque scène par sa fonction, son conflit et le changement qu’elle produit.",
+                "CardTitle",
+                True,
+            )
+        )
+        brief_box.addWidget(
+            make_label(
+                "Le tableau garde la vue d’ensemble. La fiche sélectionnée rassemble le contenu et toutes ses connexions.",
+                "Muted",
+                True,
+            )
+        )
+        workspace_box.addWidget(brief)
+
+        self.scene_table = SceneTableWidget()
+        self.scene_table.setObjectName("SceneTable")
+        self.scene_table.setHorizontalHeaderLabels(
+            ["N°", "Nom / titre de la scène", "Lieu", "Statut", "Durée (min)"]
+        )
+        self.scene_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.scene_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.scene_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        self.scene_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.scene_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.scene_table.setColumnWidth(2, 220)
+        self.scene_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.scene_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.scene_table.setAlternatingRowColors(True)
+        self.scene_table.verticalHeader().setVisible(False)
+        self.scene_table.verticalHeader().setDefaultSectionSize(50)
+        self.scene_table.setMinimumHeight(210 if self.height() < 900 else 240)
+        for row in rows:
+            self._append_scene_table_row(
+                row["title"],
+                float(row["duration"] or 0),
+                int(row["id"]),
+                self._scene_payload_from_db(row),
+            )
+        self.scene_table.rows_reordered.connect(self._scene_table_reordered)
+        self.scene_table.itemSelectionChanged.connect(self._scene_selection_changed)
+        self.scene_table.itemChanged.connect(self._scene_table_item_changed)
+        self.scene_table.itemDoubleClicked.connect(self._scene_open_detail)
+        self.scene_tag_filter.currentIndexChanged.connect(self._filter_scene_rows_by_tag)
+        workspace_box.addWidget(self.scene_table, 2)
+
+        details = make_card()
+        details.setMinimumHeight(310 if self.height() < 900 else 380)
+        details_box = QVBoxLayout(details)
+        details_box.setContentsMargins(16, 12, 16, 12)
+        details_box.setSpacing(8)
+        detail_head = QHBoxLayout()
+        detail_head.addWidget(make_label("FICHE DE LA SCÈNE", "Caption"))
+        self.scene_current_name = make_label("Sélectionne une scène", "Muted", True)
+        detail_head.addWidget(self.scene_current_name, 1)
+        self.scene_outline_context = make_label("Plan global · non relié", "AccentPill")
+        self.scene_outline_context.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        detail_head.addWidget(self.scene_outline_context)
+        details_box.addLayout(detail_head)
+
+        self.scene_detail_fields: dict[str, QLineEdit | QTextEdit] = {}
+        self.scene_connection_lists: dict[str, CheckableListWidget] = {}
+        self.scene_tabs = QTabWidget()
+        self.scene_tabs.setObjectName("SceneTabs")
+        self.scene_tabs.setDocumentMode(True)
+        self.scene_tabs.addTab(self._scene_essential_tab(), "Noyau")
+        self.scene_tabs.addTab(self._scene_progression_tab(), "Déroulement")
+        self.scene_tabs.addTab(self._scene_connections_tab(), "Connexions")
+        self.scene_tabs.addTab(
+            self._build_record_template_tab("scene", 0),
+            "Modèle de fiche",
+        )
+        details_box.addWidget(self.scene_tabs, 1)
+        workspace_box.addWidget(details, 3)
+
+        self._scene_detail_loading = False
+        self._scene_detail_row = -1
+        if self.scene_table.rowCount():
+            target_row = 0
+            pending = int(getattr(self, "_pending_scene_focus", 0) or 0)
+            if pending:
+                self._pending_scene_focus = 0
+                for row_index in range(self.scene_table.rowCount()):
+                    scene_id = int(
+                        self.scene_table.item(row_index, 0).data(Qt.ItemDataRole.UserRole) or 0
+                    )
+                    if scene_id == pending:
+                        target_row = row_index
+                        break
+            self.scene_table.selectRow(target_row)
+            self.scene_table.scrollToItem(self.scene_table.item(target_row, 0))
+            self._scene_selection_changed()
+        else:
+            self._clear_scene_detail()
+
+        actions = QHBoxLayout()
+        compact_actions = self.width() < 1250
+        actions.addWidget(make_button("+ Scène", "primary", self._add_scene_row))
+        actions.addWidget(
+            make_button(
+                "Suppr." if compact_actions else "Supprimer la scène",
+                "secondary",
+                self._delete_scene_row,
+            )
+        )
+        actions.addWidget(
+            make_button(
+                "Depuis séq." if compact_actions else "Créer depuis le séquencier",
+                "secondary",
+                self._create_scenes_from_sequences,
+            )
+        )
+        actions.addWidget(
+            make_button(
+                "Enreg." if compact_actions else "Enregistrer",
+                "secondary",
+                self._save_scene_list,
+            )
+        )
+        actions.addStretch()
+        actions.addWidget(
+            make_button(
+                "Éditeur →" if compact_actions else "Ouvrir dans l’Éditeur de scripts →",
+                "primary",
+                self._open_selected_scene_in_script,
+            )
+        )
+        workspace_box.addLayout(actions)
+
+    def _scene_essential_tab(self) -> QWidget:
+        tab = QWidget()
+        outer = QVBoxLayout(tab)
+        outer.setContentsMargins(0, 8, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        canvas = QWidget()
+        canvas.setObjectName("PanelCanvas")
+        grid = QGridLayout(canvas)
+        grid.setContentsMargins(4, 5, 10, 8)
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(7)
+
+        self.scene_status_combo = QComboBox()
+        for key, label in SCENE_STATUSES:
+            self.scene_status_combo.addItem(label, key)
+        self.scene_status_combo.currentIndexChanged.connect(self._scene_detail_summary_changed)
+        grid.addWidget(make_label("STATUT", "Caption"), 0, 0)
+        grid.addWidget(self.scene_status_combo, 1, 0)
+
+        moment = QLineEdit()
+        moment.setPlaceholderText("Ex. Jour 2 · nuit, juste après l’incident…")
+        self.scene_detail_fields["moment_label"] = moment
+        grid.addWidget(make_label("MOMENT", "Caption"), 0, 1)
+        grid.addWidget(moment, 1, 1)
+
+        self.scene_location_combo = QComboBox()
+        self.scene_location_combo.addItem("Lieu à préciser", 0)
+        for row in self.scene_location_rows:
+            self.scene_location_combo.addItem(row["name"] or "Lieu sans nom", int(row["id"]))
+        self.scene_location_combo.currentIndexChanged.connect(self._scene_detail_summary_changed)
+        grid.addWidget(make_label("LIEU", "Caption"), 2, 0)
+        grid.addWidget(self.scene_location_combo, 3, 0)
+
+        self.scene_driver_combo = QComboBox()
+        self.scene_driver_combo.addItem("Personnage moteur à préciser", 0)
+        for row in self.scene_character_rows:
+            label = row["name"] or "Personnage sans nom"
+            if row["role"]:
+                label += f" · {row['role']}"
+            self.scene_driver_combo.addItem(label, int(row["id"]))
+        grid.addWidget(make_label("PERSONNAGE MOTEUR", "Caption"), 2, 1)
+        grid.addWidget(self.scene_driver_combo, 3, 1)
+
+        for grid_row, label, key, placeholder in (
+            (4, "OBJECTIF DE LA SCÈNE", "objective", "Pourquoi cette scène doit-elle exister dans le récit ?"),
+            (6, "OBJECTIF DU PERSONNAGE", "character_objective", "Quel résultat concret cherche-t-il à obtenir avant la sortie ?"),
+        ):
+            field = make_editor(68, placeholder)
+            field.setProperty("sceneField", True)
+            field.setMaximumHeight(88)
+            self.scene_detail_fields[key] = field
+            grid.addWidget(make_label(label, "Caption"), grid_row, 0, 1, 2)
+            grid.addWidget(field, grid_row + 1, 0, 1, 2)
+
+        grid.addWidget(make_label("PERSONNAGES PRÉSENTS", "Caption"), 8, 0, 1, 2)
+        self.scene_character_list = CheckableListWidget()
+        self.scene_character_list.setObjectName("SceneCharacterPicker")
+        self.scene_character_list.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
+        self.scene_character_list.setMinimumHeight(112)
+        for row in self.scene_character_rows:
+            item = QListWidgetItem(
+                f"{row['name'] or 'Personnage sans nom'} · {row['role'] or 'Rôle à préciser'}"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Unchecked)
+            self.scene_character_list.addItem(item)
+        grid.addWidget(self.scene_character_list, 9, 0, 1, 2)
+        grid.addWidget(make_label("TAGS", "Caption"), 10, 0, 1, 2)
+        self.scene_tags = QLineEdit()
+        self.scene_tags.setPlaceholderText("dialogue, pivot, à revoir…")
+        grid.addWidget(self.scene_tags, 11, 0, 1, 2)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        scroll.setWidget(canvas)
+        outer.addWidget(scroll, 1)
+        return tab
+
+    def _scene_progression_tab(self) -> QWidget:
+        tab = QWidget()
+        outer = QVBoxLayout(tab)
+        outer.setContentsMargins(0, 8, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        canvas = QWidget()
+        canvas.setObjectName("PanelCanvas")
+        grid = QGridLayout(canvas)
+        grid.setContentsMargins(4, 5, 10, 8)
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(7)
+        definitions = (
+            ("ENTRÉE", "entry_state", "Dans quelle situation précise entrons-nous ?"),
+            ("OBSTACLE", "opposition", "Qu’est-ce qui empêche immédiatement le personnage d’avancer ?"),
+            ("CONFLIT", "conflict_note", "Quelles forces, volontés ou valeurs deviennent incompatibles ?"),
+            ("INFORMATION RÉVÉLÉE", "information_revealed", "Qu’apprend le spectateur ou un personnage ?"),
+            ("CHANGEMENT", "change_note", "Qu’est-ce qui n’est plus pareil après cette scène ?"),
+            ("SORTIE", "exit_state", "Sur quelle décision, conséquence ou question quitte-t-on la scène ?"),
+        )
+        for index, (label, key, placeholder) in enumerate(definitions):
+            row = (index // 2) * 2
+            column = index % 2
+            field = make_editor(72, placeholder)
+            field.setProperty("sceneField", True)
+            field.setMaximumHeight(102)
+            self.scene_detail_fields[key] = field
+            grid.addWidget(make_label(label, "Caption"), row, column)
+            grid.addWidget(field, row + 1, column)
+        notes = make_editor(68, "Détails utiles pour l’écriture, éléments à vérifier ou variantes.")
+        notes.setProperty("sceneField", True)
+        notes.setMaximumHeight(88)
+        self.scene_detail_fields["notes"] = notes
+        grid.addWidget(make_label("NOTES", "Caption"), 6, 0, 1, 2)
+        grid.addWidget(notes, 7, 0, 1, 2)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        scroll.setWidget(canvas)
+        outer.addWidget(scroll, 1)
+        return tab
+
+    def _scene_connections_tab(self) -> QWidget:
+        tab = QWidget()
+        outer = QVBoxLayout(tab)
+        outer.setContentsMargins(0, 8, 0, 0)
+        sequence_row = QHBoxLayout()
+        sequence_row.addWidget(make_label("SÉQUENCE / PLAN GLOBAL", "Caption"))
+        self.scene_sequence_combo = QComboBox()
+        self.scene_sequence_combo.addItem("Aucune séquence assignée", 0)
+        for row in self.scene_sequence_rows:
+            self.scene_sequence_combo.addItem(
+                f"{int(row['position']) + 1:02d} · {row['title'] or 'Séquence sans titre'}",
+                int(row["id"]),
+            )
+        self.scene_sequence_combo.currentIndexChanged.connect(self._scene_detail_summary_changed)
+        sequence_row.addWidget(self.scene_sequence_combo, 1)
+        outer.addLayout(sequence_row)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        canvas = QWidget()
+        canvas.setObjectName("PanelCanvas")
+        grid = QGridLayout(canvas)
+        grid.setContentsMargins(4, 6, 10, 8)
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(8)
+        sources = (
+            (
+                "events",
+                "ÉVÉNEMENTS DE LA CHRONOLOGIE",
+                self.db.q(
+                    "SELECT id,title,display_label FROM timeline_events WHERE project_id=? ORDER BY time_hours,id",
+                    (self.active_project,),
+                ),
+                lambda row: f"{row['display_label'] or 'Sans repère'} · {row['title'] or 'Événement sans titre'}",
+            ),
+            (
+                "conflicts",
+                "CONFLITS",
+                self.db.q(
+                    "SELECT id,title,nature FROM conflicts WHERE project_id=? ORDER BY position,id",
+                    (self.active_project,),
+                ),
+                lambda row: f"{row['title'] or 'Conflit sans titre'} · {row['nature'] or 'nature à préciser'}",
+            ),
+            (
+                "theme_positions",
+                "POSITIONS THÉMATIQUES",
+                self.db.q(
+                    "SELECT id,label,position_type FROM theme_positions WHERE project_id=? ORDER BY position,id",
+                    (self.active_project,),
+                ),
+                lambda row: f"{row['label'] or 'Position sans titre'} · {row['position_type'] or 'nuance'}",
+            ),
+            (
+                "theme_motifs",
+                "MOTIFS",
+                self.db.q(
+                    "SELECT id,name,motif_type FROM theme_motifs WHERE project_id=? ORDER BY position,id",
+                    (self.active_project,),
+                ),
+                lambda row: f"{row['name'] or 'Motif sans titre'} · {row['motif_type'] or 'élément'}",
+            ),
+            (
+                "story_nodes",
+                "CARTES DE L’HISTOIRE",
+                self.db.q(
+                    "SELECT id,title,kind FROM story_map_nodes WHERE project_id=? ORDER BY x,y,id",
+                    (self.active_project,),
+                ),
+                lambda row: f"{row['title'] or 'Carte sans titre'} · {row['kind'] or 'idée'}",
+            ),
+            (
+                "promises",
+                "PROMESSES",
+                self.db.q(
+                    "SELECT id,title,promise_type FROM story_promises WHERE project_id=? ORDER BY position,id",
+                    (self.active_project,),
+                ),
+                lambda row: f"{row['title'] or 'Promesse sans titre'} · {row['promise_type'] or 'Concept'}",
+            ),
+            (
+                "moments",
+                "MOMENTS FORTS",
+                self.db.q(
+                    "SELECT id,title,moment_type FROM story_moments WHERE project_id=? ORDER BY position,id",
+                    (self.active_project,),
+                ),
+                lambda row: f"{row['title'] or 'Moment sans titre'} · {row['moment_type'] or 'Moment fort'}",
+            ),
+        )
+        for index, (key, label, rows, formatter) in enumerate(sources):
+            column = index % 2
+            row_index = (index // 2) * 2
+            grid.addWidget(make_label(label, "Caption"), row_index, column)
+            picker = CheckableListWidget()
+            picker.setObjectName("SceneConnectionPicker")
+            picker.setMinimumHeight(112)
+            for row in rows:
+                item = QListWidgetItem(formatter(row))
+                item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(Qt.CheckState.Unchecked)
+                picker.addItem(item)
+            self.scene_connection_lists[key] = picker
+            grid.addWidget(picker, row_index + 1, column)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        scroll.setWidget(canvas)
+        outer.addWidget(scroll, 1)
+        return tab
+
+    def _migrate_legacy_scenes_if_needed(self) -> None:
+        existing = self.db.one("SELECT COUNT(*) FROM scene_rows WHERE project_id=?", (self.active_project,))[0]
+        if existing:
+            return
+        document = self.db.one(
+            "SELECT content FROM project_docs WHERE project_id=? AND doc_type='scenes'",
+            (self.active_project,),
+        )
+        if not document or not document["content"].strip():
+            return
+        with self.db.conn:
+            for position, line in enumerate(
+                line.strip() for line in document["content"].splitlines() if line.strip()
+            ):
+                title = line.lstrip("0123456789. –—-").strip() or line
+                self.db.conn.execute(
+                    "INSERT INTO scene_rows(project_id,position,title,duration,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+                    (self.active_project, position, title, 0, "idea", NOW(), NOW()),
+                )
+
+    def _scene_default_payload(self) -> dict:
+        return {
+            "status": "idea",
+            "moment_label": "",
+            "driver_character_id": 0,
+            "objective": "",
+            "character_objective": "",
+            "opposition": "",
+            "conflict_note": "",
+            "information_revealed": "",
+            "change_note": "",
+            "entry_state": "",
+            "exit_state": "",
+            "notes": "",
+            "source_sequence_id": 0,
+            "location_id": 0,
+            "character_ids": [],
+            "event_ids": [],
+            "conflict_ids": [],
+            "theme_position_ids": [],
+            "theme_motif_ids": [],
+            "story_node_ids": [],
+            "promise_ids": [],
+            "moment_ids": [],
+            "tag_text": "",
+        }
+
+    def _scene_link_ids(self, table: str, column: str, scene_id: int) -> list[int]:
+        return [
+            int(row[0])
+            for row in self.db.q(
+                f"SELECT {column} FROM {table} WHERE scene_id=? ORDER BY {column}",
+                (scene_id,),
+            )
+        ]
+
+    def _scene_payload_from_db(self, row) -> dict:
+        payload = self._scene_default_payload()
+        scene_id = int(row["id"])
+        for key in (
+            "status",
+            "moment_label",
+            "objective",
+            "character_objective",
+            "opposition",
+            "conflict_note",
+            "information_revealed",
+            "change_note",
+            "entry_state",
+            "exit_state",
+            "notes",
+        ):
+            payload[key] = row[key] or ""
+        if payload["status"] not in SCENE_STATUS_LABELS:
+            payload["status"] = "idea"
+        payload["driver_character_id"] = int(row["driver_character_id"] or 0)
+        payload["source_sequence_id"] = int(row["source_sequence_id"] or 0)
+        payload["character_ids"] = self._scene_link_ids(
+            "scene_characters", "character_id", scene_id
+        )
+        payload["event_ids"] = self._scene_link_ids("scene_events", "event_id", scene_id)
+        payload["story_node_ids"] = self._scene_link_ids(
+            "scene_story_nodes", "node_id", scene_id
+        )
+        payload["theme_position_ids"] = self._scene_link_ids(
+            "scene_theme_positions", "position_id", scene_id
+        )
+        payload["theme_motif_ids"] = self._scene_link_ids(
+            "scene_theme_motifs", "motif_id", scene_id
+        )
+        payload["conflict_ids"] = self._scene_link_ids(
+            "conflict_scenes", "conflict_id", scene_id
+        )
+        payload["promise_ids"] = self._scene_link_ids(
+            "story_promise_scenes", "promise_id", scene_id
+        )
+        payload["moment_ids"] = self._scene_link_ids(
+            "story_moment_scenes", "moment_id", scene_id
+        )
+        location = self.db.one(
+            "SELECT location_id FROM location_scenes WHERE scene_id=? ORDER BY location_id LIMIT 1",
+            (scene_id,),
+        )
+        payload["location_id"] = int(location["location_id"]) if location else 0
+        payload["tag_text"] = self._entity_tag_text("scene", scene_id)
+        return payload
+
+    def _filter_scene_rows_by_tag(self, _value=None) -> None:
+        if not hasattr(self, "scene_table"):
+            return
+        tag_id = int(self.scene_tag_filter.currentData() or 0)
+        tagged_ids = {
+            int(row["entity_id"])
+            for row in self.db.q(
+                """SELECT entity_id FROM entity_tags
+                WHERE tag_id=? AND target_type='scene'""",
+                (tag_id,),
+            )
+        } if tag_id else set()
+        for row_index in range(self.scene_table.rowCount()):
+            scene_id = int(
+                self.scene_table.item(row_index, 0).data(Qt.ItemDataRole.UserRole) or 0
+            )
+            self.scene_table.setRowHidden(
+                row_index, bool(tag_id and scene_id not in tagged_ids)
+            )
+
+    def _append_scene_table_row(
+        self,
+        title: str = "",
+        duration: float = 0,
+        scene_id: int = 0,
+        payload: dict | None = None,
+    ) -> None:
+        payload = dict(payload or self._scene_default_payload())
+        row_index = self.scene_table.rowCount()
+        self.scene_table.insertRow(row_index)
+        number = QTableWidgetItem(f"{row_index + 1:02d}")
+        number.setFlags(number.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        number.setData(Qt.ItemDataRole.UserRole, scene_id)
+        number.setData(Qt.ItemDataRole.UserRole + 20, payload)
+        self.scene_table.setItem(row_index, 0, number)
+        self.scene_table.setItem(row_index, 1, QTableWidgetItem(title))
+        location = QTableWidgetItem(
+            self.scene_location_names.get(int(payload.get("location_id") or 0), "Lieu à préciser")
+        )
+        location.setFlags(location.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self.scene_table.setItem(row_index, 2, location)
+        status = QTableWidgetItem(
+            SCENE_STATUS_LABELS.get(payload.get("status", "idea"), "Idée")
+        )
+        status.setFlags(status.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self.scene_table.setItem(row_index, 3, status)
+        duration_text = "" if duration <= 0 else f"{duration:g}"
+        self.scene_table.setItem(row_index, 4, QTableWidgetItem(duration_text))
+
+    def _scene_payload_at(self, row_index: int) -> dict:
+        if row_index < 0 or row_index >= self.scene_table.rowCount():
+            return self._scene_default_payload()
+        number = self.scene_table.item(row_index, 0)
+        payload = number.data(Qt.ItemDataRole.UserRole + 20) if number else None
+        base = self._scene_default_payload()
+        if isinstance(payload, dict):
+            base.update(payload)
+        return base
+
+    def _add_scene_row(self) -> None:
+        self._store_scene_detail()
+        payload = self._scene_default_payload()
+        payload["status"] = "idea"
+        self._append_scene_table_row("Nouvelle scène", 0, 0, payload)
+        target = self.scene_table.rowCount() - 1
+        self.scene_table.selectRow(target)
+        self.scene_table.setCurrentCell(target, 1)
+        self.scene_table.editItem(self.scene_table.currentItem())
+        self._update_scene_summary()
+
+    def _delete_scene_row(self) -> None:
+        self._store_scene_detail()
+        selected_rows = sorted(
+            {index.row() for index in self.scene_table.selectedIndexes()}, reverse=True
+        )
+        for row_index in selected_rows:
+            self.scene_table.removeRow(row_index)
+        for row_index in range(self.scene_table.rowCount()):
+            self.scene_table.item(row_index, 0).setText(f"{row_index + 1:02d}")
+        self._scene_detail_row = -1
+        if self.scene_table.rowCount():
+            self.scene_table.selectRow(
+                min(selected_rows[-1] if selected_rows else 0, self.scene_table.rowCount() - 1)
+            )
+        else:
+            self._clear_scene_detail()
+        self._update_scene_summary()
+
+    def _scene_set_checked(self, picker: QListWidget, selected_ids: set[int]) -> None:
+        for index in range(picker.count()):
+            item = picker.item(index)
+            selected = int(item.data(Qt.ItemDataRole.UserRole)) in selected_ids
+            item.setCheckState(Qt.CheckState.Checked if selected else Qt.CheckState.Unchecked)
+            if picker is self.scene_character_list:
+                item.setSelected(selected)
+
+    def _scene_checked_ids(self, picker: QListWidget) -> list[int]:
+        return [
+            int(picker.item(index).data(Qt.ItemDataRole.UserRole))
+            for index in range(picker.count())
+            if picker.item(index).checkState() == Qt.CheckState.Checked
+            or picker.item(index).isSelected()
+        ]
+
+    def _scene_selection_changed(self) -> None:
+        if not hasattr(self, "scene_detail_fields"):
+            return
+        self._store_scene_detail()
+        row_index = self.scene_table.currentRow()
+        self._scene_detail_row = row_index
+        if row_index < 0:
+            self._clear_scene_detail()
+            self._load_record_template_values("scene", 0)
+            return
+        payload = self._scene_payload_at(row_index)
+        self._scene_detail_loading = True
+        try:
+            for key, field in self.scene_detail_fields.items():
+                set_field_value(field, str(payload.get(key, "") or ""))
+            index = self.scene_status_combo.findData(payload.get("status", "idea"))
+            self.scene_status_combo.setCurrentIndex(max(0, index))
+            index = self.scene_location_combo.findData(int(payload.get("location_id") or 0))
+            self.scene_location_combo.setCurrentIndex(max(0, index))
+            index = self.scene_driver_combo.findData(
+                int(payload.get("driver_character_id") or 0)
+            )
+            self.scene_driver_combo.setCurrentIndex(max(0, index))
+            index = self.scene_sequence_combo.findData(
+                int(payload.get("source_sequence_id") or 0)
+            )
+            self.scene_sequence_combo.setCurrentIndex(max(0, index))
+            self._scene_set_checked(
+                self.scene_character_list, set(payload.get("character_ids", []))
+            )
+            self.scene_tags.setText(payload.get("tag_text", ""))
+            mapping = {
+                "events": "event_ids",
+                "conflicts": "conflict_ids",
+                "theme_positions": "theme_position_ids",
+                "theme_motifs": "theme_motif_ids",
+                "story_nodes": "story_node_ids",
+                "promises": "promise_ids",
+                "moments": "moment_ids",
+            }
+            for key, picker in self.scene_connection_lists.items():
+                self._scene_set_checked(picker, set(payload.get(mapping[key], [])))
+            title = self.scene_table.item(row_index, 1)
+            self.scene_current_name.setText(
+                f"{row_index + 1:02d} · {(title.text().strip() if title else '') or 'Scène sans titre'}"
+            )
+            self._refresh_scene_outline_context(payload)
+            number = self.scene_table.item(row_index, 0)
+            self._load_record_template_values(
+                "scene",
+                int(number.data(Qt.ItemDataRole.UserRole) or 0) if number else 0,
+            )
+        finally:
+            self._scene_detail_loading = False
+
+    def _store_scene_detail(self) -> None:
+        if getattr(self, "_scene_detail_loading", True):
+            return
+        row_index = getattr(self, "_scene_detail_row", -1)
+        if row_index < 0 or row_index >= self.scene_table.rowCount():
+            return
+        number = self.scene_table.item(row_index, 0)
+        if not number:
+            return
+        payload = self._scene_payload_at(row_index)
+        for key, field in self.scene_detail_fields.items():
+            payload[key] = field_value(field)
+        payload["status"] = self.scene_status_combo.currentData() or "idea"
+        payload["location_id"] = int(self.scene_location_combo.currentData() or 0)
+        payload["driver_character_id"] = int(self.scene_driver_combo.currentData() or 0)
+        payload["source_sequence_id"] = int(self.scene_sequence_combo.currentData() or 0)
+        payload["character_ids"] = self._scene_checked_ids(self.scene_character_list)
+        payload["tag_text"] = self.scene_tags.text()
+        mapping = {
+            "events": "event_ids",
+            "conflicts": "conflict_ids",
+            "theme_positions": "theme_position_ids",
+            "theme_motifs": "theme_motif_ids",
+            "story_nodes": "story_node_ids",
+            "promises": "promise_ids",
+            "moments": "moment_ids",
+        }
+        for key, picker in self.scene_connection_lists.items():
+            payload[mapping[key]] = self._scene_checked_ids(picker)
+        number.setData(Qt.ItemDataRole.UserRole + 20, payload)
+        self._scene_update_table_context(row_index, payload)
+        self._refresh_scene_outline_context(payload)
+
+    def _scene_update_table_context(self, row_index: int, payload: dict) -> None:
+        self.scene_table.blockSignals(True)
+        try:
+            location = self.scene_table.item(row_index, 2)
+            status = self.scene_table.item(row_index, 3)
+            if location:
+                location.setText(
+                    self.scene_location_names.get(
+                        int(payload.get("location_id") or 0), "Lieu à préciser"
+                    )
+                )
+            if status:
+                status.setText(
+                    SCENE_STATUS_LABELS.get(payload.get("status", "idea"), "Idée")
+                )
+        finally:
+            self.scene_table.blockSignals(False)
+
+    def _refresh_scene_outline_context(self, payload: dict) -> None:
+        scene_id = 0
+        row_index = getattr(self, "_scene_detail_row", -1)
+        if 0 <= row_index < self.scene_table.rowCount():
+            scene_id = int(
+                self.scene_table.item(row_index, 0).data(Qt.ItemDataRole.UserRole) or 0
+            )
+        outline = self.db.one(
+            """SELECT child.title child_title,parent.title parent_title
+            FROM outline_items child LEFT JOIN outline_items parent ON parent.id=child.parent_id
+            WHERE child.project_id=? AND child.source_scene_id=? LIMIT 1""",
+            (self.active_project, scene_id),
+        ) if scene_id else None
+        if outline:
+            label = outline["child_title"] or "Scène"
+            if outline["parent_title"]:
+                label = f"{outline['parent_title']} › {label}"
+            self.scene_outline_context.setText(f"Plan global · {label}")
+            return
+        sequence_id = int(payload.get("source_sequence_id") or 0)
+        sequence_index = self.scene_sequence_combo.findData(sequence_id)
+        if sequence_id and sequence_index >= 0:
+            self.scene_outline_context.setText(
+                f"Séquence · {self.scene_sequence_combo.itemText(sequence_index)}"
+            )
+        else:
+            self.scene_outline_context.setText("Plan global · non relié")
+
+    def _scene_detail_summary_changed(self, _value=None) -> None:
+        if getattr(self, "_scene_detail_loading", True):
+            return
+        self._store_scene_detail()
+
+    def _scene_table_item_changed(self, item: QTableWidgetItem) -> None:
+        if item.column() in (1, 4):
+            self._update_scene_summary()
+        if item.column() == 1 and item.row() == getattr(self, "_scene_detail_row", -1):
+            self.scene_current_name.setText(
+                f"{item.row() + 1:02d} · {item.text().strip() or 'Scène sans titre'}"
+            )
+
+    def _scene_open_detail(self, _item: QTableWidgetItem) -> None:
+        self.scene_tabs.setCurrentIndex(0)
+        field = self.scene_detail_fields.get("objective")
+        if field:
+            field.setFocus()
+
+    def _clear_scene_detail(self) -> None:
+        if not hasattr(self, "scene_detail_fields"):
+            return
+        self._scene_detail_loading = True
+        try:
+            for field in self.scene_detail_fields.values():
+                field.clear()
+            self.scene_tags.clear()
+            for combo in (
+                self.scene_status_combo,
+                self.scene_location_combo,
+                self.scene_driver_combo,
+                self.scene_sequence_combo,
+            ):
+                combo.setCurrentIndex(0)
+            self._scene_set_checked(self.scene_character_list, set())
+            for picker in self.scene_connection_lists.values():
+                self._scene_set_checked(picker, set())
+            self.scene_current_name.setText("Ajoute ou sélectionne une scène")
+            self.scene_outline_context.setText("Plan global · non relié")
+        finally:
+            self._scene_detail_loading = False
+
+    def _scene_table_reordered(self) -> None:
+        self._store_scene_detail()
+        for row_index in range(self.scene_table.rowCount()):
+            self.scene_table.item(row_index, 0).setText(f"{row_index + 1:02d}")
+        self._scene_detail_row = self.scene_table.currentRow()
+        self._scene_selection_changed()
+        self._update_scene_summary()
+
+    def _update_scene_summary(self) -> None:
+        if not hasattr(self, "scene_summary"):
+            return
+        duration = 0.0
+        validated = 0
+        for row_index in range(self.scene_table.rowCount()):
+            item = self.scene_table.item(row_index, 4)
+            try:
+                duration += max(
+                    0.0, float((item.text() if item else "0").replace(",", ".") or 0)
+                )
+            except ValueError:
+                pass
+            if self._scene_payload_at(row_index).get("status") == "validated":
+                validated += 1
+        count = self.scene_table.rowCount()
+        suffix = f" · {validated} VALIDÉE{'S' if validated != 1 else ''}" if validated else ""
+        self.scene_summary.setText(
+            f"{count} SCÈNE{'S' if count != 1 else ''} · {duration:g} MIN{suffix}"
+        )
+
+    def _create_scenes_from_sequences(self) -> None:
+        self._store_scene_detail()
+        existing_sources = {
+            int(self._scene_payload_at(row).get("source_sequence_id") or 0)
+            for row in range(self.scene_table.rowCount())
+        }
+        added = 0
+        for sequence in self.scene_sequence_rows:
+            if int(sequence["id"]) in existing_sources:
+                continue
+            full = self.db.one(
+                "SELECT * FROM sequence_blocks WHERE id=? AND project_id=?",
+                (int(sequence["id"]), self.active_project),
+            )
+            payload = self._scene_default_payload()
+            payload.update(
+                {
+                    "status": "to_write",
+                    "objective": full["purpose"] if full else "",
+                    "change_note": full["consequence"] if full else "",
+                    "source_sequence_id": int(sequence["id"]),
+                }
+            )
+            self._append_scene_table_row(
+                sequence["title"] or f"Séquence {int(sequence['position']) + 1}",
+                0,
+                0,
+                payload,
+            )
+            added += 1
+        if not added:
+            QMessageBox.information(
+                self, "Séquencier", "Aucune nouvelle séquence à transformer."
+            )
+            return
+        self.scene_table.selectRow(self.scene_table.rowCount() - added)
+        self._update_scene_summary()
+        self.save_state.setText(
+            f"{added} séquence{'s' if added != 1 else ''} transformée{'s' if added != 1 else ''}"
+        )
+
+    def _save_scene_links(self, scene_id: int, payload: dict) -> None:
+        character_ids = {int(value) for value in payload.get("character_ids", [])}
+        driver_id = int(payload.get("driver_character_id") or 0)
+        if driver_id:
+            character_ids.add(driver_id)
+        self.db.conn.execute("DELETE FROM scene_characters WHERE scene_id=?", (scene_id,))
+        for character_id in sorted(character_ids):
+            self.db.conn.execute(
+                "INSERT OR IGNORE INTO scene_characters(scene_id,character_id) VALUES(?,?)",
+                (scene_id, character_id),
+            )
+
+        self.db.conn.execute("DELETE FROM location_scenes WHERE scene_id=?", (scene_id,))
+        location_id = int(payload.get("location_id") or 0)
+        if location_id:
+            self.db.conn.execute(
+                "INSERT OR IGNORE INTO location_scenes(location_id,scene_id) VALUES(?,?)",
+                (location_id, scene_id),
+            )
+
+        direct_specs = (
+            ("scene_events", "event_id", "event_ids"),
+            ("scene_story_nodes", "node_id", "story_node_ids"),
+            ("scene_theme_positions", "position_id", "theme_position_ids"),
+            ("scene_theme_motifs", "motif_id", "theme_motif_ids"),
+        )
+        for table, column, key in direct_specs:
+            self.db.conn.execute(f"DELETE FROM {table} WHERE scene_id=?", (scene_id,))
+            for target_id in payload.get(key, []):
+                self.db.conn.execute(
+                    f"INSERT OR IGNORE INTO {table}(scene_id,{column}) VALUES(?,?)",
+                    (scene_id, int(target_id)),
+                )
+
+        reverse_specs = (
+            ("conflict_scenes", "conflict_id", "conflict_ids"),
+            ("story_promise_scenes", "promise_id", "promise_ids"),
+            ("story_moment_scenes", "moment_id", "moment_ids"),
+        )
+        for table, column, key in reverse_specs:
+            self.db.conn.execute(f"DELETE FROM {table} WHERE scene_id=?", (scene_id,))
+            for target_id in payload.get(key, []):
+                self.db.conn.execute(
+                    f"INSERT OR IGNORE INTO {table}({column},scene_id) VALUES(?,?)",
+                    (int(target_id), scene_id),
+                )
+
+    def _sync_scene_outline_parents(self, scenes: list[dict]) -> None:
+        for scene in scenes:
+            scene_id = int(scene["scene_id"])
+            sequence_id = int(scene["payload"].get("source_sequence_id") or 0)
+            parent = self.db.one(
+                "SELECT id FROM outline_items WHERE project_id=? AND source_sequence_id=? LIMIT 1",
+                (self.active_project, sequence_id),
+            ) if sequence_id else None
+            self.db.run(
+                """UPDATE outline_items SET parent_id=?,updated_at=?
+                WHERE project_id=? AND source_scene_id=?""",
+                (
+                    int(parent["id"]) if parent else None,
+                    NOW(),
+                    self.active_project,
+                    scene_id,
+                ),
+            )
+
+    def _save_scene_list(self, _checked: bool = False, silent: bool = False) -> None:
+        table = getattr(self, "scene_table", None)
+        if not self.active_project or not isinstance(table, QTableWidget):
+            return
+        self._store_scene_detail()
+        scenes: list[dict] = []
+        for row_index in range(table.rowCount()):
+            title_item = table.item(row_index, 1)
+            duration_item = table.item(row_index, 4)
+            title = title_item.text().strip() if title_item else ""
+            raw_duration = (
+                duration_item.text().strip().replace(",", ".") if duration_item else ""
+            )
+            try:
+                duration = max(0.0, float(raw_duration or 0))
+            except ValueError:
+                duration = 0.0
+            number = table.item(row_index, 0)
+            scenes.append(
+                {
+                    "scene_id": int(number.data(Qt.ItemDataRole.UserRole) or 0),
+                    "title": title or f"Scène {row_index + 1}",
+                    "duration": duration,
+                    "payload": self._scene_payload_at(row_index),
+                }
+            )
+
+        with self.db.conn:
+            existing_ids = {
+                int(row["id"])
+                for row in self.db.conn.execute(
+                    "SELECT id FROM scene_rows WHERE project_id=?", (self.active_project,)
+                )
+            }
+            kept_ids = set()
+            for position, scene in enumerate(scenes):
+                payload = scene["payload"]
+                scene_id = int(scene["scene_id"])
+                driver_id = int(payload.get("driver_character_id") or 0) or None
+                values = (
+                    position,
+                    scene["title"],
+                    scene["duration"],
+                    payload.get("objective", ""),
+                    payload.get("opposition", ""),
+                    payload.get("change_note", ""),
+                    payload.get("status", "idea"),
+                    payload.get("moment_label", ""),
+                    driver_id,
+                    payload.get("character_objective", ""),
+                    payload.get("conflict_note", ""),
+                    payload.get("information_revealed", ""),
+                    payload.get("entry_state", ""),
+                    payload.get("exit_state", ""),
+                    payload.get("notes", ""),
+                    int(payload.get("source_sequence_id") or 0),
+                )
+                if scene_id in existing_ids:
+                    self.db.conn.execute(
+                        """UPDATE scene_rows SET
+                        position=?,title=?,duration=?,objective=?,opposition=?,change_note=?,
+                        status=?,moment_label=?,driver_character_id=?,character_objective=?,
+                        conflict_note=?,information_revealed=?,entry_state=?,exit_state=?,notes=?,
+                        source_sequence_id=?,updated_at=? WHERE id=? AND project_id=?""",
+                        (*values, NOW(), scene_id, self.active_project),
+                    )
+                else:
+                    cursor = self.db.conn.execute(
+                        """INSERT INTO scene_rows(
+                        project_id,position,title,duration,objective,opposition,change_note,status,
+                        moment_label,driver_character_id,character_objective,conflict_note,
+                        information_revealed,entry_state,exit_state,notes,source_sequence_id,
+                        created_at,updated_at
+                        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (self.active_project, *values, NOW(), NOW()),
+                    )
+                    scene_id = int(cursor.lastrowid)
+                    scene["scene_id"] = scene_id
+                    table.item(position, 0).setData(Qt.ItemDataRole.UserRole, scene_id)
+                kept_ids.add(scene_id)
+                self._save_scene_links(scene_id, payload)
+            for removed_id in existing_ids - kept_ids:
+                self.db.conn.execute(
+                    """DELETE FROM entity_tags WHERE target_type='scene' AND entity_id=?
+                    AND tag_id IN (SELECT id FROM tags WHERE project_id=?)""",
+                    (removed_id, self.active_project),
+                )
+                self.db.conn.execute("DELETE FROM scene_rows WHERE id=?", (removed_id,))
+
+        for scene in scenes:
+            self.db.set_entity_tags(
+                self.active_project,
+                "scene",
+                int(scene["scene_id"]),
+                self._parse_tag_text(scene["payload"].get("tag_text", "")),
+            )
+
+        content_lines = []
+        for index, scene in enumerate(scenes, start=1):
+            payload = scene["payload"]
+            location = self.scene_location_names.get(
+                int(payload.get("location_id") or 0), "Lieu à préciser"
+            )
+            status = SCENE_STATUS_LABELS.get(payload.get("status", "idea"), "Idée")
+            duration = scene["duration"]
+            suffix = f" — {duration:g} min" if duration else ""
+            content_lines.append(
+                f"{index:02d}. {scene['title']} · {location} · {status}{suffix}"
+            )
+        self.db.ensure_doc(self.active_project, "scenes", "Scènes")
+        self.db.save_doc(self.active_project, "scenes", "\n".join(content_lines))
+        self.db.run(
+            "UPDATE projects SET current_document='scenes' WHERE id=?",
+            (self.active_project,),
+        )
+        self._sync_outline_sources()
+        self._sync_scene_outline_parents(scenes)
+        self._save_outline_document_copy()
+        selected_row = table.currentRow()
+        if 0 <= selected_row < table.rowCount():
+            number = table.item(selected_row, 0)
+            scene_id = int(number.data(Qt.ItemDataRole.UserRole) or 0) if number else 0
+            self._save_record_template_values(
+                target_type="scene", entity_id=scene_id, silent=True
+            )
+        self._update_scene_summary()
+        if not silent:
+            self.save_state.setText("Scènes et connexions enregistrées")
+            QTimer.singleShot(2400, lambda: self.save_state.setText(""))
+
+    def _open_selected_scene_in_script(self) -> None:
+        self._save_scene_list(silent=True)
+        self.show_script_editor()
+
+    def _build_script_summary_workspace(self, workspace_box: QVBoxLayout, project) -> None:
+        script_doc = self.db.ensure_doc(self.active_project, "script", "Scénario")
+        sequences = self.db.one(
+            "SELECT COUNT(*) FROM sequence_blocks WHERE project_id=?",
+            (self.active_project,),
+        )[0]
+        scenes = self.db.one("SELECT COUNT(*) FROM scene_rows WHERE project_id=?", (self.active_project,))[0]
+        characters = self.db.one("SELECT COUNT(*) FROM characters WHERE project_id=?", (self.active_project,))[0]
+
+        brief = make_card()
+        brief_box = QVBoxLayout(brief)
+        brief_box.setContentsMargins(22, 17, 22, 18)
+        brief_box.setSpacing(6)
+        head = QHBoxLayout()
+        head.addWidget(make_label("PASSAGE À L’ÉCRITURE", "Caption"))
+        head.addStretch()
+        state = "EN COURS" if script_doc["content"].strip() else "PRÊT À COMMENCER"
+        head.addWidget(make_label(state, "AccentPill"))
+        brief_box.addLayout(head)
+        brief_box.addWidget(make_label("Ta préparation reste accessible pendant l’écriture.", "SectionTitle", True))
+        brief_box.addWidget(
+            make_label(
+                "Le scénario se rédige maintenant dans l’Éditeur de scripts. Cette page résume la matière déjà construite.",
+                "Muted",
+                True,
+            )
+        )
+        workspace_box.addWidget(brief)
+
+        summary = make_card()
+        summary_box = QVBoxLayout(summary)
+        summary_box.setContentsMargins(22, 17, 22, 18)
+        summary_box.setSpacing(8)
+        summary_box.addWidget(make_label("SYNTHÈSE DU PROJET", "Caption"))
+        for doc_type, label in (("premise", "Prémisse"), ("logline", "Logline"), ("synopsis", "Synopsis")):
+            row = self.db.one(
+                "SELECT content FROM project_docs WHERE project_id=? AND doc_type=?",
+                (self.active_project, doc_type),
+            )
+            content = " ".join((row["content"] if row else "").split())
+            preview = content[:260].rstrip() + ("…" if len(content) > 260 else "")
+            summary_box.addWidget(make_label(label.upper(), "Caption"))
+            summary_box.addWidget(make_label(preview or "Pas encore renseigné.", "Body" if preview else "Muted", True))
+            summary_box.addWidget(make_separator())
+        metrics = QHBoxLayout()
+        for value, label in ((sequences, "séquences"), (scenes, "scènes"), (characters, "personnages")):
+            copy = QVBoxLayout()
+            copy.addWidget(make_label(str(value), "Metric"))
+            copy.addWidget(make_label(label, "Muted"))
+            metrics.addLayout(copy)
+        metrics.addStretch()
+        summary_box.addLayout(metrics)
+        summary_box.addStretch()
+        workspace_box.addWidget(summary, 1)
+        actions = QHBoxLayout()
+        word_count = len(script_doc["content"].split())
+        actions.addWidget(make_label(f"Scénario actuel · {word_count} mots", "Muted"))
+        actions.addStretch()
+        actions.addWidget(make_button("Ouvrir l’Éditeur de scripts →", "primary", self.show_script_editor))
+        workspace_box.addLayout(actions)
+
+    def _build_story_map_board(self, workspace_box: QVBoxLayout) -> None:
+        self.story_map_pan_timer.stop()
+        self._story_map_drag_item = None
+        self._story_map_space_update_pending = False
+        self._sync_story_map_answers_to_nodes(force=False)
+        node_rows = self.db.q(
+            "SELECT * FROM story_map_nodes WHERE project_id=? ORDER BY id",
+            (self.active_project,),
+        )
+        link_rows = self.db.q(
+            "SELECT * FROM story_map_links WHERE project_id=? ORDER BY id",
+            (self.active_project,),
+        )
+
+        brief = make_card()
+        brief_box = QVBoxLayout(brief)
+        brief_box.setContentsMargins(20, 15, 20, 16)
+        brief_box.setSpacing(5)
+        brief_head = QHBoxLayout()
+        brief_head.addWidget(make_label("CARTE VISUELLE", "Caption"))
+        brief_head.addStretch()
+        count = make_label(f"{len(node_rows)} CARTES · {len(link_rows)} LIENS", "AccentPill")
+        count.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        brief_head.addWidget(count)
+        brief_box.addLayout(brief_head)
+        brief_box.addWidget(make_label("Dispose les moments de l’histoire et relie leurs conséquences.", "CardTitle", True))
+        self.story_map_board_status = make_label(
+            "Le canevas conserve une zone vide autour des cartes et s’étend en le parcourant. Double-clique pour éditer.",
+            "Muted",
+            True,
+        )
+        brief_box.addWidget(self.story_map_board_status)
+        workspace_box.addWidget(brief)
+
+        self.story_map_scene = QGraphicsScene(self)
+        # Keep a generous empty reserve around the useful area. The writer can
+        # explore the board before a card has been pushed against an edge.
+        self.story_map_scene.setSceneRect(-480, -320, 3000, 1900)
+        self.story_map_items: dict[int, StoryMapCardItem] = {}
+        self.story_map_link_items: dict[int, StoryMapLinkItem] = {}
+        self.story_map_link_mode = False
+        self.story_map_link_source: StoryMapCardItem | None = None
+        for row in node_rows:
+            item = StoryMapCardItem(
+                row,
+                self.palette,
+                self._story_map_node_clicked,
+                self._edit_story_map_card,
+                self._drag_story_map_card,
+                self._move_story_map_card,
+            )
+            self.story_map_scene.addItem(item)
+            self.story_map_items[item.node_id] = item
+            self._expand_story_map_scene(item)
+        for row in link_rows:
+            source = self.story_map_items.get(row["source_id"])
+            target = self.story_map_items.get(row["target_id"])
+            if source and target:
+                edge = StoryMapLinkItem(row["id"], source, target, self.palette)
+                self.story_map_scene.addItem(edge)
+                self.story_map_link_items[edge.link_id] = edge
+        if not node_rows:
+            empty = self.story_map_scene.addText("Ajoute une première carte pour commencer.")
+            empty.setDefaultTextColor(QColor(self.palette.muted))
+            empty.setPos(90, 90)
+
+        self.story_map_view = StoryMapView(self.story_map_scene, self.palette)
+        self.story_map_view.setObjectName("StoryMapCanvas")
+        self.story_map_view.horizontalScrollBar().valueChanged.connect(
+            lambda _value, view=self.story_map_view: self._queue_story_map_navigation_space(view)
+        )
+        self.story_map_view.verticalScrollBar().valueChanged.connect(
+            lambda _value, view=self.story_map_view: self._queue_story_map_navigation_space(view)
+        )
+        workspace_box.addWidget(self.story_map_view, 1)
+
+        action_bar = QWidget()
+        action_bar.setFixedHeight(52)
+        actions = QHBoxLayout(action_bar)
+        actions.setContentsMargins(0, 4, 0, 0)
+        actions.setSpacing(8)
+        compact = self.width() < 1250
+        actions.addWidget(make_button("+ Carte", "primary", self._add_story_map_card))
+        self.story_map_link_button = make_button("Lien" if compact else "Relier deux cartes", "secondary", self._start_story_map_link)
+        actions.addWidget(self.story_map_link_button)
+        actions.addWidget(make_button("Suppr." if compact else "Supprimer", "secondary", self._delete_story_map_selection))
+        actions.addWidget(make_button("Centrer", "secondary", self._center_story_map_board))
+        actions.addStretch()
+        actions.addWidget(make_button("Guide" if compact else "Questions causales", "secondary", self._show_story_map_guide))
+        workspace_box.addWidget(action_bar)
+        QTimer.singleShot(0, self._focus_story_map_start)
+
+    def _sync_story_map_answers_to_nodes(self, force: bool) -> None:
+        existing = self.db.q(
+            "SELECT id,source_step_key FROM story_map_nodes WHERE project_id=?",
+            (self.active_project,),
+        )
+        if existing and not force:
+            return
+        existing_keys = {row["source_step_key"] for row in existing if row["source_step_key"]}
+        answers = {
+            row["step_key"]: row["answer"].strip()
+            for row in self.db.q(
+                "SELECT step_key,answer FROM story_map_answers WHERE project_id=?",
+                (self.active_project,),
+            )
+            if row["answer"].strip()
+        }
+        kind_by_step = {
+            "starting_situation": "situation",
+            "disrupting_event": "event",
+            "objective": "objective",
+            "first_actions": "action",
+            "obstacles_consequences": "obstacle",
+            "escalation": "consequence",
+            "difficult_choice": "choice",
+            "final_confrontation": "action",
+            "resolution_change": "resolution",
+        }
+        positions = [
+            (70, 70),
+            (370, 70),
+            (670, 70),
+            (670, 290),
+            (370, 290),
+            (70, 290),
+            (70, 510),
+            (370, 510),
+            (670, 510),
+        ]
+        for index, step in enumerate(STORY_MAP_STEPS):
+            if step["key"] not in answers or step["key"] in existing_keys:
+                continue
+            x, y = positions[index]
+            self.db.create_story_map_node(
+                self.active_project,
+                step["title"],
+                answers[step["key"]],
+                kind_by_step[step["key"]],
+                x,
+                y,
+                step["key"],
+            )
+        node_by_step = {
+            row["source_step_key"]: row["id"]
+            for row in self.db.q(
+                "SELECT id,source_step_key FROM story_map_nodes WHERE project_id=? AND source_step_key<>''",
+                (self.active_project,),
+            )
+        }
+        ordered_ids = [node_by_step[step["key"]] for step in STORY_MAP_STEPS if step["key"] in node_by_step]
+        for source_id, target_id in pairwise(ordered_ids):
+            self.db.create_story_map_link(self.active_project, source_id, target_id)
+
+    def _story_map_card_dialog(
+        self, row=None
+    ) -> tuple[str, str, str, list[int], str] | None:
+        dialog = QDialog(self)
+        dialog.setObjectName("StoryCardDialog")
+        dialog.setWindowTitle("Modifier la carte" if row else "Nouvelle carte")
+        dialog.resize(560, 560)
+        box = QVBoxLayout(dialog)
+        box.setContentsMargins(24, 22, 24, 22)
+        box.setSpacing(7)
+        box.addWidget(make_label("CARTE DE L’HISTOIRE", "Caption"))
+        box.addWidget(make_label("Une idée par carte", "SectionTitle"))
+        box.addWidget(make_label("Type", "Muted"))
+        kind = QComboBox()
+        for key, label in STORY_CARD_KINDS:
+            kind.addItem(label, key)
+        if row:
+            kind.setCurrentIndex(max(0, kind.findData(row["kind"])))
+        box.addWidget(kind)
+        box.addWidget(make_label("Titre court", "Muted"))
+        title = QLineEdit(row["title"] if row else "")
+        title.setPlaceholderText("Ex. Mina découvre la lettre")
+        box.addWidget(title)
+        box.addWidget(make_label("Ce qui se passe / ce que cela provoque", "Muted"))
+        content = make_editor(150, "Décris l’action, la décision ou la conséquence en quelques phrases.")
+        content.setObjectName("StoryCardContent")
+        content.setMinimumHeight(170)
+        content.setPlainText(row["content"] if row else "")
+        box.addWidget(content, 1)
+        box.addWidget(make_label("Tags", "Muted"))
+        tags = QLineEdit(
+            self._entity_tag_text("story_node", int(row["id"])) if row else ""
+        )
+        tags.setPlaceholderText("pivot, révélation, à revoir…")
+        box.addWidget(tags)
+        box.addWidget(make_label("Personnages liés à ce moment", "Muted"))
+        characters = CheckableListWidget()
+        characters.setObjectName("StoryCardCharacterPicker")
+        characters.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        characters.setMinimumHeight(120)
+        characters.setMaximumHeight(150)
+        selected_character_ids = set()
+        if row:
+            selected_character_ids = {
+                int(link["character_id"])
+                for link in self.db.q(
+                    "SELECT character_id FROM story_map_node_characters WHERE node_id=?",
+                    (row["id"],),
+                )
+            }
+        for character in self.db.q(
+            "SELECT id,name FROM characters WHERE project_id=? ORDER BY name,id",
+            (self.active_project,),
+        ):
+            item = QListWidgetItem(character["name"] or "Personnage sans nom")
+            item.setData(Qt.ItemDataRole.UserRole, int(character["id"]))
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(
+                Qt.CheckState.Checked
+                if int(character["id"]) in selected_character_ids
+                else Qt.CheckState.Unchecked
+            )
+            characters.addItem(item)
+        box.addWidget(characters)
+        actions = QHBoxLayout()
+        actions.addStretch()
+        actions.addWidget(make_button("Annuler", "secondary", dialog.reject))
+        actions.addWidget(make_button("Enregistrer", "primary", dialog.accept))
+        box.addLayout(actions)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return None
+        return (
+            title.text().strip() or "Carte sans titre",
+            content.toPlainText().strip(),
+            kind.currentData(),
+            [
+                int(characters.item(index).data(Qt.ItemDataRole.UserRole))
+                for index in range(characters.count())
+                if characters.item(index).checkState() == Qt.CheckState.Checked
+            ],
+            tags.text(),
+        )
+
+    def _set_story_map_node_characters(self, node_id: int, character_ids: list[int]) -> None:
+        with self.db.conn:
+            self.db.conn.execute("DELETE FROM story_map_node_characters WHERE node_id=?", (node_id,))
+            for character_id in character_ids:
+                self.db.conn.execute(
+                    "INSERT OR IGNORE INTO story_map_node_characters(node_id,character_id) VALUES(?,?)",
+                    (node_id, character_id),
+                )
+
+    def _add_story_map_card(self) -> None:
+        values = self._story_map_card_dialog()
+        if not values:
+            return
+        title, content, kind, character_ids, tag_text = values
+        center = self.story_map_view.mapToScene(self.story_map_view.viewport().rect().center())
+        x = max(20.0, center.x() - StoryMapCardItem.WIDTH / 2)
+        y = max(20.0, center.y() - StoryMapCardItem.HEIGHT / 2)
+        node_id = self.db.create_story_map_node(self.active_project, title, content, kind, x, y)
+        self._set_story_map_node_characters(node_id, character_ids)
+        self._save_entity_tag_text("story_node", node_id, tag_text)
+        self.show_development()
+
+    def _edit_story_map_card(self, item: StoryMapCardItem) -> None:
+        row = self.db.one("SELECT * FROM story_map_nodes WHERE id=?", (item.node_id,))
+        if not row:
+            return
+        values = self._story_map_card_dialog(row)
+        if not values:
+            return
+        title, content, kind, character_ids, tag_text = values
+        self.db.update_story_map_node(item.node_id, title, content, kind)
+        self._set_story_map_node_characters(item.node_id, character_ids)
+        self._save_entity_tag_text("story_node", item.node_id, tag_text)
+        item.update_text(title, content, kind)
+
+    def _move_story_map_card(self, item: StoryMapCardItem) -> None:
+        self.story_map_pan_timer.stop()
+        self._story_map_drag_item = item
+        position = item.pos()
+        self.db.move_story_map_node(item.node_id, position.x(), position.y())
+        QTimer.singleShot(0, self._finish_story_map_drag)
+
+    def _expand_story_map_scene(self, item: StoryMapCardItem) -> None:
+        scene_rect = QRectF(self.story_map_scene.sceneRect())
+        item_rect = item.sceneBoundingRect()
+        margin = 45.0
+        extension = 520.0
+        changed = False
+        if item_rect.right() > scene_rect.right() - margin:
+            scene_rect.setRight(item_rect.right() + extension)
+            changed = True
+        if item_rect.left() < scene_rect.left() + margin:
+            scene_rect.setLeft(item_rect.left() - extension)
+            changed = True
+        if item_rect.bottom() > scene_rect.bottom() - margin:
+            scene_rect.setBottom(item_rect.bottom() + extension)
+            changed = True
+        if item_rect.top() < scene_rect.top() + margin:
+            scene_rect.setTop(item_rect.top() - extension)
+            changed = True
+        if changed:
+            self.story_map_scene.setSceneRect(scene_rect)
+
+    def _queue_story_map_navigation_space(self, view: StoryMapView) -> None:
+        """Grow empty canvas space after scrolling, outside Qt input events."""
+        if view is not getattr(self, "story_map_view", None) or self._story_map_space_update_pending:
+            return
+        self._story_map_space_update_pending = True
+        QTimer.singleShot(0, lambda target=view: self._extend_story_map_navigation_space(target))
+
+    def _extend_story_map_navigation_space(self, view: StoryMapView | None = None) -> None:
+        """Maintain a blank working reserve around the currently visible area."""
+        self._story_map_space_update_pending = False
+        target = view or getattr(self, "story_map_view", None)
+        if target is None or target is not getattr(self, "story_map_view", None):
+            return
+        try:
+            if target.scene() is not self.story_map_scene:
+                return
+            visible = target.mapToScene(target.viewport().rect()).boundingRect()
+            scene_rect = QRectF(self.story_map_scene.sceneRect())
+        except RuntimeError:
+            return
+
+        reserve_x = max(320.0, visible.width() * 0.55)
+        reserve_y = max(260.0, visible.height() * 0.55)
+        growth_x = max(760.0, visible.width())
+        growth_y = max(620.0, visible.height())
+        changed = False
+        if visible.right() >= scene_rect.right() - reserve_x:
+            scene_rect.setRight(scene_rect.right() + growth_x)
+            changed = True
+        if visible.left() <= scene_rect.left() + reserve_x:
+            scene_rect.setLeft(scene_rect.left() - growth_x)
+            changed = True
+        if visible.bottom() >= scene_rect.bottom() - reserve_y:
+            scene_rect.setBottom(scene_rect.bottom() + growth_y)
+            changed = True
+        if visible.top() <= scene_rect.top() + reserve_y:
+            scene_rect.setTop(scene_rect.top() - growth_y)
+            changed = True
+        if changed:
+            self.story_map_scene.setSceneRect(scene_rect)
+
+    def _drag_story_map_card(self, item: StoryMapCardItem) -> None:
+        self._story_map_drag_item = item
+        if not self.story_map_pan_timer.isActive():
+            self.story_map_pan_timer.start()
+
+    def _apply_story_map_auto_pan(self) -> None:
+        item = self._story_map_drag_item
+        if item is None or not hasattr(self, "story_map_view"):
+            self.story_map_pan_timer.stop()
+            return
+        try:
+            if item.scene() is not self.story_map_scene:
+                self.story_map_pan_timer.stop()
+                self._story_map_drag_item = None
+                return
+            self._expand_story_map_scene(item)
+            visible_item = self.story_map_view.mapFromScene(item.sceneBoundingRect()).boundingRect()
+        except RuntimeError:
+            self.story_map_pan_timer.stop()
+            self._story_map_drag_item = None
+            return
+        viewport = self.story_map_view.viewport().rect()
+        edge_margin = 38
+        scroll_step = 24
+        horizontal = self.story_map_view.horizontalScrollBar()
+        vertical = self.story_map_view.verticalScrollBar()
+        if visible_item.right() >= viewport.right() - edge_margin:
+            horizontal.setValue(horizontal.value() + scroll_step)
+        elif visible_item.left() <= viewport.left() + edge_margin:
+            horizontal.setValue(horizontal.value() - scroll_step)
+        if visible_item.bottom() >= viewport.bottom() - edge_margin:
+            vertical.setValue(vertical.value() + scroll_step)
+        elif visible_item.top() <= viewport.top() + edge_margin:
+            vertical.setValue(vertical.value() - scroll_step)
+
+    def _finish_story_map_drag(self) -> None:
+        if self._story_map_drag_item is not None:
+            self._apply_story_map_auto_pan()
+        self.story_map_pan_timer.stop()
+        self._story_map_drag_item = None
+
+    def _start_story_map_link(self) -> None:
+        self.story_map_link_mode = not self.story_map_link_mode
+        self.story_map_link_source = None
+        self.story_map_scene.clearSelection()
+        if self.story_map_link_mode:
+            self.story_map_board_status.setText("Clique d’abord sur la cause, puis sur la carte qui en découle.")
+            self.story_map_link_button.setText("Annuler le lien")
+        else:
+            self.story_map_board_status.setText(
+                "Le canevas conserve une zone vide autour des cartes et s’étend en le parcourant. Double-clique pour éditer."
+            )
+            self.story_map_link_button.setText("Lien" if self.width() < 1250 else "Relier deux cartes")
+
+    def _story_map_node_clicked(self, item: StoryMapCardItem) -> None:
+        if not self.story_map_link_mode:
+            return
+        if self.story_map_link_source is None:
+            self.story_map_link_source = item
+            item.setSelected(True)
+            self.story_map_board_status.setText("Cause sélectionnée. Clique maintenant sur la conséquence.")
+            return
+        if item.node_id == self.story_map_link_source.node_id:
+            self.story_map_board_status.setText("Choisis une autre carte comme conséquence.")
+            return
+        self.db.create_story_map_link(self.active_project, self.story_map_link_source.node_id, item.node_id)
+        self.story_map_link_mode = False
+        self.story_map_link_source = None
+        self.show_development()
+
+    def _delete_story_map_selection(self) -> None:
+        selected = self.story_map_scene.selectedItems()
+        nodes = [item for item in selected if isinstance(item, StoryMapCardItem)]
+        links = [item for item in selected if isinstance(item, StoryMapLinkItem)]
+        if not nodes and not links:
+            QMessageBox.information(self, "Rien à supprimer", "Sélectionne une carte ou un lien sur le tableau.")
+            return
+        if (
+            self.db.setting("confirm_delete", "1") != "0"
+            and QMessageBox.question(self, "Supprimer la sélection", "Supprimer les éléments sélectionnés de la carte ?")
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+        for link in links:
+            self.db.run("DELETE FROM story_map_links WHERE id=?", (link.link_id,))
+        for node in nodes:
+            self._delete_entity_tag_links("story_node", node.node_id)
+            self.db.run("DELETE FROM story_map_nodes WHERE id=?", (node.node_id,))
+        self.show_development()
+
+    def _center_story_map_board(self) -> None:
+        if not hasattr(self, "story_map_view"):
+            return
+        cards = list(self.story_map_items.values())
+        self.story_map_view.resetTransform()
+        if not cards:
+            self.story_map_view.centerOn(300, 220)
+            return
+        bounds = cards[0].sceneBoundingRect()
+        for card in cards[1:]:
+            bounds = bounds.united(card.sceneBoundingRect())
+        if len(cards) == 1:
+            self.story_map_view.centerOn(bounds.center())
+            return
+        self.story_map_view.fitInView(bounds.adjusted(-70, -70, 70, 70), Qt.AspectRatioMode.KeepAspectRatio)
+        if self.story_map_view.transform().m11() < 0.72:
+            self.story_map_view.resetTransform()
+            self.story_map_view.scale(0.78, 0.78)
+            self.story_map_view.centerOn(bounds.center())
+
+    def _focus_story_map_start(self) -> None:
+        if not hasattr(self, "story_map_view"):
+            return
+        self.story_map_view.resetTransform()
+        self.story_map_view.scale(0.78 if self.width() < 1250 else 0.92, 0.78 if self.width() < 1250 else 0.92)
+        self.story_map_view.horizontalScrollBar().setValue(0)
+        self.story_map_view.verticalScrollBar().setValue(0)
+
+    def _show_story_map_guide(self) -> None:
+        self.db.set_setting(f"story_map_mode_{self.active_project}", "guide")
+        self.show_development()
+
+    def _show_story_map_board(self) -> None:
+        if getattr(self, "story_map_mode", "board") == "guide" and hasattr(self, "story_map_text"):
+            self._save_story_map_step(silent=True)
+        self._sync_story_map_answers_to_nodes(force=True)
+        self.db.set_setting(f"story_map_mode_{self.active_project}", "board")
+        self.show_development()
+
+    def _build_story_map_workspace(self, workspace_box: QVBoxLayout, project) -> None:
+        setting_key = f"story_map_step_{self.active_project}"
+        try:
+            step_index = int(self.db.setting(setting_key, "0"))
+        except ValueError:
+            step_index = 0
+        self.story_map_step_index = max(0, min(step_index, len(STORY_MAP_STEPS) - 1))
+        step = STORY_MAP_STEPS[self.story_map_step_index]
+        rows = self.db.q(
+            "SELECT step_key,answer FROM story_map_answers WHERE project_id=?",
+            (self.active_project,),
+        )
+        answers = {row["step_key"]: row["answer"] for row in rows}
+        answered_count = sum(bool(answer.strip()) for answer in answers.values())
+        suggested = self._story_map_suggested_answers(project).get(step["key"], "")
+        answer = answers.get(step["key"], suggested)
+
+        brief = make_card()
+        brief_box = QVBoxLayout(brief)
+        brief_box.setContentsMargins(18, 13, 18, 14)
+        brief_box.setSpacing(4)
+        brief_head = QHBoxLayout()
+        brief_head.addWidget(
+            make_label(
+                f"CARTE CAUSALE · QUESTION {self.story_map_step_index + 1:02d} SUR {len(STORY_MAP_STEPS)}",
+                "Caption",
+            )
+        )
+        brief_head.addStretch()
+        if step["key"] in answers and answers[step["key"]].strip():
+            state_text = "RÉPONDU"
+        elif suggested:
+            state_text = "REPRIS DU PROJET"
+        else:
+            state_text = "À ÉCRIRE"
+        state = make_label(state_text, "AccentPill")
+        state.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        brief_head.addWidget(state)
+        brief_box.addLayout(brief_head)
+
+        progress = QProgressBar()
+        progress.setRange(0, len(STORY_MAP_STEPS))
+        progress.setValue(answered_count)
+        progress.setFormat(f"{answered_count}/{len(STORY_MAP_STEPS)} réponses enregistrées")
+        progress.setTextVisible(self.width() >= 1250)
+        progress.setFixedHeight(8 if self.width() < 1250 else 16)
+        brief_box.addWidget(progress)
+        brief_box.addWidget(make_label(step["title"].upper(), "Caption"))
+        brief_box.addWidget(
+            make_label(
+                step["question"],
+                "CardTitle" if self.width() < 1250 else "SectionTitle",
+                True,
+            )
+        )
+        brief_box.addWidget(make_label(step["why"], "Body", True))
+        brief_box.addWidget(make_label(step["definition"], "Muted", True))
+        if self.width() >= 1250 and self.height() >= 800:
+            brief_box.addWidget(make_label(f"Exemple · {step['example']}", "Muted", True))
+        workspace_box.addWidget(brief)
+
+        editor_head = QHBoxLayout()
+        editor_head.addWidget(make_label("TA RÉPONSE", "Caption"))
+        editor_head.addStretch()
+        editor_head.addWidget(make_label("Une question à la fois · aucune structure en actes imposée", "Muted"))
+        workspace_box.addLayout(editor_head)
+
+        self.story_map_text = make_editor(
+            150 if self.height() < 800 else 230,
+            step["placeholder"],
+        )
+        self.story_map_text.setObjectName("LearningAnswer")
+        self.story_map_text.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.story_map_text.setPlainText(answer)
+        workspace_box.addWidget(self.story_map_text, 1)
+
+        action_bar = QWidget()
+        action_bar.setFixedHeight(52)
+        actions = QHBoxLayout(action_bar)
+        actions.setContentsMargins(0, 4, 0, 0)
+        actions.setSpacing(8)
+        compact = self.width() < 1250
+        previous = make_button("←" if compact else "← Précédent", "secondary", self._previous_story_map_step)
+        previous.setEnabled(self.story_map_step_index > 0)
+        actions.addWidget(previous)
+        actions.addWidget(make_button("Enregistrer", "secondary", self._save_story_map_step))
+        actions.addWidget(make_button("Carte" if compact else "Vue carte", "secondary", self._show_story_map_board))
+        actions.addStretch()
+        if self.story_map_step_index < len(STORY_MAP_STEPS) - 1:
+            actions.addWidget(make_button("Continuer →", "primary", self._next_story_map_step))
+        else:
+            actions.addWidget(make_button("Terminer la carte", "primary", self._finish_story_map))
+        workspace_box.addWidget(action_bar)
+
+    def _story_map_suggested_answers(self, project) -> dict[str, str]:
+        rows = self.db.q(
+            "SELECT question_key,answer FROM project_questions WHERE project_id=?",
+            (self.active_project,),
+        )
+        questions = {row["question_key"]: row["answer"].strip() for row in rows}
+        obstacle_parts = [part for part in (project["opposition"].strip(), questions.get("consequence", "")) if part]
+        resolution_parts = [part for part in (project["ending"].strip(), project["change_note"].strip()) if part]
+        return {
+            "objective": project["objective"].strip(),
+            "first_actions": questions.get("action", ""),
+            "obstacles_consequences": "\n".join(obstacle_parts),
+            "escalation": questions.get("progression", ""),
+            "difficult_choice": questions.get("choice", ""),
+            "resolution_change": "\n".join(resolution_parts),
+        }
+
+    def _save_story_map_step(self, _checked: bool = False, silent: bool = False) -> None:
+        if not self.active_project or not hasattr(self, "story_map_text"):
+            return
+        step = STORY_MAP_STEPS[self.story_map_step_index]
+        self.db.save_story_map_answer(self.active_project, step["key"], self.story_map_text.toPlainText().strip())
+        self.db.run(
+            "UPDATE projects SET current_document=? WHERE id=?",
+            ("story_map", self.active_project),
+        )
+        if not silent:
+            self.save_state.setText("Réponse enregistrée localement")
+            QTimer.singleShot(2400, lambda: self.save_state.setText(""))
+
+    def _previous_story_map_step(self) -> None:
+        self._save_story_map_step(silent=True)
+        if self.story_map_step_index > 0:
+            self.db.set_setting(f"story_map_step_{self.active_project}", self.story_map_step_index - 1)
+            self.show_development()
+
+    def _next_story_map_step(self) -> None:
+        if not self.story_map_text.toPlainText().strip():
+            QMessageBox.information(
+                self,
+                "Une réponse avant de continuer",
+                "Écris au moins une phrase. Tu pourras la modifier plus tard.",
+            )
+            return
+        self._save_story_map_step(silent=True)
+        if self.story_map_step_index < len(STORY_MAP_STEPS) - 1:
+            self.db.set_setting(f"story_map_step_{self.active_project}", self.story_map_step_index + 1)
+            self.show_development()
+
+    def _story_map_compilation(self, include_current: bool = True) -> str:
+        rows = self.db.q(
+            "SELECT step_key,answer FROM story_map_answers WHERE project_id=?",
+            (self.active_project,),
+        )
+        answers = {row["step_key"]: row["answer"].strip() for row in rows}
+        if include_current and getattr(self, "story_map_mode", "board") == "guide" and hasattr(self, "story_map_text"):
+            current = STORY_MAP_STEPS[self.story_map_step_index]
+            answers[current["key"]] = self.story_map_text.toPlainText().strip()
+        sections = []
+        for index, step in enumerate(STORY_MAP_STEPS, start=1):
+            answer = answers.get(step["key"], "") or "— À écrire"
+            sections.append(f"{index:02d}. {step['title'].upper()}\n{answer}")
+        return "\n\n".join(sections)
+
+    def _preview_story_map(self) -> None:
+        self._save_story_map_step(silent=True)
+        self._show_story_map_summary(completed=False)
+
+    def _finish_story_map(self, _checked: bool = False, show_dialog: bool = True) -> None:
+        if not self.story_map_text.toPlainText().strip():
+            QMessageBox.information(
+                self,
+                "Une réponse avant de terminer",
+                "Écris la résolution et le changement, même provisoirement.",
+            )
+            return
+        self._save_story_map_step(silent=True)
+        rows = self.db.q(
+            "SELECT step_key,answer FROM story_map_answers WHERE project_id=?",
+            (self.active_project,),
+        )
+        answers = {row["step_key"]: row["answer"].strip() for row in rows}
+        missing = next((index for index, step in enumerate(STORY_MAP_STEPS) if not answers.get(step["key"])), None)
+        if missing is not None:
+            self.db.set_setting(f"story_map_step_{self.active_project}", missing)
+            self.show_development()
+            if show_dialog:
+                QMessageBox.information(
+                    self,
+                    "Carte encore incomplète",
+                    "StoryForge t’a ramené à la première question restée vide.",
+                )
+            return
+
+        compiled = self._story_map_compilation(include_current=False)
+        document = self.db.ensure_doc(self.active_project, "story_map", "Carte de l’histoire")
+        previous = document["content"].strip()
+        if previous and previous != compiled.strip():
+            self.db.snapshot(self.active_project, "story_map", previous, "Carte précédente")
+        self.db.save_doc(self.active_project, "story_map", compiled)
+        project = self.db.one("SELECT stage FROM projects WHERE id=?", (self.active_project,))
+        if project and project["stage"] in {"Idée", "Noyau"}:
+            self.db.run("UPDATE projects SET stage='Carte',current_document='story_map' WHERE id=?", (self.active_project,))
+        self.save_state.setText("Carte de l’histoire terminée")
+        QTimer.singleShot(2600, lambda: self.save_state.setText(""))
+        if show_dialog:
+            self._show_story_map_summary(completed=True)
+
+    def _show_story_map_summary(self, completed: bool) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Carte de l’histoire")
+        dialog.resize(720, 680)
+        box = QVBoxLayout(dialog)
+        box.setContentsMargins(26, 24, 26, 24)
+        box.setSpacing(9)
+        box.addWidget(make_label("SYNTHÈSE CAUSALE", "Caption"))
+        box.addWidget(make_label("Carte terminée" if completed else "Carte en cours", "SectionTitle"))
+        box.addWidget(
+            make_label(
+                "Relis surtout les liens entre décisions et conséquences. Cette carte n’impose aucun découpage en actes.",
+                "Muted",
+                True,
+            )
+        )
+        summary = make_editor(460)
+        summary.setReadOnly(True)
+        summary.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        summary.setPlainText(self._story_map_compilation(include_current=True))
+        box.addWidget(summary, 1)
+        actions = QHBoxLayout()
+        actions.addStretch()
+        actions.addWidget(make_button("Fermer", "primary", dialog.accept))
+        box.addLayout(actions)
+        dialog.exec()
+
+    def _build_synopsis_guide_workspace(self, workspace_box: QVBoxLayout, project) -> None:
+        setting_key = f"synopsis_step_{self.active_project}"
+        try:
+            step_index = int(self.db.setting(setting_key, "0"))
+        except ValueError:
+            step_index = 0
+        self.synopsis_step_index = max(0, min(step_index, len(SYNOPSIS_STEPS) - 1))
+        step = SYNOPSIS_STEPS[self.synopsis_step_index]
+        rows = self.db.q(
+            "SELECT step_key,answer FROM synopsis_answers WHERE project_id=?",
+            (self.active_project,),
+        )
+        answers = {row["step_key"]: row["answer"] for row in rows}
+        answered_count = sum(bool(answer.strip()) for answer in answers.values())
+        suggested = self._synopsis_suggested_answers(project).get(step["key"], "")
+        saved_answer = answers.get(step["key"], "")
+        answer = saved_answer or suggested
+
+        brief = make_card()
+        brief_box = QVBoxLayout(brief)
+        brief_box.setContentsMargins(22, 16, 22, 17)
+        brief_box.setSpacing(6)
+        brief_head = QHBoxLayout()
+        brief_head.addWidget(
+            make_label(
+                f"SYNOPSIS GUIDÉ · QUESTION {self.synopsis_step_index + 1:02d} SUR {len(SYNOPSIS_STEPS)}",
+                "Caption",
+            )
+        )
+        brief_head.addStretch()
+        state_text = "RÉPONDU" if saved_answer.strip() else "REPRIS DE LA CARTE" if suggested else "À ÉCRIRE"
+        state = make_label(state_text, "AccentPill")
+        state.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        brief_head.addWidget(state)
+        brief_box.addLayout(brief_head)
+
+        progress_row = QHBoxLayout()
+        progress_row.addWidget(make_label("PROGRESSION", "Caption"))
+        progress_row.addStretch()
+        progress_row.addWidget(
+            make_label(
+                f"{answered_count}/{len(SYNOPSIS_STEPS)} réponses enregistrées",
+                "Muted",
+            )
+        )
+        brief_box.addLayout(progress_row)
+        progress = QProgressBar()
+        progress.setRange(0, len(SYNOPSIS_STEPS))
+        progress.setValue(answered_count)
+        progress.setTextVisible(False)
+        progress.setFixedHeight(7)
+        brief_box.addWidget(progress)
+        brief_box.addWidget(make_label("LES 6 QUESTIONS", "Caption"))
+        if self.width() >= 1250:
+            question_grid = QGridLayout()
+            question_grid.setHorizontalSpacing(7)
+            question_grid.setVerticalSpacing(5)
+            for index, question in enumerate(SYNOPSIS_STEPS):
+                button = QPushButton(f"{index + 1:02d}  {question['title']}")
+                button.setProperty("segment", True)
+                button.setProperty("synopsisQuestion", True)
+                button.setCheckable(True)
+                button.setChecked(index == self.synopsis_step_index)
+                button.setCursor(Qt.CursorShape.PointingHandCursor)
+                button.clicked.connect(
+                    lambda _checked=False, target=index: self._select_synopsis_step(target)
+                )
+                question_grid.addWidget(button, index // 3, index % 3)
+            brief_box.addLayout(question_grid)
+        else:
+            question_path = "  →  ".join(
+                f"{index:02d} {question['title']}"
+                for index, question in enumerate(SYNOPSIS_STEPS, start=1)
+            )
+            brief_box.addWidget(make_label(question_path, "Body", True))
+        brief_box.addWidget(make_label(f"{step['part'].upper()} · {step['title'].upper()}", "Caption"))
+        brief_box.addWidget(
+            make_label(
+                step["question"],
+                "CardTitle" if self.width() < 1250 else "SectionTitle",
+                True,
+            )
+        )
+        brief_box.addWidget(make_label(step["why"], "Body", True))
+        brief_box.addWidget(make_label(step["guidance"], "Muted", True))
+        if suggested and not saved_answer.strip() and self.width() >= 1250 and self.height() >= 800:
+            preview = " ".join(suggested.split())
+            if len(preview) > 260:
+                preview = preview[:257].rstrip() + "…"
+            brief_box.addWidget(make_label(f"Matière reprise · {preview}", "Muted", True))
+        workspace_box.addWidget(brief)
+
+        editor_head = QHBoxLayout()
+        editor_head.addWidget(make_label("TON PASSAGE", "Caption"))
+        editor_head.addStretch()
+        editor_head.addWidget(make_label("Une question à la fois · les trois parties ne sont pas des actes imposés", "Muted"))
+        workspace_box.addLayout(editor_head)
+
+        self.synopsis_answer_text = make_editor(
+            150 if self.height() < 800 else 230,
+            step["placeholder"],
+        )
+        self.synopsis_answer_text.setObjectName("LearningAnswer")
+        self.synopsis_answer_text.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.synopsis_answer_text.setPlainText(answer)
+        workspace_box.addWidget(self.synopsis_answer_text, 1)
+
+        action_bar = QWidget()
+        action_bar.setFixedHeight(52)
+        actions = QHBoxLayout(action_bar)
+        actions.setContentsMargins(0, 4, 0, 0)
+        actions.setSpacing(8)
+        compact = self.width() < 1250
+        previous = make_button("←" if compact else "← Précédent", "secondary", self._previous_synopsis_step)
+        previous.setEnabled(self.synopsis_step_index > 0)
+        actions.addWidget(previous)
+        actions.addWidget(make_button("Enregistrer", "secondary", self._save_synopsis_step))
+        actions.addWidget(make_button("Texte final" if compact else "Voir le synopsis final", "secondary", self._show_synopsis_final))
+        actions.addStretch()
+        if self.synopsis_step_index < len(SYNOPSIS_STEPS) - 1:
+            actions.addWidget(make_button("Continuer →", "primary", self._next_synopsis_step))
+        else:
+            actions.addWidget(make_button("Assembler le synopsis", "primary", self._finish_synopsis_guide))
+        workspace_box.addWidget(action_bar)
+
+    def _select_synopsis_step(self, target: int) -> None:
+        self._save_synopsis_step(silent=True)
+        self.db.set_setting(f"synopsis_step_{self.active_project}", target)
+        self.show_development()
+
+    def _synopsis_suggested_answers(self, project) -> dict[str, str]:
+        map_rows = self.db.q(
+            "SELECT step_key,answer FROM story_map_answers WHERE project_id=?",
+            (self.active_project,),
+        )
+        map_answers = {row["step_key"]: row["answer"].strip() for row in map_rows if row["answer"].strip()}
+        nodes = self.db.q(
+            "SELECT title,content,kind,source_step_key FROM story_map_nodes WHERE project_id=? ORDER BY id",
+            (self.active_project,),
+        )
+
+        def node_text(node) -> str:
+            title = node["title"].strip()
+            content = node["content"].strip()
+            meaningful_title = title and title != "Carte sans titre"
+            if meaningful_title and content:
+                return f"{title} — {content}"
+            if content:
+                return content
+            return title if meaningful_title else ""
+
+        project_fallbacks = {
+            "opening_situation": [project["protagonist"].strip()],
+            "disruption_direction": [project["objective"].strip()],
+            "first_chain": [],
+            "escalation_choice": [project["opposition"].strip(), project["stakes"].strip()],
+            "decisive_confrontation": [],
+            "outcome_change": [project["ending"].strip(), project["change_note"].strip()],
+        }
+        suggestions = {}
+        for step in SYNOPSIS_STEPS:
+            parts = [map_answers[key] for key in step["story_keys"] if map_answers.get(key)]
+            if not parts:
+                parts = [
+                    node_text(node)
+                    for node in nodes
+                    if node["source_step_key"] in step["story_keys"] and node_text(node)
+                ]
+            if not parts and step["fallback_kinds"]:
+                parts = [
+                    node_text(node)
+                    for node in nodes
+                    if not node["source_step_key"] and node["kind"] in step["fallback_kinds"] and node_text(node)
+                ]
+            if not parts:
+                parts = [part for part in project_fallbacks[step["key"]] if part]
+            suggestions[step["key"]] = "\n\n".join(dict.fromkeys(parts))
+        return suggestions
+
+    def _save_synopsis_step(self, _checked: bool = False, silent: bool = False) -> None:
+        editor = getattr(self, "synopsis_answer_text", None)
+        if not self.active_project or not isinstance(editor, QTextEdit):
+            return
+        try:
+            answer = editor.toPlainText().strip()
+        except RuntimeError:
+            return
+        step = SYNOPSIS_STEPS[self.synopsis_step_index]
+        self.db.save_synopsis_answer(self.active_project, step["key"], answer)
+        self.db.run("UPDATE projects SET current_document='synopsis' WHERE id=?", (self.active_project,))
+        if not silent:
+            self.save_state.setText("Passage du synopsis enregistré")
+            QTimer.singleShot(2400, lambda: self.save_state.setText(""))
+
+    def _previous_synopsis_step(self) -> None:
+        self._save_synopsis_step(silent=True)
+        if self.synopsis_step_index > 0:
+            self.db.set_setting(f"synopsis_step_{self.active_project}", self.synopsis_step_index - 1)
+            self.show_development()
+
+    def _next_synopsis_step(self) -> None:
+        if not self.synopsis_answer_text.toPlainText().strip():
+            QMessageBox.information(
+                self,
+                "Un passage avant de continuer",
+                "Écris au moins une phrase. La matière reprise de la carte reste entièrement modifiable.",
+            )
+            return
+        self._save_synopsis_step(silent=True)
+        if self.synopsis_step_index < len(SYNOPSIS_STEPS) - 1:
+            self.db.set_setting(f"synopsis_step_{self.active_project}", self.synopsis_step_index + 1)
+            self.show_development()
+
+    def _synopsis_compilation(self, include_current: bool = True) -> str:
+        rows = self.db.q(
+            "SELECT step_key,answer FROM synopsis_answers WHERE project_id=?",
+            (self.active_project,),
+        )
+        answers = {row["step_key"]: row["answer"].strip() for row in rows}
+        if include_current and getattr(self, "synopsis_mode", "guide") == "guide":
+            editor = getattr(self, "synopsis_answer_text", None)
+            if isinstance(editor, QTextEdit):
+                answers[SYNOPSIS_STEPS[self.synopsis_step_index]["key"]] = editor.toPlainText().strip()
+        return "\n\n".join(answers.get(step["key"], "") for step in SYNOPSIS_STEPS if answers.get(step["key"], ""))
+
+    def _finish_synopsis_guide(self, _checked: bool = False) -> None:
+        if not self.synopsis_answer_text.toPlainText().strip():
+            QMessageBox.information(
+                self,
+                "Une fin avant d’assembler",
+                "Écris le résultat et le changement, même s’ils restent provisoires.",
+            )
+            return
+        self._save_synopsis_step(silent=True)
+        rows = self.db.q(
+            "SELECT step_key,answer FROM synopsis_answers WHERE project_id=?",
+            (self.active_project,),
+        )
+        answers = {row["step_key"]: row["answer"].strip() for row in rows}
+        missing = next((index for index, step in enumerate(SYNOPSIS_STEPS) if not answers.get(step["key"])), None)
+        if missing is not None:
+            self.db.set_setting(f"synopsis_step_{self.active_project}", missing)
+            self.show_development()
+            QMessageBox.information(
+                self,
+                "Synopsis encore incomplet",
+                "StoryForge t’a ramené à la première question restée vide.",
+            )
+            return
+        self._replace_synopsis_with_compilation()
+        self.db.set_setting(f"synopsis_mode_{self.active_project}", "final")
+        self.synopsis_mode = "final"
+        self.save_state.setText("Synopsis assemblé et enregistré")
+        QTimer.singleShot(2600, lambda: self.save_state.setText(""))
+        self.show_development()
+
+    def _build_synopsis_final_workspace(self, workspace_box: QVBoxLayout) -> None:
+        document = self.db.ensure_doc(self.active_project, "synopsis", "Synopsis")
+        answer_count = self.db.one(
+            "SELECT COUNT(*) FROM synopsis_answers WHERE project_id=? AND TRIM(answer)<>''",
+            (self.active_project,),
+        )[0]
+        brief = make_card()
+        brief_box = QVBoxLayout(brief)
+        brief_box.setContentsMargins(22, 16, 22, 17)
+        brief_box.setSpacing(6)
+        brief_head = QHBoxLayout()
+        brief_head.addWidget(make_label("SYNOPSIS FINAL", "Caption"))
+        brief_head.addStretch()
+        state = make_label("MODIFIABLE", "AccentPill")
+        state.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        brief_head.addWidget(state)
+        brief_box.addLayout(brief_head)
+        brief_box.addWidget(
+            make_label(
+                "Raconte toute l’histoire clairement, fin comprise.",
+                "CardTitle" if self.width() < 1250 else "SectionTitle",
+                True,
+            )
+        )
+        brief_box.addWidget(
+            make_label(
+                "Les réponses ont seulement fourni une première continuité. Réorganise, relie et réécris librement ce texte au présent. "
+                "Les repères début, développement et fin ne sont pas des actes obligatoires.",
+                "Muted",
+                True,
+            )
+        )
+        brief_box.addWidget(make_label(f"Guide · {answer_count}/{len(SYNOPSIS_STEPS)} passages enregistrés", "Muted"))
+        workspace_box.addWidget(brief)
+
+        editor_head = QHBoxLayout()
+        editor_head.addWidget(make_label("TON SYNOPSIS", "Caption"))
+        editor_head.addStretch()
+        editor_head.addWidget(make_label("Grand texte continu · sauvegarde locale", "Muted"))
+        workspace_box.addLayout(editor_head)
+
+        self.synopsis_final_text = make_editor(
+            180 if self.height() < 800 else 280,
+            "Assemble ici l’histoire complète, du point de départ jusqu’au résultat final.",
+        )
+        self.synopsis_final_text.setObjectName("LearningAnswer")
+        self.synopsis_final_text.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.synopsis_final_text.setPlainText(document["content"] or self._synopsis_compilation(include_current=False))
+        workspace_box.addWidget(self.synopsis_final_text, 1)
+
+        action_bar = QWidget()
+        action_bar.setFixedHeight(52)
+        actions = QHBoxLayout(action_bar)
+        actions.setContentsMargins(0, 4, 0, 0)
+        actions.setSpacing(8)
+        compact = self.width() < 1250
+        actions.addWidget(make_button("← Guide" if compact else "← Reprendre les questions", "secondary", self._show_synopsis_guide))
+        actions.addWidget(make_button("Enregistrer", "secondary", self._save_synopsis_final))
+        actions.addWidget(make_button("Version" if compact else "Créer une version", "secondary", self._snapshot_synopsis_final))
+        actions.addStretch()
+        rebuild = make_button("Réassembler" if compact else "Réassembler depuis les réponses", "primary", self._rebuild_synopsis_from_answers)
+        rebuild.setEnabled(answer_count == len(SYNOPSIS_STEPS))
+        actions.addWidget(rebuild)
+        workspace_box.addWidget(action_bar)
+
+    def _show_synopsis_guide(self) -> None:
+        if getattr(self, "synopsis_mode", "guide") == "final":
+            self._save_synopsis_final(silent=True)
+        self.db.set_setting(f"synopsis_mode_{self.active_project}", "guide")
+        self.synopsis_mode = "guide"
+        self.show_development()
+
+    def _show_synopsis_final(self) -> None:
+        if getattr(self, "synopsis_mode", "guide") == "guide":
+            self._save_synopsis_step(silent=True)
+        self.db.set_setting(f"synopsis_mode_{self.active_project}", "final")
+        self.synopsis_mode = "final"
+        self.show_development()
+
+    def _replace_synopsis_with_compilation(self) -> None:
+        compiled = self._synopsis_compilation(include_current=False).strip()
+        if not compiled:
+            return
+        document = self.db.ensure_doc(self.active_project, "synopsis", "Synopsis")
+        previous = document["content"].strip()
+        if previous and previous != compiled:
+            self.db.snapshot(self.active_project, "synopsis", previous, "Synopsis précédent")
+        self.db.save_doc(self.active_project, "synopsis", compiled)
+        project = self.db.one("SELECT stage FROM projects WHERE id=?", (self.active_project,))
+        if project and project["stage"] in {"Idée", "Noyau", "Carte"}:
+            self.db.run("UPDATE projects SET stage='Synopsis',current_document='synopsis' WHERE id=?", (self.active_project,))
+        else:
+            self.db.run("UPDATE projects SET current_document='synopsis' WHERE id=?", (self.active_project,))
+
+    def _rebuild_synopsis_from_answers(self) -> None:
+        self._save_synopsis_final(silent=True)
+        self._replace_synopsis_with_compilation()
+        document = self.db.one(
+            "SELECT content FROM project_docs WHERE project_id=? AND doc_type='synopsis'",
+            (self.active_project,),
+        )
+        if isinstance(getattr(self, "synopsis_final_text", None), QTextEdit) and document:
+            self.synopsis_final_text.setPlainText(document["content"])
+        self.save_state.setText("Synopsis réassemblé · version précédente conservée")
+        QTimer.singleShot(2600, lambda: self.save_state.setText(""))
+
+    def _save_synopsis_final(self, _checked: bool = False, silent: bool = False) -> None:
+        editor = getattr(self, "synopsis_final_text", None)
+        if not self.active_project or not isinstance(editor, QTextEdit):
+            return
+        try:
+            content = editor.toPlainText()
+        except RuntimeError:
+            return
+        self.db.ensure_doc(self.active_project, "synopsis", "Synopsis")
+        self.db.save_doc(self.active_project, "synopsis", content)
+        self.db.run("UPDATE projects SET current_document='synopsis' WHERE id=?", (self.active_project,))
+        if not silent:
+            self.save_state.setText("Synopsis enregistré localement")
+            QTimer.singleShot(2400, lambda: self.save_state.setText(""))
+
+    def _snapshot_synopsis_final(self) -> None:
+        editor = getattr(self, "synopsis_final_text", None)
+        if not isinstance(editor, QTextEdit):
+            return
+        content = editor.toPlainText()
+        self._save_synopsis_final(silent=True)
+        self.db.snapshot(self.active_project, "synopsis", content)
+        self.save_state.setText("Version du synopsis créée")
+        QTimer.singleShot(2400, lambda: self.save_state.setText(""))
+
+    def _switch_development_document(self, key: str) -> None:
+        if key not in dict(DEVELOPMENT_DOCUMENTS):
+            return
+        if self.current_view == "development":
+            if self.development_doc_type == "story_map":
+                if getattr(self, "story_map_mode", "board") == "guide":
+                    self._save_story_map_step(silent=True)
+            elif self.development_doc_type == "synopsis":
+                if getattr(self, "synopsis_mode", "guide") == "final":
+                    self._save_synopsis_final(silent=True)
+                else:
+                    self._save_synopsis_step(silent=True)
+            elif self.development_doc_type == "outline":
+                self._save_sequence_board(silent=True)
+            elif self.development_doc_type == "scenes":
+                self._save_scene_list(silent=True)
+            else:
+                self._save_development_document(silent=True)
+        self.db.set_setting(f"last_development_doc_{self.active_project}", key)
+        self.show_development()
+
+    def _previous_development_document(self) -> None:
+        keys = [key for key, _title in DEVELOPMENT_DOCUMENTS]
+        index = keys.index(self.development_doc_type)
+        if index > 0:
+            self._switch_development_document(keys[index - 1])
+
+    def _continue_development_document(self) -> None:
+        if self.development_doc_type == "outline":
+            self._save_sequence_board(silent=True)
+        elif self.development_doc_type == "scenes":
+            self._save_scene_list(silent=True)
+        else:
+            self._save_development_document(silent=True)
+        keys = [key for key, _title in DEVELOPMENT_DOCUMENTS]
+        index = keys.index(self.development_doc_type)
+        if index < len(keys) - 1:
+            self.db.set_setting(f"last_development_doc_{self.active_project}", keys[index + 1])
+            self.show_development()
+
+    def _save_development_document(self, _checked: bool = False, silent: bool = False) -> None:
+        editor = getattr(self, "development_text", None)
+        if (
+            not self.active_project
+            or self.development_doc_type in {"story_map", "synopsis", "outline", "scenes", "script"}
+            or not isinstance(editor, QTextEdit)
+        ):
+            return
+        try:
+            content = editor.toPlainText()
+        except RuntimeError:
+            return
+        title = dict(DEVELOPMENT_DOCUMENTS)[self.development_doc_type]
+        self.db.ensure_doc(self.active_project, self.development_doc_type, title)
+        self.db.save_doc(self.active_project, self.development_doc_type, content)
+        self.db.run(
+            "UPDATE projects SET current_document=? WHERE id=?",
+            (self.development_doc_type, self.active_project),
+        )
+        if not silent:
+            self.save_state.setText("Document enregistré localement")
+            QTimer.singleShot(2400, lambda: self.save_state.setText(""))
+
+    def _snapshot_development_document(self) -> None:
+        content = self.development_text.toPlainText()
+        self._save_development_document(silent=True)
+        self.db.snapshot(self.active_project, self.development_doc_type, content)
+        self.save_state.setText("Version créée")
+        QTimer.singleShot(2400, lambda: self.save_state.setText(""))
+
+    def _insert_beat_template(self) -> None:
+        editor = getattr(self, "development_text", None)
+        if not isinstance(editor, QTextEdit):
+            return
+        titles = [template["title"] for template in TEMPLATE_LIBRARY]
+        selected_title, accepted = QInputDialog.getItem(
+            self,
+            "Choisir une carte de beats",
+            "Template facultatif",
+            titles,
+            editable=False,
+        )
+        if not accepted:
+            return
+        template = next(item for item in TEMPLATE_LIBRARY if item["title"] == selected_title)
+        generated = "\n\n".join(
+            f"{index:02d}. {title}\nFonction : {purpose}\nÉvénement : {events}\nConséquence : {consequence}"
+            for index, (title, purpose, events, consequence) in enumerate(template["steps"], start=1)
+        )
+        if editor.toPlainText().strip():
+            answer = QMessageBox.question(
+                self,
+                "Ajouter le template",
+                "Ajouter ce template sous les beats déjà écrits ?",
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            editor.append(f"\n\n{generated}")
+        else:
+            editor.setPlainText(generated)
+        self._save_development_document(silent=True)
+        self.save_state.setText(f"Template « {selected_title} » ajouté aux beats")
+        QTimer.singleShot(2600, lambda: self.save_state.setText(""))
+
+    # ---------- Global search and tags ----------
+
+    def show_search(self) -> None:
+        page = self._begin_page("Recherche", "search", compact=True)
+        self._page_header(
+            page,
+            "Retrouver et croiser",
+            "Recherche globale",
+            "Cherche dans tout le projet, puis ouvre directement la fiche, la scène ou le document correspondant.",
+        )
+        search_card = make_card()
+        search_box = QHBoxLayout(search_card)
+        search_box.setContentsMargins(16, 12, 16, 12)
+        search_box.setSpacing(8)
+        self.global_search_query = QLineEdit()
+        self.global_search_query.setPlaceholderText(
+            "Personnage, lieu, scène, événement, note…  ·  Ctrl+K"
+        )
+        self.global_search_query.setClearButtonEnabled(True)
+        self.global_search_query.setText(self.db.setting("global_search_query", ""))
+        search_box.addWidget(self.global_search_query, 1)
+        self.global_search_type = QComboBox()
+        self.global_search_type.addItem("Tous les résultats", "")
+        for key, label in SEARCH_TARGETS.items():
+            self.global_search_type.addItem(label, key)
+        self.global_search_type.addItem("Relation", "relationship")
+        search_box.addWidget(self.global_search_type)
+        self.global_search_tag = QComboBox()
+        self.global_search_tag.addItem("Tous les tags", 0)
+        tag_project_ids = [0]
+        if self.active_project:
+            tag_project_ids.append(self.active_project)
+        placeholders = ",".join("?" * len(tag_project_ids))
+        for tag in self.db.q(
+            f"""SELECT id,name,project_id FROM tags WHERE project_id IN ({placeholders})
+            ORDER BY name COLLATE NOCASE""",
+            tag_project_ids,
+        ):
+            suffix = " · Idées" if int(tag["project_id"]) == 0 else ""
+            self.global_search_tag.addItem(f"#{tag['name']}{suffix}", int(tag["id"]))
+        search_box.addWidget(self.global_search_tag)
+        page.addWidget(search_card)
+
+        body = QHBoxLayout()
+        body.setSpacing(12)
+        results_card = make_card()
+        results_box = QVBoxLayout(results_card)
+        results_box.setContentsMargins(14, 14, 14, 14)
+        results_head = QHBoxLayout()
+        results_head.addWidget(make_label("RÉSULTATS", "Caption"))
+        results_head.addStretch()
+        self.global_search_count = make_label("0", "AccentPill")
+        results_head.addWidget(self.global_search_count)
+        results_box.addLayout(results_head)
+        self.global_search_results = QTreeWidget()
+        self.global_search_results.setObjectName("GlobalSearchResults")
+        self.global_search_results.setHeaderLabels(["Type", "Résultat", "Contexte", "Tags"])
+        self.global_search_results.header().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.global_search_results.header().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.Interactive
+        )
+        self.global_search_results.header().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.Stretch
+        )
+        self.global_search_results.header().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.global_search_results.setColumnWidth(1, 300)
+        self.global_search_results.itemSelectionChanged.connect(
+            self._global_search_selection_changed
+        )
+        self.global_search_results.itemDoubleClicked.connect(
+            self._open_global_search_result
+        )
+        results_box.addWidget(self.global_search_results, 1)
+        result_actions = QHBoxLayout()
+        self.global_search_hint = make_label(
+            "Double-clique sur un résultat pour l’ouvrir.", "Muted", True
+        )
+        result_actions.addWidget(self.global_search_hint, 1)
+        self.global_search_open_button = make_button(
+            "Ouvrir le résultat", "primary", self._open_selected_global_search_result
+        )
+        self.global_search_open_button.setEnabled(False)
+        result_actions.addWidget(self.global_search_open_button)
+        results_box.addLayout(result_actions)
+        body.addWidget(results_card, 1)
+
+        side = QTabWidget()
+        side.setObjectName("SearchSideTabs")
+        side.setFixedWidth(390)
+
+        selected_tab = QWidget()
+        selected_box = QVBoxLayout(selected_tab)
+        selected_box.setContentsMargins(14, 14, 14, 14)
+        selected_box.setSpacing(8)
+        selected_box.addWidget(make_label("ÉLÉMENT SÉLECTIONNÉ", "Caption"))
+        self.global_search_selected_title = make_label(
+            "Sélectionne un résultat", "SectionTitle", True
+        )
+        selected_box.addWidget(self.global_search_selected_title)
+        self.global_search_selected_context = make_label(
+            "Tu pourras lui attribuer des tags communs au projet.", "Muted", True
+        )
+        selected_box.addWidget(self.global_search_selected_context)
+        selected_box.addSpacing(6)
+        selected_box.addWidget(make_label("TAGS", "Caption"))
+        self.global_search_selected_tags = QLineEdit()
+        self.global_search_selected_tags.setPlaceholderText(
+            "important, backstory, à revoir…"
+        )
+        self.global_search_selected_tags.setEnabled(False)
+        selected_box.addWidget(self.global_search_selected_tags)
+        self.global_search_save_tags = make_button(
+            "Enregistrer les tags", "primary", self._save_global_search_result_tags
+        )
+        self.global_search_save_tags.setEnabled(False)
+        selected_box.addWidget(self.global_search_save_tags)
+        selected_box.addStretch()
+        side.addTab(selected_tab, "Résultat")
+
+        manager_tab = QWidget()
+        manager_box = QVBoxLayout(manager_tab)
+        manager_box.setContentsMargins(14, 14, 14, 14)
+        manager_box.setSpacing(8)
+        manager_box.addWidget(make_label("GESTIONNAIRE DE TAGS", "Caption"))
+        self.tag_manager_scope = QComboBox()
+        if self.active_project:
+            self.tag_manager_scope.addItem("Projet actif", self.active_project)
+        self.tag_manager_scope.addItem("Carnet d’idées", 0)
+        self.tag_manager_scope.currentIndexChanged.connect(self._refresh_tag_manager)
+        manager_box.addWidget(self.tag_manager_scope)
+        self.tag_manager_list = QListWidget()
+        self.tag_manager_list.setObjectName("TagManagerList")
+        self.tag_manager_list.currentItemChanged.connect(self._tag_manager_selected)
+        manager_box.addWidget(self.tag_manager_list, 1)
+        manager_box.addWidget(
+            make_button("+ Nouveau tag", "primary", self._new_managed_tag)
+        )
+        manager_box.addWidget(make_label("NOM", "Caption"))
+        self.tag_manager_name = QLineEdit()
+        self.tag_manager_name.setEnabled(False)
+        manager_box.addWidget(self.tag_manager_name)
+        manager_box.addWidget(make_label("COULEUR", "Caption"))
+        color_row = QHBoxLayout()
+        self.tag_manager_color = QLineEdit("#D84A32")
+        self.tag_manager_color.setEnabled(False)
+        color_row.addWidget(self.tag_manager_color, 1)
+        self.tag_manager_color_button = make_button(
+            "Choisir", "secondary", self._choose_managed_tag_color
+        )
+        self.tag_manager_color_button.setEnabled(False)
+        color_row.addWidget(self.tag_manager_color_button)
+        manager_box.addLayout(color_row)
+        managed_actions = QGridLayout()
+        self.tag_manager_save_button = make_button(
+            "Enregistrer", "primary", self._save_managed_tag
+        )
+        self.tag_manager_merge_button = make_button(
+            "Fusionner", "secondary", self._merge_managed_tag
+        )
+        self.tag_manager_delete_button = make_button(
+            "Supprimer", "danger", self._delete_managed_tag
+        )
+        for button in (
+            self.tag_manager_save_button,
+            self.tag_manager_merge_button,
+            self.tag_manager_delete_button,
+        ):
+            button.setEnabled(False)
+        managed_actions.addWidget(self.tag_manager_save_button, 0, 0, 1, 2)
+        managed_actions.addWidget(self.tag_manager_merge_button, 1, 0)
+        managed_actions.addWidget(self.tag_manager_delete_button, 1, 1)
+        manager_box.addLayout(managed_actions)
+        side.addTab(manager_tab, "Tags")
+        body.addWidget(side)
+        page.addLayout(body, 1)
+
+        self.global_search_query.textChanged.connect(self._refresh_global_search)
+        self.global_search_type.currentIndexChanged.connect(self._refresh_global_search)
+        self.global_search_tag.currentIndexChanged.connect(self._refresh_global_search)
+        self._refresh_global_search()
+        self._refresh_tag_manager()
+
+    def _focus_global_search(self) -> None:
+        if self.current_view != "search" or not hasattr(self, "global_search_query"):
+            self.show_search()
+        self.global_search_query.setFocus()
+        self.global_search_query.selectAll()
+
+    def _tag_scope_for_target(self, target_type: str) -> int:
+        return 0 if target_type == "idea" else int(self.active_project or 0)
+
+    @staticmethod
+    def _parse_tag_text(value: str) -> list[str]:
+        return [
+            part.strip().lstrip("#").strip()
+            for part in re.split(r"[,;\n]", value or "")
+            if part.strip().lstrip("#").strip()
+        ]
+
+    def _entity_tag_text(self, target_type: str, entity_id: int) -> str:
+        return ", ".join(
+            self.db.entity_tag_names(
+                self._tag_scope_for_target(target_type), target_type, entity_id
+            )
+        )
+
+    def _save_entity_tag_text(
+        self, target_type: str, entity_id: int, value: str
+    ) -> None:
+        if not entity_id:
+            return
+        self.db.set_entity_tags(
+            self._tag_scope_for_target(target_type),
+            target_type,
+            entity_id,
+            self._parse_tag_text(value),
+        )
+
+    def _delete_entity_tag_links(self, target_type: str, entity_id: int) -> None:
+        project_id = self._tag_scope_for_target(target_type)
+        self.db.run(
+            """DELETE FROM entity_tags WHERE target_type=? AND entity_id=?
+            AND tag_id IN (SELECT id FROM tags WHERE project_id=?)""",
+            (target_type, entity_id, project_id),
+        )
+
+    def _global_search_sources(self) -> list[dict]:
+        rows: list[dict] = []
+
+        def add(target: str, entity_id: int, title: str, context: str, text: str, **extra) -> None:
+            rows.append(
+                {
+                    "target": target,
+                    "entity_id": int(entity_id or 0),
+                    "title": title or f"{SEARCH_TARGETS.get(target, target)} sans titre",
+                    "context": context or "",
+                    "text": text or "",
+                    **extra,
+                }
+            )
+
+        for row in self.db.q("SELECT * FROM ideas ORDER BY id DESC"):
+            add(
+                "idea",
+                row["id"],
+                row["title"],
+                dict(IDEA_TYPES).get(row["idea_type"], "Idée"),
+                " ".join(
+                    str(row[key] or "")
+                    for key in ("title", "seed", "attraction", "what_if", "status", "potential")
+                ),
+            )
+        if not self.active_project:
+            return rows
+        pid = self.active_project
+        for row in self.db.q("SELECT * FROM characters WHERE project_id=?", (pid,)):
+            add(
+                "character",
+                row["id"],
+                row["name"],
+                row["role"] or "Rôle à préciser",
+                " ".join(str(value or "") for value in row),
+            )
+        for row in self.db.q(
+            """SELECT relation.*,a.name name_a,b.name name_b
+            FROM character_relationships relation
+            JOIN characters a ON a.id=relation.character_a_id
+            JOIN characters b ON b.id=relation.character_b_id
+            WHERE relation.project_id=?""",
+            (pid,),
+        ):
+            label = f"{row['name_a']} → {row['name_b']}"
+            add(
+                "relationship",
+                row["id"],
+                label,
+                row["relation_type"] or "Relation",
+                " ".join(str(value or "") for value in row),
+                navigation_id=int(row["character_a_id"]),
+            )
+        source_specs = (
+            (
+                "location",
+                "SELECT * FROM locations WHERE project_id=?",
+                "name",
+                "category",
+            ),
+            (
+                "scene",
+                "SELECT * FROM scene_rows WHERE project_id=?",
+                "title",
+                "status",
+            ),
+            (
+                "event",
+                "SELECT * FROM timeline_events WHERE project_id=?",
+                "title",
+                "display_label",
+            ),
+            (
+                "story_node",
+                "SELECT * FROM story_map_nodes WHERE project_id=?",
+                "title",
+                "kind",
+            ),
+            (
+                "sequence",
+                "SELECT * FROM sequence_blocks WHERE project_id=?",
+                "title",
+                "purpose",
+            ),
+            (
+                "conflict",
+                "SELECT * FROM conflicts WHERE project_id=?",
+                "title",
+                "importance",
+            ),
+            (
+                "image",
+                "SELECT id,title,category,notes,file_name FROM image_library WHERE project_id=?",
+                "title",
+                "category",
+            ),
+            (
+                "faction",
+                "SELECT * FROM character_groups WHERE project_id=?",
+                "name",
+                "group_type",
+            ),
+        )
+        for target, sql, title_key, context_key in source_specs:
+            for row in self.db.q(sql, (pid,)):
+                add(
+                    target,
+                    row["id"],
+                    row[title_key],
+                    row[context_key] or "",
+                    " ".join(str(value or "") for value in row),
+                )
+        for row in self.db.q(
+            "SELECT id,doc_type,title,content FROM project_docs WHERE project_id=?",
+            (pid,),
+        ):
+            add(
+                "document",
+                row["id"],
+                row["title"],
+                DOCUMENT_NAMES.get(row["doc_type"], row["doc_type"]),
+                f"{row['title']} {row['content']}",
+                doc_type=row["doc_type"],
+            )
+        return rows
+
+    def _refresh_global_search(self, _value=None) -> None:
+        if not hasattr(self, "global_search_results"):
+            return
+        query = self.global_search_query.text().strip().casefold()
+        self.db.set_setting("global_search_query", self.global_search_query.text().strip())
+        target_filter = self.global_search_type.currentData() or ""
+        tag_id = int(self.global_search_tag.currentData() or 0)
+        tagged_pairs = set()
+        if tag_id:
+            tagged_pairs = {
+                (row["target_type"], int(row["entity_id"]))
+                for row in self.db.q(
+                    "SELECT target_type,entity_id FROM entity_tags WHERE tag_id=?", (tag_id,)
+                )
+            }
+        self.global_search_results.blockSignals(True)
+        self.global_search_results.clear()
+        count = 0
+        for result in self._global_search_sources():
+            if target_filter and result["target"] != target_filter:
+                continue
+            if tag_id and (result["target"], result["entity_id"]) not in tagged_pairs:
+                continue
+            haystack = f"{result['title']} {result['context']} {result['text']}".casefold()
+            if query and query not in haystack:
+                continue
+            tag_text = self._entity_tag_text(result["target"], result["entity_id"])
+            item = QTreeWidgetItem(
+                [
+                    SEARCH_TARGETS.get(result["target"], "Relation"),
+                    result["title"],
+                    result["context"],
+                    " · ".join(f"#{name.strip()}" for name in tag_text.split(",") if name.strip()),
+                ]
+            )
+            item.setData(0, Qt.ItemDataRole.UserRole, result)
+            item.setToolTip(1, result["text"][:900])
+            self.global_search_results.addTopLevelItem(item)
+            count += 1
+        self.global_search_results.blockSignals(False)
+        self.global_search_count.setText(str(count))
+        self.global_search_open_button.setEnabled(False)
+        self.global_search_selected_tags.setEnabled(False)
+        self.global_search_save_tags.setEnabled(False)
+
+    def _global_search_selection_changed(self) -> None:
+        items = self.global_search_results.selectedItems()
+        if not items:
+            return
+        result = items[0].data(0, Qt.ItemDataRole.UserRole)
+        self.global_search_selected_result = result
+        self.global_search_selected_title.setText(result["title"])
+        self.global_search_selected_context.setText(
+            f"{SEARCH_TARGETS.get(result['target'], 'Relation')} · {result['context']}"
+        )
+        can_tag = result["target"] != "relationship"
+        self.global_search_selected_tags.setText(
+            self._entity_tag_text(result["target"], result["entity_id"])
+        )
+        self.global_search_selected_tags.setEnabled(can_tag)
+        self.global_search_save_tags.setEnabled(can_tag)
+        self.global_search_open_button.setEnabled(True)
+
+    def _save_global_search_result_tags(self) -> None:
+        result = getattr(self, "global_search_selected_result", None)
+        if not result or result["target"] == "relationship":
+            return
+        self._save_entity_tag_text(
+            result["target"],
+            result["entity_id"],
+            self.global_search_selected_tags.text(),
+        )
+        self._refresh_global_search()
+        self._refresh_tag_manager()
+        self.save_state.setText("Tags enregistrés")
+
+    def _open_selected_global_search_result(self) -> None:
+        items = self.global_search_results.selectedItems()
+        if items:
+            self._open_global_search_result(items[0], 0)
+
+    def _open_global_search_result(self, item: QTreeWidgetItem, _column: int = 0) -> None:
+        result = item.data(0, Qt.ItemDataRole.UserRole)
+        target = result["target"]
+        entity_id = int(result["entity_id"])
+        if target == "idea":
+            self.show_ideas()
+            for index in range(self.idea_list.count()):
+                candidate = self.idea_list.item(index)
+                if int(candidate.data(Qt.ItemDataRole.UserRole)) == entity_id:
+                    self.idea_list.setCurrentItem(candidate)
+                    break
+        elif target in {"character", "relationship"}:
+            character_id = int(result.get("navigation_id", entity_id))
+            self.db.set_setting(f"last_character_{self.active_project}", character_id)
+            self.show_characters()
+        elif target == "location":
+            self.db.set_setting(f"last_location_{self.active_project}", entity_id)
+            self.show_locations()
+        elif target == "scene":
+            self.db.set_setting(f"last_development_doc_{self.active_project}", "scenes")
+            self._pending_scene_focus = entity_id
+            self.show_development()
+        elif target == "event":
+            self.show_timeline()
+            self._select_timeline_event(entity_id)
+        elif target == "story_node":
+            self.db.set_setting(f"last_development_doc_{self.active_project}", "story_map")
+            self.show_development()
+        elif target == "sequence":
+            self.db.set_setting(f"last_development_doc_{self.active_project}", "outline")
+            self._pending_sequence_focus = entity_id
+            self.show_development()
+        elif target == "conflict":
+            self.show_conflicts()
+            self._load_conflict(entity_id)
+        elif target == "image":
+            self.show_images()
+            for index in range(self.image_library_list.count()):
+                candidate = self.image_library_list.item(index)
+                if int(candidate.data(Qt.ItemDataRole.UserRole)) == entity_id:
+                    self.image_library_list.setCurrentItem(candidate)
+                    break
+        elif target == "faction":
+            self.show_characters()
+            self._manage_character_groups()
+        elif target == "document":
+            doc_type = result.get("doc_type", "")
+            if doc_type == "script":
+                self.show_script_editor()
+            elif doc_type in dict(DEVELOPMENT_DOCUMENTS):
+                self.db.set_setting(f"last_development_doc_{self.active_project}", doc_type)
+                self.show_development()
+            else:
+                self.db.run(
+                    "UPDATE projects SET current_document=? WHERE id=?",
+                    (doc_type, self.active_project),
+                )
+                self.show_workshop()
+
+    def _refresh_tag_manager(self, _value=None) -> None:
+        if not hasattr(self, "tag_manager_list"):
+            return
+        project_id = int(self.tag_manager_scope.currentData() or 0)
+        selected_id = int(self.db.setting("selected_tag", "0") or 0)
+        self.tag_manager_list.blockSignals(True)
+        self.tag_manager_list.clear()
+        selected_item = None
+        for row in self.db.q(
+            """SELECT tag.*,COUNT(link.entity_id) usage_count FROM tags tag
+            LEFT JOIN entity_tags link ON link.tag_id=tag.id
+            WHERE tag.project_id=? GROUP BY tag.id ORDER BY tag.name COLLATE NOCASE""",
+            (project_id,),
+        ):
+            item = QListWidgetItem(f"#{row['name']}\n{row['usage_count']} utilisation(s)")
+            item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+            item.setData(Qt.ItemDataRole.UserRole + 1, row["color"])
+            item.setSizeHint(QSize(0, 54))
+            self.tag_manager_list.addItem(item)
+            if int(row["id"]) == selected_id:
+                selected_item = item
+        if selected_item:
+            self.tag_manager_list.setCurrentItem(selected_item)
+        self.tag_manager_list.blockSignals(False)
+
+    def _tag_manager_selected(self, current, _previous=None) -> None:
+        enabled = current is not None
+        for widget in (
+            self.tag_manager_name,
+            self.tag_manager_color,
+            self.tag_manager_color_button,
+            self.tag_manager_save_button,
+            self.tag_manager_merge_button,
+            self.tag_manager_delete_button,
+        ):
+            widget.setEnabled(enabled)
+        if not current:
+            return
+        tag_id = int(current.data(Qt.ItemDataRole.UserRole))
+        row = self.db.one("SELECT * FROM tags WHERE id=?", (tag_id,))
+        if row:
+            self.db.set_setting("selected_tag", tag_id)
+            self.tag_manager_name.setText(row["name"])
+            self.tag_manager_color.setText(row["color"])
+
+    def _new_managed_tag(self) -> None:
+        name, accepted = QInputDialog.getText(self, "Nouveau tag", "Nom du tag")
+        if not accepted or not name.strip().lstrip("#").strip():
+            return
+        project_id = int(self.tag_manager_scope.currentData() or 0)
+        clean_name = name.strip().lstrip("#").strip()
+        self.db.run(
+            """INSERT INTO tags(project_id,name,color,created_at,updated_at)
+            VALUES(?,?,?,?,?) ON CONFLICT(project_id,name)
+            DO UPDATE SET updated_at=excluded.updated_at""",
+            (project_id, clean_name, "#D84A32", NOW(), NOW()),
+        )
+        row = self.db.one(
+            "SELECT id FROM tags WHERE project_id=? AND name=? COLLATE NOCASE",
+            (project_id, clean_name),
+        )
+        self.db.set_setting("selected_tag", int(row["id"]))
+        self._refresh_tag_manager()
+
+    def _choose_managed_tag_color(self) -> None:
+        color = QColorDialog.getColor(QColor(self.tag_manager_color.text()), self)
+        if color.isValid():
+            self.tag_manager_color.setText(color.name().upper())
+
+    def _save_managed_tag(self) -> None:
+        items = self.tag_manager_list.selectedItems()
+        if not items:
+            return
+        tag_id = int(items[0].data(Qt.ItemDataRole.UserRole))
+        name = self.tag_manager_name.text().strip().lstrip("#").strip()
+        if not name:
+            return
+        project_id = int(self.tag_manager_scope.currentData() or 0)
+        duplicate = self.db.one(
+            "SELECT id FROM tags WHERE project_id=? AND name=? COLLATE NOCASE AND id<>?",
+            (project_id, name, tag_id),
+        )
+        if duplicate:
+            QMessageBox.warning(
+                self,
+                "Nom déjà utilisé",
+                "Un tag porte déjà ce nom. Utilise plutôt l’action Fusionner.",
+            )
+            return
+        self.db.run(
+            "UPDATE tags SET name=?,color=?,updated_at=? WHERE id=?",
+            (name, self.tag_manager_color.text().strip() or "#D84A32", NOW(), tag_id),
+        )
+        self._refresh_tag_manager()
+        self._refresh_global_search()
+
+    def _merge_managed_tag(self) -> None:
+        items = self.tag_manager_list.selectedItems()
+        if not items:
+            return
+        source_id = int(items[0].data(Qt.ItemDataRole.UserRole))
+        project_id = int(self.tag_manager_scope.currentData() or 0)
+        candidates = self.db.q(
+            "SELECT id,name FROM tags WHERE project_id=? AND id<>? ORDER BY name COLLATE NOCASE",
+            (project_id, source_id),
+        )
+        if not candidates:
+            return
+        labels = [row["name"] for row in candidates]
+        target_name, accepted = QInputDialog.getItem(
+            self, "Fusionner le tag", "Déplacer les utilisations vers", labels, editable=False
+        )
+        if not accepted:
+            return
+        target_id = int(next(row["id"] for row in candidates if row["name"] == target_name))
+        with self.db.conn:
+            self.db.conn.execute(
+                """INSERT OR IGNORE INTO entity_tags(tag_id,target_type,entity_id)
+                SELECT ?,target_type,entity_id FROM entity_tags WHERE tag_id=?""",
+                (target_id, source_id),
+            )
+            self.db.conn.execute("DELETE FROM tags WHERE id=?", (source_id,))
+        self.db.set_setting("selected_tag", target_id)
+        self._refresh_tag_manager()
+        self._refresh_global_search()
+
+    def _delete_managed_tag(self) -> None:
+        items = self.tag_manager_list.selectedItems()
+        if not items:
+            return
+        tag_id = int(items[0].data(Qt.ItemDataRole.UserRole))
+        if QMessageBox.question(
+            self,
+            "Supprimer le tag",
+            "Retirer ce tag de tous les éléments ? Les fiches resteront intactes.",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        self.db.run("DELETE FROM tags WHERE id=?", (tag_id,))
+        self.db.set_setting("selected_tag", 0)
+        self._refresh_tag_manager()
+        self._refresh_global_search()
+
+    # ---------- Idea bank ----------
+
+    def show_ideas(self) -> None:
+        page = self._begin_page("Idées", "ideas")
+        self._page_header(
+            page,
+            "Produire sans juger",
+            "Carnet d’idées",
+            "Capture une étincelle, puis note simplement pourquoi elle mérite de rester disponible.",
+        )
+        body = QHBoxLayout()
+        body.setSpacing(14)
+
+        left = make_card()
+        left.setFixedWidth(286 if self.width() < 1250 else 326)
+        left_box = QVBoxLayout(left)
+        left_box.setContentsMargins(12, 14, 12, 14)
+        left_box.setSpacing(8)
+        list_head = QHBoxLayout()
+        list_head.addWidget(make_label("MES IDÉES", "Caption"))
+        list_head.addStretch()
+        self.idea_count = make_label("0", "AccentPill")
+        list_head.addWidget(self.idea_count)
+        left_box.addLayout(list_head)
+        left_box.addWidget(make_button("+ Nouvelle idée", "primary", self._new_idea))
+        self.idea_search = QLineEdit()
+        self.idea_search.setPlaceholderText("Rechercher…")
+        self.idea_search.textChanged.connect(self._filter_ideas)
+        left_box.addWidget(self.idea_search)
+        self.idea_type_filter = QComboBox()
+        self.idea_type_filter.addItem("Tous les types d’idées", "all")
+        for value, label in IDEA_TYPES:
+            self.idea_type_filter.addItem(label, value)
+        self.idea_type_filter.currentIndexChanged.connect(
+            lambda _index: self._filter_ideas(self.idea_search.text())
+        )
+        left_box.addWidget(self.idea_type_filter)
+        self.idea_tag_filter = QComboBox()
+        self.idea_tag_filter.addItem("Tous les tags", 0)
+        for tag in self.db.q(
+            "SELECT id,name FROM tags WHERE project_id=0 ORDER BY name COLLATE NOCASE"
+        ):
+            self.idea_tag_filter.addItem(f"#{tag['name']}", int(tag["id"]))
+        self.idea_tag_filter.currentIndexChanged.connect(
+            lambda _index: self._filter_ideas(self.idea_search.text())
+        )
+        left_box.addWidget(self.idea_tag_filter)
+        self.idea_list = QListWidget()
+        self.idea_list.setObjectName("IdeaList")
+        self.idea_list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.idea_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.idea_list.itemSelectionChanged.connect(self._load_idea)
+        left_box.addWidget(self.idea_list, 1)
+        body.addWidget(left)
+
+        right = make_card()
+        right.setMinimumHeight(620 if self.height() < 800 else 690)
+        right_box = QVBoxLayout(right)
+        compact_height = self.height() < 800
+        right_box.setContentsMargins(18 if compact_height else 24, 15 if compact_height else 19, 18 if compact_height else 24, 16 if compact_height else 20)
+        right_box.setSpacing(5 if compact_height else 8)
+        detail_head = QHBoxLayout()
+        detail_head.addWidget(make_label("IDÉE SÉLECTIONNÉE", "Caption"))
+        detail_head.addStretch()
+        self.idea_detail_state = make_label("NOUVELLE", "AccentPill")
+        detail_head.addWidget(self.idea_detail_state)
+        right_box.addLayout(detail_head)
+        if not compact_height:
+            right_box.addWidget(
+                make_label(
+                    "Garde seulement ce qui donne envie d’y revenir.",
+                    "CardTitle" if self.width() < 1250 else "SectionTitle",
+                    True,
+                )
+            )
+        right_box.addSpacing(2)
+        right_box.addWidget(make_label("TITRE PROVISOIRE", "Caption"))
+        title = QLineEdit()
+        title.setPlaceholderText("Quelques mots pour la retrouver facilement")
+        right_box.addWidget(title)
+        right_box.addSpacing(4)
+        right_box.addWidget(make_label("01 · L’ÉTINCELLE", "Caption"))
+        if not compact_height:
+            right_box.addWidget(
+                make_label(
+                    "Une image, une situation, une relation, une phrase ou un « et si… ? ».",
+                    "Muted",
+                    True,
+                )
+            )
+        seed = make_editor(72, "Note l’idée telle qu’elle arrive, sans essayer de raconter toute l’histoire.")
+        seed.setObjectName("IdeaEditor")
+        seed.setFixedHeight(58 if compact_height else 132)
+        right_box.addWidget(seed)
+        right_box.addSpacing(4)
+        right_box.addWidget(make_label("02 · CE QUI M’ATTIRE", "Caption"))
+        if not compact_height:
+            right_box.addWidget(
+                make_label(
+                    "L’émotion, la question ou la possibilité narrative que tu veux garder.",
+                    "Muted",
+                    True,
+                )
+            )
+        attraction = make_editor(58, "Pourquoi as-tu envie de revoir ou de développer cette idée ?")
+        attraction.setObjectName("IdeaEditor")
+        attraction.setFixedHeight(54 if compact_height else 92)
+        right_box.addWidget(attraction)
+        right_box.addSpacing(4)
+        what_if_head = QHBoxLayout()
+        what_if_head.addWidget(make_label("03 · ÉLARGIR AVEC « ET SI ? »", "Caption"))
+        what_if_head.addStretch()
+        what_if_button = make_button("+ Ajouter une piste", "quiet", self._append_idea_what_if)
+        what_if_head.addWidget(what_if_button)
+        right_box.addLayout(what_if_head)
+        if not compact_height:
+            right_box.addWidget(
+                make_label(
+                    "Change une donnée importante pour découvrir plusieurs histoires possibles sans choisir trop vite.",
+                    "Muted",
+                    True,
+                )
+            )
+        what_if = make_editor(
+            72,
+            "Et si la personne obtenait l’inverse de ce qu’elle veut ?\nEt si l’obstacle venait d’un allié ?",
+        )
+        what_if.setObjectName("IdeaEditor")
+        what_if.setFixedHeight(68 if compact_height else 112)
+        right_box.addWidget(what_if)
+        self.idea_fields: dict[str, QLineEdit | QTextEdit] = {
+            "title": title,
+            "seed": seed,
+            "attraction": attraction,
+            "what_if": what_if,
+        }
+        right_box.addSpacing(4)
+        right_box.addWidget(make_label("04 · REPÈRES", "Caption"))
+        selectors = QHBoxLayout()
+        selectors.setSpacing(8)
+        self.idea_kind = QComboBox()
+        compact_type_names = {
+            "unclassified": "Non classée",
+            "concept": "« Et si… ? »",
+            "situation": "Situation / image",
+            "character": "Personnage",
+            "relationship": "Relation",
+            "dialogue": "Dialogue",
+            "theme": "Thème",
+            "setting": "Décor / univers",
+            "genre": "Genre / ton",
+            "event": "Événement",
+            "ending": "Fin / scène",
+        }
+        for value, label in IDEA_TYPES:
+            self.idea_kind.addItem(compact_type_names.get(value, label), value)
+        self.idea_kind.setToolTip("Nature de l’étincelle")
+        self.idea_status = QComboBox()
+        for label, value in (
+            ("Brute", "brute"),
+            ("À explorer", "à explorer"),
+            ("Retenue", "retenue"),
+            ("Mise de côté", "abandonnée"),
+            ("À recycler", "recyclée"),
+        ):
+            self.idea_status.addItem(label, value)
+        self.idea_status.setToolTip("État de l’idée")
+        self.idea_potential = QComboBox()
+        for label, value in (
+            ("Format inconnu", "inconnu"),
+            ("Court métrage", "court"),
+            ("Moyen métrage", "moyen"),
+            ("Long métrage", "long"),
+        ):
+            self.idea_potential.addItem(label, value)
+        self.idea_potential.setToolTip("Format éventuellement envisagé")
+        selectors.addWidget(self.idea_kind, 1)
+        selectors.addWidget(self.idea_status, 1)
+        selectors.addWidget(self.idea_potential, 1)
+        selectors.addStretch()
+        right_box.addLayout(selectors)
+        right_box.addSpacing(4)
+        right_box.addWidget(make_label("05 · TAGS", "Caption"))
+        self.idea_tags = QLineEdit()
+        self.idea_tags.setPlaceholderText("mystère, dialogue, à revoir…")
+        right_box.addWidget(self.idea_tags)
+        right_box.addSpacing(4)
+        right_box.addWidget(make_label("06 · IMAGE OU FICHIER", "Caption"))
+        self.idea_attachment_data = b""
+        self.idea_attachment_name = ""
+        self.idea_attachment_mime = ""
+        attachment = QFrame()
+        attachment.setObjectName("IdeaImageDrop")
+        attachment.setFixedHeight(190 if compact_height else 220)
+        attachment_box = QVBoxLayout(attachment)
+        attachment_box.setContentsMargins(7, 7, 7, 7)
+        attachment_box.setSpacing(6)
+        self.idea_attachment_preview = AttachmentPreviewLabel()
+        self.idea_attachment_preview.setObjectName("AttachmentPreview")
+        self.idea_attachment_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.idea_attachment_preview.setFixedHeight(130 if compact_height else 160)
+        self.idea_attachment_preview.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.idea_attachment_preview.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.idea_attachment_preview.clicked.connect(self._choose_idea_attachment)
+        attachment_box.addWidget(self.idea_attachment_preview)
+        attachment_info = QHBoxLayout()
+        attachment_info.setSpacing(7)
+        attachment_copy = QVBoxLayout()
+        attachment_copy.setSpacing(1)
+        self.idea_attachment_title = make_label("Aucun fichier", "CardTitle", True)
+        self.idea_attachment_meta = make_label("Image, capture, PDF ou autre document · 25 Mo maximum", "Muted", True)
+        attachment_copy.addWidget(self.idea_attachment_title)
+        attachment_copy.addWidget(self.idea_attachment_meta)
+        attachment_info.addLayout(attachment_copy, 1)
+        attach_label = "Ajouter" if compact_height else "Ajouter / remplacer"
+        self.idea_attachment_choose = make_button(attach_label, "secondary", self._choose_idea_attachment)
+        attachment_info.addWidget(self.idea_attachment_choose)
+        self.idea_attachment_open = make_button("Ouvrir", "quiet", self._open_idea_attachment)
+        attachment_info.addWidget(self.idea_attachment_open)
+        self.idea_attachment_remove = make_button("×", "quiet", self._clear_idea_attachment)
+        self.idea_attachment_remove.setFixedWidth(34)
+        self.idea_attachment_remove.setToolTip("Retirer le fichier de cette idée")
+        attachment_info.addWidget(self.idea_attachment_remove)
+        attachment_box.addLayout(attachment_info)
+        right_box.addWidget(attachment)
+        right_box.addStretch()
+        right_box.addWidget(make_separator())
+        actions = QHBoxLayout()
+        actions.addWidget(make_button("Enregistrer l’idée", "primary", self._save_idea))
+        actions.addStretch()
+        actions.addWidget(make_button("Supprimer", "danger", self._delete_idea))
+        right_box.addLayout(actions)
+        right_scroll = QScrollArea()
+        right_scroll.setWidgetResizable(True)
+        right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        right_scroll.setWidget(right)
+        body.addWidget(right_scroll, 1)
+        page.addLayout(body, 1)
+        self.idea_id: int | None = None
+        self._update_idea_attachment_preview()
+        self._refresh_ideas(select_first=True)
+
+    def _refresh_ideas(self, select_first: bool = False) -> None:
+        selected_id = self.idea_id
+        rows = self.db.q(
+            "SELECT id,title,seed,what_if,status,potential,idea_type,attachment_name FROM ideas ORDER BY id DESC"
+        )
+        self.idea_list.blockSignals(True)
+        self.idea_list.clear()
+        selected_item = None
+        type_names = dict(IDEA_TYPES)
+        for row in rows:
+            status = (row["status"] or "brute").capitalize()
+            potential = {
+                "inconnu": "Indécis",
+                "court": "Court",
+                "moyen": "Moyen",
+                "long": "Long",
+            }.get(row["potential"], row["potential"] or "Format inconnu")
+            idea_type = row["idea_type"] or "unclassified"
+            type_label = type_names.get(idea_type, "Non classée")
+            item = QListWidgetItem(f"{row['title']}\n{type_label} · {status} · {potential}")
+            item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+            item.setData(int(Qt.ItemDataRole.UserRole) + 1, idea_type)
+            attachment_note = f"\nPièce jointe · {row['attachment_name']}" if row["attachment_name"] else ""
+            what_if_note = (
+                f"\n\nPistes « Et si ? » :\n{row['what_if'].strip()}"
+                if row["what_if"]
+                else ""
+            )
+            item.setToolTip(
+                f"{type_label} · {status} · {potential}{attachment_note}\n\n"
+                f"{(row['seed'] or row['title']).strip()}"
+                f"{what_if_note}"
+            )
+            self.idea_list.addItem(item)
+            if int(row["id"]) == selected_id:
+                selected_item = item
+        self.idea_count.setText(str(len(rows)))
+        self.idea_list.blockSignals(False)
+        if selected_item or (select_first and self.idea_list.count()):
+            self.idea_list.setCurrentItem(selected_item or self.idea_list.item(0))
+        self._filter_ideas(self.idea_search.text())
+
+    def _filter_ideas(self, text: str) -> None:
+        query = text.strip().casefold()
+        selected_type = self.idea_type_filter.currentData()
+        selected_tag = int(self.idea_tag_filter.currentData() or 0)
+        tagged_ids = {
+            int(row["entity_id"])
+            for row in self.db.q(
+                "SELECT entity_id FROM entity_tags WHERE tag_id=? AND target_type='idea'",
+                (selected_tag,),
+            )
+        } if selected_tag else set()
+        visible_count = 0
+        first_visible = None
+        for index in range(self.idea_list.count()):
+            item = self.idea_list.item(index)
+            matches_text = not query or query in item.text().casefold() or query in item.toolTip().casefold()
+            matches_type = selected_type == "all" or item.data(int(Qt.ItemDataRole.UserRole) + 1) == selected_type
+            matches_tag = not selected_tag or int(item.data(Qt.ItemDataRole.UserRole)) in tagged_ids
+            visible = matches_text and matches_type and matches_tag
+            item.setHidden(not visible)
+            visible_count += int(visible)
+            if visible and first_visible is None:
+                first_visible = item
+        total = self.idea_list.count()
+        self.idea_count.setText(
+            f"{visible_count}/{total}"
+            if query or selected_type != "all" or selected_tag
+            else str(total)
+        )
+        current = self.idea_list.currentItem()
+        if first_visible is not None and (current is None or current.isHidden()):
+            self.idea_list.setCurrentItem(first_visible)
+
+    def _new_idea(self) -> None:
+        self.idea_id = None
+        self.idea_list.clearSelection()
+        self.idea_list.setCurrentItem(None)
+        for field in self.idea_fields.values():
+            set_field_value(field, "")
+        self.idea_status.setCurrentIndex(self.idea_status.findData("brute"))
+        self.idea_potential.setCurrentIndex(self.idea_potential.findData("inconnu"))
+        self.idea_kind.setCurrentIndex(self.idea_kind.findData("unclassified"))
+        self.idea_tags.clear()
+        self.idea_attachment_data = b""
+        self.idea_attachment_name = ""
+        self.idea_attachment_mime = ""
+        self._update_idea_attachment_preview()
+        self.idea_detail_state.setText("NOUVELLE")
+        self.idea_fields["title"].setFocus()
+
+    def _append_idea_what_if(self) -> None:
+        editor = self.idea_fields.get("what_if")
+        if not isinstance(editor, QTextEdit):
+            return
+        cursor = editor.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        if editor.toPlainText().strip():
+            cursor.insertText("\n\n")
+        cursor.insertText("Et si… ")
+        editor.setTextCursor(cursor)
+        editor.setFocus()
+        self.idea_detail_state.setText("À ENREGISTRER" if self.idea_id else "NOUVELLE")
+
+    def _load_idea(self) -> None:
+        selected = self.idea_list.selectedItems()
+        if not selected:
+            return
+        self.idea_id = int(selected[0].data(Qt.ItemDataRole.UserRole))
+        row = self.db.one("SELECT * FROM ideas WHERE id=?", (self.idea_id,))
+        if not row:
+            return
+        for key, field in self.idea_fields.items():
+            set_field_value(field, row[key])
+        self.idea_status.setCurrentIndex(max(0, self.idea_status.findData(row["status"])))
+        self.idea_potential.setCurrentIndex(max(0, self.idea_potential.findData(row["potential"])))
+        self.idea_kind.setCurrentIndex(max(0, self.idea_kind.findData(row["idea_type"])))
+        self.idea_tags.setText(self._entity_tag_text("idea", self.idea_id))
+        self.idea_attachment_name = row["attachment_name"] or ""
+        self.idea_attachment_mime = row["attachment_mime"] or ""
+        self.idea_attachment_data = bytes(row["attachment_data"] or b"")
+        self._update_idea_attachment_preview()
+        self.idea_detail_state.setText("ENREGISTRÉE")
+
+    def _save_idea(self) -> None:
+        data = {key: field_value(field) for key, field in self.idea_fields.items()}
+        title = data["title"] or "Idée sans titre"
+        status = self.idea_status.currentData()
+        potential = self.idea_potential.currentData()
+        idea_type = self.idea_kind.currentData()
+        if self.idea_id:
+            self.db.run(
+                """UPDATE ideas SET title=?,seed=?,attraction=?,what_if=?,status=?,potential=?,idea_type=?,
+                attachment_name=?,attachment_mime=?,attachment_data=? WHERE id=?""",
+                (
+                    title,
+                    data["seed"],
+                    data["attraction"],
+                    data["what_if"],
+                    status,
+                    potential,
+                    idea_type,
+                    self.idea_attachment_name,
+                    self.idea_attachment_mime,
+                    self.idea_attachment_data or None,
+                    self.idea_id,
+                ),
+            )
+        else:
+            self.idea_id = self.db.run(
+                """INSERT INTO ideas(
+                created_at,title,seed,attraction,what_if,status,potential,idea_type,
+                attachment_name,attachment_mime,attachment_data
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    NOW(),
+                    title,
+                    data["seed"],
+                    data["attraction"],
+                    data["what_if"],
+                    status,
+                    potential,
+                    idea_type,
+                    self.idea_attachment_name,
+                    self.idea_attachment_mime,
+                    self.idea_attachment_data or None,
+                ),
+            ).lastrowid
+        self._save_entity_tag_text("idea", self.idea_id, self.idea_tags.text())
+        self._refresh_ideas()
+        self.idea_detail_state.setText("ENREGISTRÉE")
+        self.save_state.setText("Idée enregistrée localement")
+        QTimer.singleShot(2400, lambda: self.save_state.setText(""))
+
+    def _choose_idea_attachment(self, _checked: bool = False) -> None:
+        selected, _filter = QFileDialog.getOpenFileName(
+            self,
+            "Ajouter une image ou un fichier",
+            "",
+            "Images et documents (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.pdf *.txt *.md *.doc *.docx *.odt);;Tous les fichiers (*)",
+        )
+        if selected:
+            self._set_idea_attachment(Path(selected))
+
+    def _set_idea_attachment(self, path: Path) -> None:
+        try:
+            size = path.stat().st_size
+            if size > IDEA_ATTACHMENT_LIMIT:
+                QMessageBox.warning(
+                    self,
+                    "Fichier trop volumineux",
+                    "La limite est de 25 Mo afin de garder les sauvegardes StoryForge légères.",
+                )
+                return
+            data = path.read_bytes()
+        except OSError as exc:
+            QMessageBox.warning(self, "Fichier inaccessible", f"StoryForge ne peut pas lire ce fichier.\n\n{exc}")
+            return
+        self.idea_attachment_name = path.name
+        self.idea_attachment_mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        self.idea_attachment_data = data
+        self._update_idea_attachment_preview()
+        self.idea_detail_state.setText("À ENREGISTRER")
+
+    def _clear_idea_attachment(self, _checked: bool = False) -> None:
+        self.idea_attachment_name = ""
+        self.idea_attachment_mime = ""
+        self.idea_attachment_data = b""
+        self._update_idea_attachment_preview()
+        self.idea_detail_state.setText("À ENREGISTRER" if self.idea_id else "NOUVELLE")
+
+    def _update_idea_attachment_preview(self) -> None:
+        has_file = bool(self.idea_attachment_name and self.idea_attachment_data)
+        self.idea_attachment_preview.clear()
+        if not has_file:
+            self.idea_attachment_preview.setText("＋\nAjouter une image ou un fichier")
+            self.idea_attachment_title.setText("Aucun fichier")
+            self.idea_attachment_title.setToolTip("")
+            self.idea_attachment_meta.setText("Image, capture, PDF ou autre document · 25 Mo maximum")
+            self.idea_attachment_choose.setText("Ajouter")
+        else:
+            pixmap = QPixmap()
+            is_image = self.idea_attachment_mime.startswith("image/") and pixmap.loadFromData(
+                self.idea_attachment_data
+            )
+            if is_image:
+                self.idea_attachment_preview.setPixmap(
+                    pixmap.scaled(
+                        self.idea_attachment_preview.size(),
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                )
+            else:
+                suffix = Path(self.idea_attachment_name).suffix.lstrip(".").upper()
+                self.idea_attachment_preview.setText(suffix[:6] or "FICHIER")
+            available_name_width = 150 if self.width() < 1250 else 340
+            displayed_name = self.idea_attachment_title.fontMetrics().elidedText(
+                self.idea_attachment_name,
+                Qt.TextElideMode.ElideMiddle,
+                available_name_width,
+            )
+            self.idea_attachment_title.setText(displayed_name)
+            self.idea_attachment_title.setToolTip(self.idea_attachment_name)
+            size = len(self.idea_attachment_data)
+            size_text = f"{size / (1024 * 1024):.1f} Mo" if size >= 1024 * 1024 else f"{max(1, size // 1024)} Ko"
+            self.idea_attachment_meta.setText(f"{self.idea_attachment_mime} · {size_text}")
+            self.idea_attachment_choose.setText("Remplacer")
+        self.idea_attachment_open.setEnabled(has_file)
+        self.idea_attachment_remove.setEnabled(has_file)
+
+    def _open_idea_attachment(self, _checked: bool = False) -> None:
+        if not self.idea_attachment_name or not self.idea_attachment_data:
+            return
+        safe_name = Path(self.idea_attachment_name).name
+        temp_path = Path(tempfile.gettempdir()) / f"storyforge_idee_{self.idea_id or 'nouvelle'}_{safe_name}"
+        try:
+            temp_path.write_bytes(self.idea_attachment_data)
+        except OSError as exc:
+            QMessageBox.warning(self, "Ouverture impossible", f"Le fichier temporaire n’a pas pu être créé.\n\n{exc}")
+            return
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(temp_path))):
+            QMessageBox.warning(self, "Ouverture impossible", "Aucune application Linux ne peut ouvrir ce type de fichier.")
+
+    def _delete_idea(self) -> None:
+        if not self.idea_id:
+            return
+        confirmed = self.db.setting("confirm_delete", "1") == "0" or QMessageBox.question(self, "Supprimer l’idée", "Supprimer cette idée ?") == QMessageBox.StandardButton.Yes
+        if confirmed:
+            self._delete_entity_tag_links("idea", self.idea_id)
+            self.db.run("DELETE FROM ideas WHERE id=?", (self.idea_id,))
+            self._new_idea()
+            self._refresh_ideas(select_first=True)
+
+    # ---------- Timeline ----------
+
+    def show_timeline(self) -> None:
+        page = self._begin_page("Chronologie", "timeline")
+        self._page_header(
+            page,
+            "Temps de l’histoire",
+            "Chronologie",
+            "Place les événements dans le temps, puis isole l’intrigue, la backstory ou le parcours d’un personnage.",
+        )
+        if not self.active_project:
+            page.addWidget(make_label("Crée ou sélectionne d’abord un projet.", "Muted"))
+            page.addStretch()
+            return
+
+        default_timeline = self.db.ensure_timeline_track(self.active_project)
+        self.db.run(
+            """UPDATE timeline_events SET track_id=?
+            WHERE project_id=? AND (track_id IS NULL OR track_id=0)""",
+            (int(default_timeline["id"]), self.active_project),
+        )
+        self.timeline_tracks = [
+            dict(row) for row in self.db.q(
+                "SELECT * FROM timeline_tracks WHERE project_id=? ORDER BY position,id",
+                (self.active_project,),
+            )
+        ]
+        self.timeline_selected_event_id: int | None = None
+        controls = make_card()
+        controls_box = QHBoxLayout(controls)
+        controls_box.setContentsMargins(14, 10, 14, 10)
+        controls_box.setSpacing(8)
+
+        controls_box.addWidget(make_label("UNITÉ", "Caption"))
+        self.timeline_unit = QComboBox()
+        for key, (label, _factor, _singular) in TIMELINE_UNITS.items():
+            self.timeline_unit.addItem(label, key)
+        saved_unit = self.db.setting(f"timeline_unit_{self.active_project}", "day")
+        self.timeline_unit.setCurrentIndex(max(0, self.timeline_unit.findData(saved_unit)))
+        self.timeline_unit.setMinimumWidth(105)
+        controls_box.addWidget(self.timeline_unit)
+
+        controls_box.addWidget(make_label("TIMELINES", "Caption"))
+        self.timeline_view_filter = QComboBox()
+        self.timeline_view_filter.addItem("Toutes les timelines", "all")
+        for track in self.timeline_tracks:
+            self.timeline_view_filter.addItem(track["name"], f"track:{track['id']}")
+        self.timeline_view_filter.addItem("Par personnage…", "character")
+        self.timeline_view_filter.setMinimumWidth(190)
+        controls_box.addWidget(self.timeline_view_filter)
+
+        self.timeline_character_filter = QComboBox()
+        self.timeline_character_filter.setMinimumWidth(155)
+        for character in self.db.q(
+            "SELECT id,name FROM characters WHERE project_id=? ORDER BY name COLLATE NOCASE,id",
+            (self.active_project,),
+        ):
+            self.timeline_character_filter.addItem(character["name"] or "Personnage sans nom", int(character["id"]))
+        self.timeline_character_filter.setEnabled(False)
+        self.timeline_character_filter.setVisible(False)
+        controls_box.addWidget(self.timeline_character_filter)
+
+        self.timeline_category_filter = QComboBox()
+        self.timeline_category_filter.addItem("Toutes les catégories", "")
+        categories = list(TIMELINE_CATEGORIES)
+        for row in self.db.q(
+            "SELECT DISTINCT category FROM timeline_events WHERE project_id=? ORDER BY category COLLATE NOCASE",
+            (self.active_project,),
+        ):
+            if row["category"] and row["category"] not in categories:
+                categories.append(row["category"])
+        for category in categories:
+            self.timeline_category_filter.addItem(category, category)
+        self.timeline_category_filter.setMinimumWidth(165)
+        controls_box.addWidget(self.timeline_category_filter)
+        self.timeline_tag_filter = QComboBox()
+        self.timeline_tag_filter.addItem("Tous les tags", 0)
+        for tag in self.db.q(
+            "SELECT id,name FROM tags WHERE project_id=? ORDER BY name COLLATE NOCASE",
+            (self.active_project,),
+        ):
+            self.timeline_tag_filter.addItem(f"#{tag['name']}", int(tag["id"]))
+        controls_box.addWidget(self.timeline_tag_filter)
+        controls_box.addWidget(make_label("Glisser librement le fond", "Muted"))
+        controls_box.addStretch()
+        controls_box.addWidget(make_button("Gérer", "secondary", self._manage_timeline_tracks))
+        controls_box.addWidget(make_button("+ Timeline", "secondary", self._add_timeline_track))
+        controls_box.addWidget(make_button("Centrer", "secondary", self._center_timeline))
+        controls_box.addWidget(make_button("+ Événement", "primary", self._add_timeline_event))
+        page.addWidget(controls)
+        page.addSpacing(10)
+
+        self.timeline_view = TimelineView(
+            self.palette,
+            self._select_timeline_event,
+            self._edit_timeline_event,
+            self,
+        )
+        page.addWidget(self.timeline_view, 1)
+        page.addSpacing(10)
+
+        self.timeline_detail = make_card()
+        detail_box = QHBoxLayout(self.timeline_detail)
+        detail_box.setContentsMargins(18, 14, 16, 14)
+        detail_box.setSpacing(16)
+        detail_copy = QVBoxLayout()
+        detail_copy.setSpacing(4)
+        self.timeline_detail_meta = make_label("AUCUN ÉVÉNEMENT SÉLECTIONNÉ", "Caption")
+        self.timeline_detail_title = make_label("Clique sur une carte de la chronologie", "CardTitle")
+        self.timeline_detail_description = make_label(
+            "Sa description, son lieu, ses personnages et sa conséquence apparaîtront ici.", "Muted", True
+        )
+        detail_copy.addWidget(self.timeline_detail_meta)
+        detail_copy.addWidget(self.timeline_detail_title)
+        detail_copy.addWidget(self.timeline_detail_description)
+        detail_box.addLayout(detail_copy, 1)
+        self.timeline_edit_button = make_button("Modifier", "secondary", self._edit_timeline_event)
+        self.timeline_delete_button = make_button("Supprimer", "danger", self._delete_timeline_event)
+        self.timeline_edit_button.setEnabled(False)
+        self.timeline_delete_button.setEnabled(False)
+        detail_box.addWidget(self.timeline_edit_button)
+        detail_box.addWidget(self.timeline_delete_button)
+        page.addWidget(self.timeline_detail)
+
+        self.timeline_unit.currentIndexChanged.connect(self._timeline_filters_changed)
+        self.timeline_view_filter.currentIndexChanged.connect(self._timeline_filters_changed)
+        self.timeline_character_filter.currentIndexChanged.connect(self._timeline_filters_changed)
+        self.timeline_category_filter.currentIndexChanged.connect(self._timeline_filters_changed)
+        self.timeline_tag_filter.currentIndexChanged.connect(self._timeline_filters_changed)
+        self._refresh_timeline()
+        QTimer.singleShot(0, self._center_timeline)
+
+    def _timeline_filters_changed(self, _index: int = -1) -> None:
+        if not hasattr(self, "timeline_view_filter"):
+            return
+        character_view = self.timeline_view_filter.currentData() == "character"
+        self.timeline_character_filter.setEnabled(character_view and self.timeline_character_filter.count() > 0)
+        self.timeline_character_filter.setVisible(character_view)
+        unit_key = self.timeline_unit.currentData() or "day"
+        self.db.set_setting(f"timeline_unit_{self.active_project}", unit_key)
+        self._refresh_timeline()
+
+    def _add_timeline_track(self) -> None:
+        name, accepted = QInputDialog.getText(
+            self,
+            "Nouvelle timeline",
+            "Nom de la ligne temporelle :",
+            text="Nouvelle timeline",
+        )
+        name = name.strip()
+        if not accepted or not name:
+            return
+        if self.db.one(
+            "SELECT id FROM timeline_tracks WHERE project_id=? AND LOWER(name)=LOWER(?)",
+            (self.active_project, name),
+        ):
+            QMessageBox.information(self, "Timeline existante", "Une timeline porte déjà ce nom.")
+            return
+        colors = ("#3D8EF7", "#9B6BDE", "#37A56A", "#E08B35", "#D85C69", "#3AA6A0")
+        color = colors[len(self.timeline_tracks) % len(colors)]
+        track = self.db.ensure_timeline_track(self.active_project, name, color)
+        self.db.set_setting(f"timeline_track_{self.active_project}", int(track["id"]))
+        self.show_timeline()
+        index = self.timeline_view_filter.findData(f"track:{track['id']}")
+        self.timeline_view_filter.setCurrentIndex(max(0, index))
+
+    def _choose_timeline_track(self, title: str) -> dict | None:
+        tracks = [
+            dict(row) for row in self.db.q(
+                "SELECT * FROM timeline_tracks WHERE project_id=? ORDER BY position,id",
+                (self.active_project,),
+            )
+        ]
+        if not tracks:
+            return None
+        names = [track["name"] for track in tracks]
+        selected, accepted = QInputDialog.getItem(self, title, "Timeline :", names, 0, False)
+        if not accepted:
+            return None
+        return next(track for track in tracks if track["name"] == selected)
+
+    def _manage_timeline_tracks(self) -> None:
+        track = self._choose_timeline_track("Gérer une timeline")
+        if not track:
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Modifier la timeline")
+        dialog.setObjectName("TimelineEventDialog")
+        dialog.resize(500, 260)
+        box = QVBoxLayout(dialog)
+        box.setContentsMargins(22, 20, 22, 20)
+        box.setSpacing(10)
+        box.addWidget(make_label("LIGNE TEMPORELLE", "Caption"))
+        name = QLineEdit(track["name"])
+        name.setPlaceholderText("Nom de la timeline")
+        box.addWidget(name)
+        color_button = make_button("Choisir sa couleur", "secondary")
+        chosen_color = QColor(track["color"] or self.palette.accent)
+
+        def choose_color() -> None:
+            nonlocal chosen_color
+            candidate = QColorDialog.getColor(chosen_color, dialog, "Couleur de la timeline")
+            if candidate.isValid():
+                chosen_color = candidate
+                color_button.setText(candidate.name().upper())
+
+        color_button.clicked.connect(choose_color)
+        color_button.setText(chosen_color.name().upper())
+        box.addWidget(color_button)
+        actions = QHBoxLayout()
+        delete_button = make_button("Supprimer", "danger")
+        delete_button.setEnabled(len(self.timeline_tracks) > 1)
+        actions.addWidget(delete_button)
+        actions.addStretch()
+        actions.addWidget(make_button("Annuler", "secondary", dialog.reject))
+        actions.addWidget(make_button("Enregistrer", "primary", dialog.accept))
+        box.addLayout(actions)
+        delete_requested = {"value": False}
+
+        def request_delete() -> None:
+            delete_requested["value"] = True
+            dialog.accept()
+
+        delete_button.clicked.connect(request_delete)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        if delete_requested["value"]:
+            replacement = next(item for item in self.timeline_tracks if int(item["id"]) != int(track["id"]))
+            with self.db.conn:
+                self.db.conn.execute(
+                    "UPDATE timeline_events SET track_id=? WHERE track_id=?",
+                    (int(replacement["id"]), int(track["id"])),
+                )
+                self.db.conn.execute("DELETE FROM timeline_tracks WHERE id=?", (int(track["id"]),))
+            self.show_timeline()
+            return
+        new_name = name.text().strip() or track["name"]
+        duplicate = self.db.one(
+            "SELECT id FROM timeline_tracks WHERE project_id=? AND LOWER(name)=LOWER(?) AND id<>?",
+            (self.active_project, new_name, int(track["id"])),
+        )
+        if duplicate:
+            QMessageBox.information(self, "Nom déjà utilisé", "Une autre timeline porte déjà ce nom.")
+            return
+        self.db.run(
+            "UPDATE timeline_tracks SET name=?,color=?,updated_at=? WHERE id=?",
+            (new_name, chosen_color.name(), NOW(), int(track["id"])),
+        )
+        self.show_timeline()
+
+    def _timeline_query_rows(self) -> list[dict]:
+        parameters: list[object] = [self.active_project]
+        clauses = ["event.project_id=?"]
+        view = self.timeline_view_filter.currentData()
+        if isinstance(view, str) and view.startswith("track:"):
+            clauses.append("event.track_id=?")
+            parameters.append(int(view.split(":", 1)[1]))
+        elif view == "character" and self.timeline_character_filter.currentData():
+            clauses.append(
+                "EXISTS(SELECT 1 FROM timeline_event_characters selected "
+                "WHERE selected.event_id=event.id AND selected.character_id=?)"
+            )
+            parameters.append(int(self.timeline_character_filter.currentData()))
+        elif view == "character":
+            return []
+        category = self.timeline_category_filter.currentData()
+        if category:
+            clauses.append("event.category=?")
+            parameters.append(category)
+        tag_id = int(self.timeline_tag_filter.currentData() or 0)
+        if tag_id:
+            clauses.append(
+                "EXISTS(SELECT 1 FROM entity_tags tagged "
+                "WHERE tagged.target_type='event' AND tagged.entity_id=event.id "
+                "AND tagged.tag_id=?)"
+            )
+            parameters.append(tag_id)
+        rows = self.db.q(
+            f"""SELECT event.*,track.name track_name,track.color track_color,
+            track.position track_position,GROUP_CONCAT(character.name, ', ') character_names
+            FROM timeline_events event
+            LEFT JOIN timeline_tracks track ON track.id=event.track_id
+            LEFT JOIN timeline_event_characters link ON link.event_id=event.id
+            LEFT JOIN characters character ON character.id=link.character_id
+            WHERE {' AND '.join(clauses)}
+            GROUP BY event.id ORDER BY event.time_hours,event.id""",
+            parameters,
+        )
+        return [dict(row) for row in rows]
+
+    def _refresh_timeline(self) -> None:
+        if not hasattr(self, "timeline_view"):
+            return
+        self.timeline_rows = self._timeline_query_rows()
+        visible_ids = {int(row["id"]) for row in self.timeline_rows}
+        if self.timeline_selected_event_id not in visible_ids:
+            self.timeline_selected_event_id = None
+        view = self.timeline_view_filter.currentData()
+        visible_tracks = self.timeline_tracks
+        if isinstance(view, str) and view.startswith("track:"):
+            track_id = int(view.split(":", 1)[1])
+            visible_tracks = [track for track in self.timeline_tracks if int(track["id"]) == track_id]
+        self.timeline_view.set_events(
+            self.timeline_rows,
+            self.timeline_unit.currentData() or "day",
+            self.timeline_selected_event_id,
+            visible_tracks,
+        )
+        self._render_timeline_detail()
+
+    def _center_timeline(self) -> None:
+        if hasattr(self, "timeline_view"):
+            self.timeline_view.center_content()
+
+    def _select_timeline_event(self, event_id: int) -> None:
+        self.timeline_selected_event_id = int(event_id)
+        self.timeline_view.select_event(self.timeline_selected_event_id)
+        self._render_timeline_detail()
+
+    def _render_timeline_detail(self) -> None:
+        row = next(
+            (item for item in getattr(self, "timeline_rows", []) if int(item["id"]) == self.timeline_selected_event_id),
+            None,
+        )
+        if not row:
+            self.timeline_detail_meta.setText("AUCUN ÉVÉNEMENT SÉLECTIONNÉ")
+            self.timeline_detail_title.setText("Clique sur une carte de la chronologie")
+            self.timeline_detail_description.setText(
+                "Sa description, son lieu, ses personnages et sa conséquence apparaîtront ici."
+            )
+            self.timeline_edit_button.setEnabled(False)
+            self.timeline_delete_button.setEnabled(False)
+            return
+        factor = TIMELINE_UNITS[self.timeline_unit.currentData() or "day"][1]
+        relative = TimelineView.relative_label(
+            float(row["time_hours"]) / factor,
+            self.timeline_unit.currentData() or "day",
+            row["display_label"],
+        )
+        timeline_name = row.get("track_name") or "Timeline"
+        self.timeline_detail_meta.setText(
+            f"{timeline_name.upper()} · {relative.upper()} · {row['category'].upper()}"
+        )
+        self.timeline_detail_title.setText(row["title"] or "Événement sans titre")
+        details = []
+        if row["description"]:
+            details.append(row["description"])
+        context = " · ".join(value for value in (row["place"], row.get("character_names") or "") if value)
+        if context:
+            details.append(context)
+        if row["consequence"]:
+            details.append(f"Conséquence : {row['consequence']}")
+        self.timeline_detail_description.setText("\n".join(details) or "Aucun détail ajouté pour le moment.")
+        self.timeline_edit_button.setEnabled(True)
+        self.timeline_delete_button.setEnabled(True)
+
+    def _add_timeline_event(self) -> None:
+        self._timeline_event_dialog()
+
+    def _edit_timeline_event(self, event_id: int | None = None) -> None:
+        target_id = int(event_id) if isinstance(event_id, int) and not isinstance(event_id, bool) else self.timeline_selected_event_id
+        if target_id:
+            self._timeline_event_dialog(target_id)
+
+    def _timeline_event_dialog(self, event_id: int | None = None) -> None:
+        row = self.db.one("SELECT * FROM timeline_events WHERE id=?", (event_id,)) if event_id else None
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Modifier l’événement" if row else "Nouvel événement")
+        dialog.setObjectName("TimelineEventDialog")
+        dialog.resize(760, 740)
+        box = QVBoxLayout(dialog)
+        box.setContentsMargins(22, 20, 22, 20)
+        box.setSpacing(8)
+        box.addWidget(make_label("FICHE ÉVÉNEMENT", "Caption"))
+        box.addWidget(make_label("Un fait daté et ses conséquences", "SectionTitle"))
+
+        form = QGridLayout()
+        form.setHorizontalSpacing(10)
+        form.setVerticalSpacing(7)
+        title = QLineEdit(row["title"] if row else "")
+        title.setPlaceholderText("Nom de l’événement")
+        time_value = QDoubleSpinBox()
+        time_value.setRange(-1_000_000, 1_000_000)
+        time_value.setDecimals(2)
+        time_value.setSingleStep(1.0)
+        unit_key = self.timeline_unit.currentData() or "day"
+        factor = TIMELINE_UNITS[unit_key][1]
+        time_value.setSuffix(
+            {"year": " ans", "month": " mois", "day": " jours", "hour": " heures"}[unit_key]
+        )
+        if row:
+            time_value.setValue(float(row["time_hours"]) / factor)
+        display_label = QLineEdit(row["display_label"] if row else "")
+        display_label.setPlaceholderText("Facultatif : Jour 0, hiver 1998…")
+        category = QComboBox()
+        category.setEditable(True)
+        category.addItems(TIMELINE_CATEGORIES)
+        category.setCurrentText(row["category"] if row else "Intrigue principale")
+        track = QComboBox()
+        for timeline_track in self.db.q(
+            "SELECT id,name FROM timeline_tracks WHERE project_id=? ORDER BY position,id",
+            (self.active_project,),
+        ):
+            track.addItem(timeline_track["name"], int(timeline_track["id"]))
+        preferred_track = int(row["track_id"] or 0) if row else int(
+            self.db.setting(f"timeline_track_{self.active_project}", "0") or 0
+        )
+        if preferred_track:
+            track.setCurrentIndex(max(0, track.findData(preferred_track)))
+        place = QLineEdit(row["place"] if row else "")
+        place.setPlaceholderText("Lieu concerné")
+        form.addWidget(make_label("NOM", "Caption"), 0, 0, 1, 2)
+        form.addWidget(title, 1, 0, 1, 2)
+        form.addWidget(make_label("POSITION RELATIVE", "Caption"), 2, 0)
+        form.addWidget(make_label("REPÈRE AFFICHÉ", "Caption"), 2, 1)
+        form.addWidget(time_value, 3, 0)
+        form.addWidget(display_label, 3, 1)
+        form.addWidget(make_label("TIMELINE", "Caption"), 4, 0)
+        form.addWidget(make_label("CATÉGORIE", "Caption"), 4, 1)
+        form.addWidget(track, 5, 0)
+        form.addWidget(category, 5, 1)
+        form.addWidget(make_label("LIEU", "Caption"), 6, 0, 1, 2)
+        form.addWidget(place, 7, 0, 1, 2)
+        box.addLayout(form)
+
+        box.addWidget(make_label("DESCRIPTION", "Caption"))
+        description = make_editor(92, "Que s’est-il passé concrètement ?")
+        description.setPlainText(row["description"] if row else "")
+        box.addWidget(description)
+        box.addWidget(make_label("CONSÉQUENCES", "Caption"))
+        consequence = make_editor(76, "Qu’est-ce que cet événement rend possible, impossible ou nécessaire ?")
+        consequence.setPlainText(row["consequence"] if row else "")
+        box.addWidget(consequence)
+        box.addWidget(make_label("TAGS", "Caption"))
+        tags = QLineEdit(self._entity_tag_text("event", event_id) if event_id else "")
+        tags.setPlaceholderText("backstory, révélation, monde…")
+        box.addWidget(tags)
+        box.addWidget(make_label("PERSONNAGES CONCERNÉS", "Caption"))
+        character_list = QListWidget()
+        character_list.setObjectName("TimelineCharacterPicker")
+        character_list.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        character_list.setMinimumHeight(118)
+        character_list.setMaximumHeight(150)
+        selected_characters = set()
+        if event_id:
+            selected_characters = {
+                int(link["character_id"])
+                for link in self.db.q("SELECT character_id FROM timeline_event_characters WHERE event_id=?", (event_id,))
+            }
+        for character in self.db.q(
+            "SELECT id,name,role FROM characters WHERE project_id=? ORDER BY name COLLATE NOCASE,id",
+            (self.active_project,),
+        ):
+            item = QListWidgetItem(
+                f"{character['name'] or 'Personnage sans nom'} · {character['role'] or 'Rôle à préciser'}"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, int(character["id"]))
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(
+                Qt.CheckState.Checked
+                if int(character["id"]) in selected_characters
+                else Qt.CheckState.Unchecked
+            )
+            character_list.addItem(item)
+        box.addWidget(character_list)
+
+        actions = QHBoxLayout()
+        actions.addStretch()
+        actions.addWidget(make_button("Annuler", "secondary", dialog.reject))
+        actions.addWidget(make_button("Enregistrer l’événement", "primary", dialog.accept))
+        box.addLayout(actions)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        values = (
+            int(track.currentData()),
+            title.text().strip() or "Événement sans titre",
+            float(time_value.value()) * factor,
+            display_label.text().strip(),
+            category.currentText().strip() or "Intrigue principale",
+            description.toPlainText().strip(),
+            place.text().strip(),
+            consequence.toPlainText().strip(),
+        )
+        with self.db.conn:
+            if event_id:
+                self.db.conn.execute(
+                    """UPDATE timeline_events SET track_id=?,title=?,time_hours=?,display_label=?,category=?,
+                    description=?,place=?,consequence=?,updated_at=? WHERE id=?""",
+                    (*values, NOW(), event_id),
+                )
+                saved_id = event_id
+            else:
+                saved_id = self.db.conn.execute(
+                    """INSERT INTO timeline_events(
+                    project_id,track_id,title,time_hours,display_label,category,description,place,consequence,created_at,updated_at
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                    (self.active_project, *values, NOW(), NOW()),
+                ).lastrowid
+            self.db.conn.execute("DELETE FROM timeline_event_characters WHERE event_id=?", (saved_id,))
+            for index in range(character_list.count()):
+                item = character_list.item(index)
+                if item.checkState() == Qt.CheckState.Checked:
+                    self.db.conn.execute(
+                        "INSERT OR IGNORE INTO timeline_event_characters(event_id,character_id) VALUES(?,?)",
+                        (saved_id, int(item.data(Qt.ItemDataRole.UserRole))),
+                    )
+        self._save_entity_tag_text("event", int(saved_id), tags.text())
+        self.db.set_setting(f"timeline_track_{self.active_project}", int(track.currentData()))
+        self.timeline_selected_event_id = int(saved_id)
+        self._refresh_timeline()
+        self.save_state.setText("Événement enregistré")
+        QTimer.singleShot(2200, lambda: self.save_state.setText(""))
+
+    def _delete_timeline_event(self) -> None:
+        if not self.timeline_selected_event_id:
+            return
+        if QMessageBox.question(
+            self,
+            "Supprimer l’événement",
+            "Supprimer cet événement de la chronologie ?",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        self._delete_entity_tag_links("event", self.timeline_selected_event_id)
+        self.db.run("DELETE FROM timeline_events WHERE id=?", (self.timeline_selected_event_id,))
+        self.timeline_selected_event_id = None
+        self._refresh_timeline()
+
+    # ---------- World and universe ----------
+
+    def show_universe(self) -> None:
+        page = self._begin_page("Univers", "universe")
+        self._page_header(
+            page,
+            "Monde du projet",
+            "Univers et règles",
+            "Définis uniquement ce qui influence les personnages, les choix ou les conséquences de l’histoire.",
+        )
+        if not self.active_project:
+            page.addWidget(make_label("Crée ou sélectionne d’abord un projet.", "Muted"))
+            page.addStretch()
+            return
+        self.universe_tabs = QTabWidget()
+        self.universe_tabs.setObjectName("UniverseTabs")
+        self.universe_tabs.addTab(self._build_world_profile_tab(), "Cadre")
+        self.universe_tabs.addTab(self._build_world_rules_tab(), "Règles")
+        self.universe_tabs.addTab(self._build_world_history_tab(), "Histoire")
+        self.universe_tabs.addTab(self._build_world_lexicon_tab(), "Lexique")
+        self.universe_tabs.addTab(
+            self._build_record_template_tab("world", self.active_project),
+            "Modèle de fiche",
+        )
+        tab_index = int(self.db.setting(f"universe_tab_{self.active_project}", "0") or 0)
+        self.universe_tabs.setCurrentIndex(min(max(tab_index, 0), self.universe_tabs.count() - 1))
+        self.universe_tabs.currentChanged.connect(
+            lambda index: self.db.set_setting(f"universe_tab_{self.active_project}", index)
+        )
+        page.addWidget(self.universe_tabs, 1)
+
+    def _build_world_profile_tab(self) -> QWidget:
+        tab = QWidget()
+        outer = QVBoxLayout(tab)
+        outer.setContentsMargins(0, 12, 0, 0)
+        card = make_card()
+        card_box = QVBoxLayout(card)
+        card_box.setContentsMargins(18, 16, 18, 16)
+        card_box.setSpacing(8)
+        head = QHBoxLayout()
+        head_copy = QVBoxLayout()
+        head_copy.addWidget(make_label("CADRE DU RÉCIT", "Caption"))
+        head_copy.addWidget(make_label("Les repères qui agissent réellement sur l’histoire", "CardTitle", True))
+        head.addLayout(head_copy, 1)
+        head.addWidget(make_button("Enregistrer", "primary", self._save_world_profile))
+        card_box.addLayout(head)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        canvas = QWidget()
+        canvas.setObjectName("PanelCanvas")
+        form = QVBoxLayout(canvas)
+        form.setContentsMargins(4, 8, 10, 8)
+        form.setSpacing(8)
+        specs = (
+            ("ÉPOQUE ET DURÉE", "epoch", "Quand se déroule l’histoire ? Quelle période ou durée importe ?"),
+            ("LIEUX IMPORTANTS", "places", "Quels lieux reviennent, et qu’est-ce qu’ils permettent ou empêchent ?"),
+            ("SOCIÉTÉ ET POUVOIR", "society", "Qui décide, qui obéit et quelles tensions structurent ce monde ?"),
+            ("CULTURE ET VIE QUOTIDIENNE", "culture", "Quelles habitudes, croyances ou ressources affectent les actions ?"),
+            ("VISION DU MONDE", "worldview", "Qu’est-ce que les habitants tiennent pour normal, possible ou interdit ?"),
+            ("SIGNATURE DE L’UNIVERS", "originality", "Qu’est-ce qui distingue immédiatement ce monde et influence réellement le récit ?"),
+        )
+        row = self.db.one("SELECT * FROM world_profiles WHERE project_id=?", (self.active_project,))
+        self.world_profile_fields: dict[str, QTextEdit] = {}
+        for label, key, placeholder in specs:
+            form.addWidget(make_label(label, "Caption"))
+            editor = make_editor(104, placeholder)
+            editor.setProperty("universeField", True)
+            editor.setMinimumHeight(104)
+            editor.setMaximumHeight(104)
+            editor.setPlainText(row[key] if row else "")
+            self.world_profile_fields[key] = editor
+            form.addWidget(editor)
+        form.addStretch()
+        scroll.setWidget(canvas)
+        card_box.addWidget(scroll, 1)
+        outer.addWidget(card, 1)
+        return tab
+
+    def _save_world_profile(self) -> None:
+        if not self.active_project or not hasattr(self, "world_profile_fields"):
+            return
+        values = [self.world_profile_fields[key].toPlainText().strip() for key in (
+            "epoch", "places", "society", "culture", "worldview", "originality"
+        )]
+        self.db.run(
+            """INSERT INTO world_profiles(
+            project_id,epoch,places,society,culture,worldview,originality,created_at,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(project_id) DO UPDATE SET epoch=excluded.epoch,places=excluded.places,
+            society=excluded.society,culture=excluded.culture,worldview=excluded.worldview,
+            originality=excluded.originality,updated_at=excluded.updated_at""",
+            [self.active_project] + values + [NOW(), NOW()],
+        )
+        self.save_state.setText("Cadre de l’univers enregistré")
+        QTimer.singleShot(2200, lambda: self.save_state.setText(""))
+
+    def _build_world_rules_tab(self) -> QWidget:
+        tab = QWidget()
+        outer = QHBoxLayout(tab)
+        outer.setContentsMargins(0, 12, 0, 0)
+        outer.setSpacing(12)
+        navigation = make_card()
+        navigation.setFixedWidth(285)
+        nav = QVBoxLayout(navigation)
+        nav.setContentsMargins(14, 14, 14, 14)
+        nav.addWidget(make_label("RÈGLES DU MONDE", "Caption"))
+        self.world_rule_search = QLineEdit()
+        self.world_rule_search.setPlaceholderText("Rechercher…")
+        self.world_rule_search.setClearButtonEnabled(True)
+        nav.addWidget(self.world_rule_search)
+        self.world_rule_list = QListWidget()
+        self.world_rule_list.setObjectName("WorldRuleList")
+        nav.addWidget(self.world_rule_list, 1)
+        nav.addWidget(make_button("+ Nouvelle règle", "primary", self._new_world_rule))
+        outer.addWidget(navigation)
+
+        detail = make_card()
+        detail_box = QVBoxLayout(detail)
+        detail_box.setContentsMargins(16, 14, 16, 14)
+        detail_box.addWidget(make_label("FICHE DE LA RÈGLE", "Caption"))
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        canvas = QWidget()
+        canvas.setObjectName("PanelCanvas")
+        form = QVBoxLayout(canvas)
+        form.setContentsMargins(4, 8, 10, 8)
+        form.setSpacing(8)
+        self.world_rule_fields: dict[str, QLineEdit | QTextEdit | QComboBox] = {}
+        for label, key, kind, placeholder in (
+            ("TITRE", "title", "line", "Ex. La mémoire ne peut pas être copiée"),
+            ("CATÉGORIE", "category", "category", ""),
+            ("ÉTAT", "status", "status", ""),
+            ("RÈGLE", "rule_text", "text", "Formule la règle simplement."),
+            ("CHAMP D’APPLICATION", "scope", "text", "À qui, à quoi et où s’applique-t-elle ?"),
+            ("LIMITES", "limitation", "text", "Qu’est-ce qu’elle ne permet jamais ?"),
+            ("COÛT", "cost", "text", "Quel prix faut-il payer pour l’utiliser ou la contourner ?"),
+            ("EXCEPTIONS", "exceptions", "text", "Existe-t-il une exception connue et justifiée ?"),
+            ("CONSÉQUENCE DRAMATIQUE", "consequence", "text", "Quelles décisions ou conflits cette règle provoque-t-elle ?"),
+        ):
+            form.addWidget(make_label(label, "Caption"))
+            if kind == "category":
+                field = QComboBox()
+                field.addItems(WORLD_RULE_CATEGORIES)
+            elif kind == "status":
+                field = QComboBox()
+                field.addItem("À préciser", "draft")
+                field.addItem("Établie", "established")
+                field.addItem("Exceptionnelle", "exception")
+            elif kind == "text":
+                field = make_editor(92, placeholder)
+                field.setProperty("universeField", True)
+                field.setMinimumHeight(92)
+                field.setMaximumHeight(92)
+            else:
+                field = QLineEdit()
+                field.setPlaceholderText(placeholder)
+            self.world_rule_fields[key] = field
+            form.addWidget(field)
+        form.addWidget(make_separator())
+        form.addWidget(make_label("CONNEXIONS", "Caption"))
+        form.addWidget(
+            make_label(
+                "Coche les éléments directement concernés par cette règle. Ces liens restent facultatifs.",
+                "Muted",
+                True,
+            )
+        )
+        connection_grid = QGridLayout()
+        connection_grid.setHorizontalSpacing(10)
+        connection_grid.setVerticalSpacing(8)
+        self.world_rule_connection_lists: dict[str, QListWidget] = {}
+        connection_sources = (
+            (
+                "characters",
+                "PERSONNAGES",
+                self.db.q("SELECT id,name,role FROM characters WHERE project_id=? ORDER BY name,id", (self.active_project,)),
+                lambda row: f"{row['name'] or 'Sans nom'} · {row['role'] or 'Rôle à préciser'}",
+            ),
+            (
+                "groups",
+                "GROUPES / FACTIONS",
+                self.db.q("SELECT id,name,group_type FROM character_groups WHERE project_id=? ORDER BY name,id", (self.active_project,)),
+                lambda row: f"{row['name'] or 'Sans nom'} · {row['group_type'] or 'Groupe'}",
+            ),
+            (
+                "events",
+                "ÉVÉNEMENTS",
+                self.db.q("SELECT id,title,category FROM timeline_events WHERE project_id=? ORDER BY time_hours,id", (self.active_project,)),
+                lambda row: f"{row['title'] or 'Sans titre'} · {row['category']}",
+            ),
+            (
+                "images",
+                "IMAGES",
+                self.db.q("SELECT id,title,category FROM image_library WHERE project_id=? ORDER BY title,id", (self.active_project,)),
+                lambda row: f"{row['title'] or 'Sans titre'} · {row['category']}",
+            ),
+        )
+        for index, (key, label, rows, formatter) in enumerate(connection_sources):
+            column = index % 2
+            grid_row = (index // 2) * 2
+            connection_grid.addWidget(make_label(label, "Caption"), grid_row, column)
+            picker = QListWidget()
+            picker.setObjectName("WorldConnectionPicker")
+            picker.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+            picker.setMinimumHeight(112)
+            picker.setMaximumHeight(112)
+            for row in rows:
+                item = QListWidgetItem(formatter(row))
+                item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(Qt.CheckState.Unchecked)
+                picker.addItem(item)
+            self.world_rule_connection_lists[key] = picker
+            connection_grid.addWidget(picker, grid_row + 1, column)
+        form.addLayout(connection_grid)
+        form.addStretch()
+        scroll.setWidget(canvas)
+        detail_box.addWidget(scroll, 1)
+        actions = QHBoxLayout()
+        actions.addWidget(make_button("Enregistrer", "primary", self._save_world_rule))
+        actions.addStretch()
+        actions.addWidget(make_button("Supprimer", "danger", self._delete_world_rule))
+        detail_box.addLayout(actions)
+        outer.addWidget(detail, 1)
+        self.world_rule_id: int | None = None
+        self.world_rule_search.textChanged.connect(self._refresh_world_rules)
+        self.world_rule_list.currentItemChanged.connect(self._world_rule_selected)
+        self._refresh_world_rules(select_first=True)
+        return tab
+
+    def _refresh_world_rules(self, _value=None, select_first: bool = False) -> None:
+        if not hasattr(self, "world_rule_list"):
+            return
+        query = self.world_rule_search.text().strip().casefold()
+        rows = self.db.q(
+            "SELECT * FROM world_rules WHERE project_id=? ORDER BY category,title COLLATE NOCASE,id",
+            (self.active_project,),
+        )
+        self.world_rule_list.blockSignals(True)
+        self.world_rule_list.clear()
+        selected_item = None
+        for row in rows:
+            if query and query not in f"{row['category']} {row['title']} {row['rule_text']}".casefold():
+                continue
+            item = QListWidgetItem(f"{row['title'] or 'Règle sans titre'}\n{row['category']}")
+            item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+            item.setSizeHint(QSize(0, 58))
+            self.world_rule_list.addItem(item)
+            if int(row["id"]) == self.world_rule_id:
+                selected_item = item
+        if selected_item:
+            self.world_rule_list.setCurrentItem(selected_item)
+        elif select_first and self.world_rule_list.count():
+            self.world_rule_list.setCurrentRow(0)
+        self.world_rule_list.blockSignals(False)
+        current = self.world_rule_list.currentItem()
+        if current:
+            self._load_world_rule(int(current.data(Qt.ItemDataRole.UserRole)))
+
+    def _world_rule_selected(self, current: QListWidgetItem | None, _previous=None) -> None:
+        if current:
+            self._load_world_rule(int(current.data(Qt.ItemDataRole.UserRole)))
+
+    def _load_world_rule(self, rule_id: int) -> None:
+        row = self.db.one("SELECT * FROM world_rules WHERE id=?", (rule_id,))
+        if not row:
+            return
+        self.world_rule_id = rule_id
+        for key, field in self.world_rule_fields.items():
+            if isinstance(field, QComboBox):
+                index = field.findData(row[key])
+                if index < 0:
+                    index = field.findText(row[key])
+                field.setCurrentIndex(max(0, index))
+            else:
+                set_field_value(field, row[key])
+        self._load_world_rule_connections(rule_id)
+
+    def _new_world_rule(self) -> None:
+        self.world_rule_id = None
+        self.world_rule_list.clearSelection()
+        for field in self.world_rule_fields.values():
+            if isinstance(field, QComboBox):
+                field.setCurrentIndex(0)
+            else:
+                set_field_value(field, "")
+        self._clear_world_rule_connections()
+        self.world_rule_fields["title"].setFocus()
+
+    def _save_world_rule(self) -> None:
+        if not self.active_project:
+            return
+        values = {key: field_value(field) for key, field in self.world_rule_fields.items()}
+        values["title"] = values["title"] or "Règle sans titre"
+        keys = ("category", "title", "rule_text", "scope", "limitation", "cost", "exceptions", "consequence", "status")
+        if self.world_rule_id:
+            self.db.run(
+                f"UPDATE world_rules SET {','.join(f'{key}=?' for key in keys)},updated_at=? WHERE id=?",
+                [values[key] for key in keys] + [NOW(), self.world_rule_id],
+            )
+        else:
+            self.world_rule_id = self.db.run(
+                f"INSERT INTO world_rules(project_id,{','.join(keys)},created_at,updated_at) "
+                f"VALUES({','.join('?' * (len(keys) + 3))})",
+                [self.active_project] + [values[key] for key in keys] + [NOW(), NOW()],
+            ).lastrowid
+        self._save_world_rule_connections()
+        self._refresh_world_rules()
+        self.save_state.setText("Règle enregistrée")
+
+    def _clear_world_rule_connections(self) -> None:
+        for picker in getattr(self, "world_rule_connection_lists", {}).values():
+            for index in range(picker.count()):
+                picker.item(index).setCheckState(Qt.CheckState.Unchecked)
+
+    def _load_world_rule_connections(self, rule_id: int) -> None:
+        table_specs = {
+            "characters": ("world_rule_characters", "character_id"),
+            "groups": ("world_rule_groups", "group_id"),
+            "events": ("world_rule_events", "event_id"),
+            "images": ("world_rule_images", "image_id"),
+        }
+        for key, picker in getattr(self, "world_rule_connection_lists", {}).items():
+            table, column = table_specs[key]
+            selected_ids = {
+                int(row[0])
+                for row in self.db.q(f"SELECT {column} FROM {table} WHERE rule_id=?", (rule_id,))
+            }
+            for index in range(picker.count()):
+                item = picker.item(index)
+                item.setCheckState(
+                    Qt.CheckState.Checked
+                    if int(item.data(Qt.ItemDataRole.UserRole)) in selected_ids
+                    else Qt.CheckState.Unchecked
+                )
+
+    def _save_world_rule_connections(self) -> None:
+        if not self.world_rule_id:
+            return
+        table_specs = {
+            "characters": ("world_rule_characters", "character_id"),
+            "groups": ("world_rule_groups", "group_id"),
+            "events": ("world_rule_events", "event_id"),
+            "images": ("world_rule_images", "image_id"),
+        }
+        with self.db.conn:
+            for key, picker in getattr(self, "world_rule_connection_lists", {}).items():
+                table, column = table_specs[key]
+                self.db.conn.execute(f"DELETE FROM {table} WHERE rule_id=?", (self.world_rule_id,))
+                for index in range(picker.count()):
+                    item = picker.item(index)
+                    if item.checkState() == Qt.CheckState.Checked:
+                        self.db.conn.execute(
+                            f"INSERT OR IGNORE INTO {table}(rule_id,{column}) VALUES(?,?)",
+                            (self.world_rule_id, int(item.data(Qt.ItemDataRole.UserRole))),
+                        )
+
+    def _delete_world_rule(self) -> None:
+        if not self.world_rule_id:
+            return
+        if QMessageBox.question(self, "Supprimer la règle", "Supprimer cette règle de l’univers ?") != QMessageBox.StandardButton.Yes:
+            return
+        self.db.run("DELETE FROM world_rules WHERE id=?", (self.world_rule_id,))
+        self.world_rule_id = None
+        self._new_world_rule()
+        self._refresh_world_rules(select_first=True)
+
+    def _build_world_history_tab(self) -> QWidget:
+        tab = QWidget()
+        outer = QVBoxLayout(tab)
+        outer.setContentsMargins(0, 12, 0, 0)
+        card = make_card()
+        box = QVBoxLayout(card)
+        box.setContentsMargins(16, 14, 16, 14)
+        head = QHBoxLayout()
+        copy = QVBoxLayout()
+        copy.addWidget(make_label("HISTOIRE DU MONDE", "Caption"))
+        copy.addWidget(make_label("Les événements viennent de la Chronologie", "CardTitle"))
+        copy.addWidget(make_label("Classe un événement en Monde, Guerre ou Backstory pour le retrouver facilement ici.", "Muted", True))
+        head.addLayout(copy, 1)
+        head.addWidget(make_button("Ouvrir Chronologie →", "primary", self.show_timeline))
+        box.addLayout(head)
+        self.world_history_table = QTreeWidget()
+        self.world_history_table.setHeaderLabels(["Repère", "Événement", "Catégorie", "Timeline"])
+        self.world_history_table.setRootIsDecorated(False)
+        self.world_history_table.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.world_history_table.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.world_history_table.header().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.world_history_table.header().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        rows = self.db.q(
+            """SELECT event.*,track.name track_name FROM timeline_events event
+            LEFT JOIN timeline_tracks track ON track.id=event.track_id
+            WHERE event.project_id=? AND event.category IN ('Monde','Guerre','Backstory')
+            ORDER BY event.time_hours,event.id""",
+            (self.active_project,),
+        )
+        for row in rows:
+            item = QTreeWidgetItem([
+                row["display_label"] or f"{float(row['time_hours']):g} h",
+                row["title"] or "Événement sans titre",
+                row["category"],
+                row["track_name"] or "Timeline",
+            ])
+            item.setToolTip(1, row["description"] or row["consequence"] or "")
+            self.world_history_table.addTopLevelItem(item)
+        box.addWidget(self.world_history_table, 1)
+        outer.addWidget(card, 1)
+        return tab
+
+    def _build_world_lexicon_tab(self) -> QWidget:
+        tab = QWidget()
+        outer = QVBoxLayout(tab)
+        outer.setContentsMargins(0, 12, 0, 0)
+        card = make_card()
+        box = QVBoxLayout(card)
+        box.setContentsMargins(16, 14, 16, 14)
+        head = QHBoxLayout()
+        head.addWidget(make_label("LEXIQUE PROPRE AU PROJET", "Caption"))
+        head.addStretch()
+        head.addWidget(make_button("+ Terme", "secondary", self._add_world_term_row))
+        head.addWidget(make_button("Enregistrer", "primary", self._save_world_terms))
+        box.addLayout(head)
+        box.addWidget(make_label("Noms, expressions, objets ou institutions dont le sens doit rester cohérent.", "Muted", True))
+        self.world_terms_table = QTableWidget(0, 4)
+        self.world_terms_table.setObjectName("WorldTermsTable")
+        self.world_terms_table.setHorizontalHeaderLabels(["Terme", "Catégorie", "Définition", "Usage dans l’histoire"])
+        for column in range(4):
+            self.world_terms_table.horizontalHeader().setSectionResizeMode(
+                column,
+                QHeaderView.ResizeMode.ResizeToContents if column < 2 else QHeaderView.ResizeMode.Stretch,
+            )
+        self.world_terms_table.verticalHeader().setVisible(False)
+        self.world_terms_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        for row in self.db.q(
+            "SELECT * FROM world_terms WHERE project_id=? ORDER BY category,term COLLATE NOCASE,id",
+            (self.active_project,),
+        ):
+            self._add_world_term_row(row)
+        box.addWidget(self.world_terms_table, 1)
+        actions = QHBoxLayout()
+        actions.addWidget(make_button("Supprimer la ligne", "quiet", self._remove_world_term_row))
+        actions.addStretch()
+        box.addLayout(actions)
+        outer.addWidget(card, 1)
+        return tab
+
+    def _add_world_term_row(self, row=None) -> None:
+        if not hasattr(self, "world_terms_table"):
+            return
+        index = self.world_terms_table.rowCount()
+        self.world_terms_table.insertRow(index)
+        values = (
+            row["term"] if row else "",
+            row["category"] if row else "",
+            row["definition"] if row else "",
+            row["usage"] if row else "",
+        )
+        for column, value in enumerate(values):
+            self.world_terms_table.setItem(index, column, QTableWidgetItem(value))
+        self.world_terms_table.setRowHeight(index, 48)
+        self.world_terms_table.setCurrentCell(index, 0)
+
+    def _remove_world_term_row(self) -> None:
+        row = self.world_terms_table.currentRow()
+        if row >= 0:
+            self.world_terms_table.removeRow(row)
+
+    def _save_world_terms(self) -> None:
+        if not self.active_project:
+            return
+        values = []
+        for row in range(self.world_terms_table.rowCount()):
+            fields = [
+                self.world_terms_table.item(row, column).text().strip()
+                if self.world_terms_table.item(row, column) else ""
+                for column in range(4)
+            ]
+            if fields[0]:
+                values.append(fields)
+        with self.db.conn:
+            self.db.conn.execute("DELETE FROM world_terms WHERE project_id=?", (self.active_project,))
+            for term, category, definition, usage in values:
+                self.db.conn.execute(
+                    """INSERT INTO world_terms(project_id,category,term,definition,usage,created_at,updated_at)
+                    VALUES(?,?,?,?,?,?,?)""",
+                    (self.active_project, category or "Autre", term, definition, usage, NOW(), NOW()),
+                )
+        self.save_state.setText("Lexique de l’univers enregistré")
+        QTimer.singleShot(2200, lambda: self.save_state.setText(""))
+
+    # ---------- Theme and motifs ----------
+
+    def show_theme(self) -> None:
+        page = self._begin_page("Thème", "theme")
+        self._page_header(
+            page,
+            "Sens du projet",
+            "Thème et motifs",
+            "Observe les questions que l’histoire met à l’épreuve, sans lui imposer une morale obligatoire.",
+        )
+        if not self.active_project:
+            page.addWidget(make_label("Crée ou sélectionne d’abord un projet.", "Muted"))
+            page.addStretch()
+            return
+        self.theme_profile_row = self.db.one(
+            "SELECT * FROM theme_profiles WHERE project_id=?", (self.active_project,)
+        )
+        self.theme_profile_fields: dict[str, QLineEdit | QTextEdit] = {}
+        self.theme_tabs = QTabWidget()
+        self.theme_tabs.setObjectName("ThemeTabs")
+        self.theme_tabs.addTab(self._build_theme_question_tab(), "Question")
+        self.theme_tabs.addTab(self._build_theme_positions_tab(), "Positions")
+        self.theme_tabs.addTab(self._build_theme_expression_tab(), "Expression")
+        self.theme_tabs.addTab(self._build_theme_motifs_tab(), "Motifs")
+        self.theme_tabs.addTab(
+            self._build_record_template_tab("theme", self.active_project),
+            "Modèle de fiche",
+        )
+        tab_index = int(self.db.setting(f"theme_tab_{self.active_project}", "0") or 0)
+        self.theme_tabs.setCurrentIndex(min(max(tab_index, 0), self.theme_tabs.count() - 1))
+        self.theme_tabs.currentChanged.connect(
+            lambda index: self.db.set_setting(f"theme_tab_{self.active_project}", index)
+        )
+        page.addWidget(self.theme_tabs, 1)
+
+    def _build_theme_profile_tab(self, kicker: str, title: str, intro: str, specs) -> QWidget:
+        tab = QWidget()
+        outer = QVBoxLayout(tab)
+        outer.setContentsMargins(0, 12, 0, 0)
+        card = make_card()
+        box = QVBoxLayout(card)
+        box.setContentsMargins(18, 16, 18, 16)
+        box.setSpacing(8)
+        head = QHBoxLayout()
+        copy = QVBoxLayout()
+        copy.addWidget(make_label(kicker, "Caption"))
+        copy.addWidget(make_label(title, "CardTitle", True))
+        copy.addWidget(make_label(intro, "Muted", True))
+        head.addLayout(copy, 1)
+        head.addWidget(make_button("Enregistrer", "primary", self._save_theme_profile))
+        box.addLayout(head)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        canvas = QWidget()
+        canvas.setObjectName("PanelCanvas")
+        form = QVBoxLayout(canvas)
+        form.setContentsMargins(4, 8, 10, 8)
+        form.setSpacing(8)
+        for label, key, kind, placeholder in specs:
+            form.addWidget(make_label(label, "Caption"))
+            if kind == "line":
+                field = QLineEdit()
+                field.setPlaceholderText(placeholder)
+            else:
+                field = make_editor(104, placeholder)
+                field.setProperty("themeField", True)
+                field.setMinimumHeight(104)
+                field.setMaximumHeight(104)
+            value = self.theme_profile_row[key] if self.theme_profile_row else ""
+            set_field_value(field, value)
+            self.theme_profile_fields[key] = field
+            form.addWidget(field)
+        form.addStretch()
+        scroll.setWidget(canvas)
+        box.addWidget(scroll, 1)
+        outer.addWidget(card, 1)
+        return tab
+
+    def _build_theme_question_tab(self) -> QWidget:
+        return self._build_theme_profile_tab(
+            "QUESTION THÉMATIQUE",
+            "Ce que ton histoire cherche à éprouver",
+            "Une question ouvre le récit. Une morale le ferme trop tôt.",
+            (
+                ("THÈME GÉNÉRAL", "theme_word", "line", "Ex. la loyauté, la justice, le deuil, l’ambition…"),
+                ("QUESTION CENTRALE", "central_question", "text", "Ex. Jusqu’où peut-on protéger quelqu’un sans décider à sa place ?"),
+                ("POURQUOI CETTE QUESTION M’INTÉRESSE", "personal_interest", "text", "Ce qui te touche, t’intrigue ou te met en désaccord."),
+                ("CE QUE JE REFUSE DE RÉDUIRE À UNE MORALE", "avoid_message", "text", "Quelle réponse trop simple veux-tu éviter ?"),
+            ),
+        )
+
+    def _build_theme_expression_tab(self) -> QWidget:
+        return self._build_theme_profile_tab(
+            "EXPRESSION DANS L’HISTOIRE",
+            "Faire apparaître le thème par les actes",
+            "Le thème devient perceptible lorsque des choix produisent des conséquences différentes.",
+            (
+                ("VISION AU DÉBUT", "opening_view", "text", "Que semblent croire le protagoniste ou le monde au début ?"),
+                ("DÉCISIONS QUI METTENT LA QUESTION À L’ÉPREUVE", "decisions_note", "text", "Quels choix obligent réellement les personnages à se positionner ?"),
+                ("CONSÉQUENCES", "consequences_note", "text", "Quelles conséquences confirment, contredisent ou nuancent leurs positions ?"),
+                ("CONFLITS THÉMATIQUES", "conflicts_note", "text", "Quels conflits opposent deux réponses légitimes à la même question ?"),
+                ("RÉPONSE APPORTÉE PAR LA FIN", "ending_response", "text", "Que suggère la résolution, sans devoir formuler une leçon ?"),
+                ("NOTES LIBRES", "notes", "text", "Contradictions, doutes ou pistes à conserver."),
+            ),
+        )
+
+    def _save_theme_profile(self) -> None:
+        if not self.active_project or not hasattr(self, "theme_profile_fields"):
+            return
+        keys = (
+            "theme_word", "central_question", "personal_interest", "avoid_message",
+            "opening_view", "decisions_note", "consequences_note", "conflicts_note",
+            "ending_response", "notes",
+        )
+        values = [field_value(self.theme_profile_fields[key]) for key in keys]
+        self.db.run(
+            f"""INSERT INTO theme_profiles(project_id,{','.join(keys)},created_at,updated_at)
+            VALUES({','.join('?' * (len(keys) + 3))})
+            ON CONFLICT(project_id) DO UPDATE SET
+            {','.join(f'{key}=excluded.{key}' for key in keys)},updated_at=excluded.updated_at""",
+            [self.active_project] + values + [NOW(), NOW()],
+        )
+        self.save_state.setText("Thème enregistré")
+        QTimer.singleShot(2200, lambda: self.save_state.setText(""))
+
+    def _build_theme_positions_tab(self) -> QWidget:
+        tab = QWidget()
+        outer = QHBoxLayout(tab)
+        outer.setContentsMargins(0, 12, 0, 0)
+        outer.setSpacing(12)
+        navigation = make_card()
+        navigation.setFixedWidth(285)
+        nav = QVBoxLayout(navigation)
+        nav.setContentsMargins(14, 14, 14, 14)
+        nav.addWidget(make_label("POINTS DE VUE", "Caption"))
+        nav.addWidget(make_label("Plusieurs personnages peuvent répondre différemment à la même question.", "Muted", True))
+        self.theme_position_search = QLineEdit()
+        self.theme_position_search.setPlaceholderText("Rechercher…")
+        self.theme_position_search.setClearButtonEnabled(True)
+        nav.addWidget(self.theme_position_search)
+        self.theme_position_list = QListWidget()
+        self.theme_position_list.setObjectName("ThemePositionList")
+        nav.addWidget(self.theme_position_list, 1)
+        nav.addWidget(make_button("+ Nouvelle position", "primary", self._new_theme_position))
+        outer.addWidget(navigation)
+
+        detail = make_card()
+        box = QVBoxLayout(detail)
+        box.setContentsMargins(16, 14, 16, 14)
+        box.addWidget(make_label("FICHE DU POINT DE VUE", "Caption"))
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        canvas = QWidget()
+        canvas.setObjectName("PanelCanvas")
+        form = QVBoxLayout(canvas)
+        form.setContentsMargins(4, 8, 10, 8)
+        form.setSpacing(8)
+        self.theme_position_fields: dict[str, QLineEdit | QTextEdit | QComboBox] = {}
+        form.addWidget(make_label("TYPE DE POSITION", "Caption"))
+        position_type = QComboBox()
+        for key, label in THEME_POSITION_TYPES:
+            position_type.addItem(label, key)
+        self.theme_position_fields["position_type"] = position_type
+        form.addWidget(position_type)
+        for label, key, placeholder in (
+            ("FORMULATION COURTE", "label", "Ex. On ne peut faire confiance qu’à soi-même."),
+            ("CE QUE CETTE POSITION DÉFEND", "stance", "Pourquoi cette réponse paraît-elle juste à ce personnage ?"),
+            ("VÉRITÉ ET LIMITES", "nuance", "Qu’a-t-elle de vrai, et à quel moment devient-elle insuffisante ou dangereuse ?"),
+        ):
+            form.addWidget(make_label(label, "Caption"))
+            if key == "label":
+                field = QLineEdit()
+                field.setPlaceholderText(placeholder)
+            else:
+                field = make_editor(112, placeholder)
+                field.setProperty("themeField", True)
+                field.setMinimumHeight(112)
+                field.setMaximumHeight(112)
+            self.theme_position_fields[key] = field
+            form.addWidget(field)
+        form.addWidget(make_separator())
+        form.addWidget(make_label("PERSONNAGES QUI PORTENT CETTE POSITION", "Caption"))
+        form.addWidget(make_label("Un personnage peut défendre cette idée consciemment ou simplement agir comme s’il y croyait.", "Muted", True))
+        self.theme_position_characters = CheckableListWidget()
+        self.theme_position_characters.setObjectName("ThemeConnectionPicker")
+        self.theme_position_characters.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.theme_position_characters.setMinimumHeight(150)
+        for row in self.db.q(
+            "SELECT id,name,role FROM characters WHERE project_id=? ORDER BY name COLLATE NOCASE,id",
+            (self.active_project,),
+        ):
+            item = QListWidgetItem(f"{row['name'] or 'Sans nom'} · {row['role'] or 'Rôle à préciser'}")
+            item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Unchecked)
+            self.theme_position_characters.addItem(item)
+        form.addWidget(self.theme_position_characters)
+        form.addStretch()
+        scroll.setWidget(canvas)
+        box.addWidget(scroll, 1)
+        actions = QHBoxLayout()
+        actions.addWidget(make_button("Enregistrer", "primary", self._save_theme_position))
+        actions.addStretch()
+        actions.addWidget(make_button("Supprimer", "danger", self._delete_theme_position))
+        box.addLayout(actions)
+        outer.addWidget(detail, 1)
+        self.theme_position_id: int | None = None
+        self.theme_position_search.textChanged.connect(self._refresh_theme_positions)
+        self.theme_position_list.currentItemChanged.connect(self._theme_position_selected)
+        self._refresh_theme_positions(select_first=True)
+        return tab
+
+    def _refresh_theme_positions(self, _text: str = "", select_first: bool = False) -> None:
+        if not hasattr(self, "theme_position_list"):
+            return
+        query = self.theme_position_search.text().strip().lower()
+        rows = self.db.q(
+            "SELECT * FROM theme_positions WHERE project_id=? ORDER BY position,id",
+            (self.active_project,),
+        )
+        self.theme_position_list.blockSignals(True)
+        self.theme_position_list.clear()
+        selected = None
+        for row in rows:
+            haystack = f"{row['label']} {THEME_POSITION_LABELS.get(row['position_type'], '')}".lower()
+            if query and query not in haystack:
+                continue
+            item = QListWidgetItem(
+                f"{row['label'] or 'Position sans titre'}\n{THEME_POSITION_LABELS.get(row['position_type'], 'Autre point de vue')}"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+            item.setSizeHint(QSize(0, 58))
+            self.theme_position_list.addItem(item)
+            if int(row["id"]) == self.theme_position_id:
+                selected = item
+        if selected:
+            self.theme_position_list.setCurrentItem(selected)
+        elif select_first and self.theme_position_list.count():
+            self.theme_position_list.setCurrentRow(0)
+        self.theme_position_list.blockSignals(False)
+        current = self.theme_position_list.currentItem()
+        if current:
+            self._load_theme_position(int(current.data(Qt.ItemDataRole.UserRole)))
+
+    def _theme_position_selected(self, current: QListWidgetItem | None, _previous=None) -> None:
+        if current:
+            self._load_theme_position(int(current.data(Qt.ItemDataRole.UserRole)))
+
+    def _load_theme_position(self, position_id: int) -> None:
+        row = self.db.one("SELECT * FROM theme_positions WHERE id=?", (position_id,))
+        if not row:
+            return
+        self.theme_position_id = position_id
+        combo = self.theme_position_fields["position_type"]
+        combo.setCurrentIndex(max(0, combo.findData(row["position_type"])))
+        set_field_value(self.theme_position_fields["label"], row["label"])
+        set_field_value(self.theme_position_fields["stance"], row["stance"])
+        set_field_value(self.theme_position_fields["nuance"], row["nuance"])
+        selected = {
+            int(link[0]) for link in self.db.q(
+                "SELECT character_id FROM theme_position_characters WHERE position_id=?", (position_id,)
+            )
+        }
+        for index in range(self.theme_position_characters.count()):
+            item = self.theme_position_characters.item(index)
+            item.setCheckState(
+                Qt.CheckState.Checked if int(item.data(Qt.ItemDataRole.UserRole)) in selected
+                else Qt.CheckState.Unchecked
+            )
+
+    def _new_theme_position(self) -> None:
+        self.theme_position_id = None
+        self.theme_position_list.clearSelection()
+        self.theme_position_fields["position_type"].setCurrentIndex(0)
+        for key in ("label", "stance", "nuance"):
+            set_field_value(self.theme_position_fields[key], "")
+        for index in range(self.theme_position_characters.count()):
+            self.theme_position_characters.item(index).setCheckState(Qt.CheckState.Unchecked)
+        self.theme_position_fields["label"].setFocus()
+
+    def _save_theme_position(self) -> None:
+        if not self.active_project:
+            return
+        position_type = self.theme_position_fields["position_type"].currentData() or "nuance"
+        label = field_value(self.theme_position_fields["label"]) or "Position sans titre"
+        stance = field_value(self.theme_position_fields["stance"])
+        nuance = field_value(self.theme_position_fields["nuance"])
+        if self.theme_position_id:
+            self.db.run(
+                """UPDATE theme_positions SET position_type=?,label=?,stance=?,nuance=?,updated_at=? WHERE id=?""",
+                (position_type, label, stance, nuance, NOW(), self.theme_position_id),
+            )
+        else:
+            next_position = int(self.db.one(
+                "SELECT COUNT(*) FROM theme_positions WHERE project_id=?", (self.active_project,)
+            )[0])
+            self.theme_position_id = self.db.run(
+                """INSERT INTO theme_positions(project_id,position,position_type,label,stance,nuance,created_at,updated_at)
+                VALUES(?,?,?,?,?,?,?,?)""",
+                (self.active_project, next_position, position_type, label, stance, nuance, NOW(), NOW()),
+            ).lastrowid
+        with self.db.conn:
+            self.db.conn.execute(
+                "DELETE FROM theme_position_characters WHERE position_id=?", (self.theme_position_id,)
+            )
+            for index in range(self.theme_position_characters.count()):
+                item = self.theme_position_characters.item(index)
+                if item.checkState() == Qt.CheckState.Checked:
+                    self.db.conn.execute(
+                        "INSERT OR IGNORE INTO theme_position_characters(position_id,character_id) VALUES(?,?)",
+                        (self.theme_position_id, int(item.data(Qt.ItemDataRole.UserRole))),
+                    )
+        self._refresh_theme_positions()
+        self.save_state.setText("Position thématique enregistrée")
+
+    def _delete_theme_position(self) -> None:
+        if not self.theme_position_id:
+            return
+        if QMessageBox.question(self, "Supprimer la position", "Supprimer ce point de vue thématique ?") != QMessageBox.StandardButton.Yes:
+            return
+        self.db.run("DELETE FROM theme_positions WHERE id=?", (self.theme_position_id,))
+        self.theme_position_id = None
+        self._new_theme_position()
+        self._refresh_theme_positions(select_first=True)
+
+    def _build_theme_motifs_tab(self) -> QWidget:
+        tab = QWidget()
+        outer = QHBoxLayout(tab)
+        outer.setContentsMargins(0, 12, 0, 0)
+        outer.setSpacing(12)
+        navigation = make_card()
+        navigation.setFixedWidth(285)
+        nav = QVBoxLayout(navigation)
+        nav.setContentsMargins(14, 14, 14, 14)
+        nav.addWidget(make_label("MOTIFS DU PROJET", "Caption"))
+        self.theme_motif_search = QLineEdit()
+        self.theme_motif_search.setPlaceholderText("Rechercher…")
+        self.theme_motif_search.setClearButtonEnabled(True)
+        nav.addWidget(self.theme_motif_search)
+        self.theme_motif_filter = QComboBox()
+        self.theme_motif_filter.addItem("Tous les types", "")
+        for motif_type in THEME_MOTIF_TYPES:
+            self.theme_motif_filter.addItem(motif_type, motif_type)
+        nav.addWidget(self.theme_motif_filter)
+        self.theme_motif_list = QListWidget()
+        self.theme_motif_list.setObjectName("ThemeMotifList")
+        nav.addWidget(self.theme_motif_list, 1)
+        nav.addWidget(make_button("+ Nouveau motif", "primary", self._new_theme_motif))
+        outer.addWidget(navigation)
+
+        detail = make_card()
+        box = QVBoxLayout(detail)
+        box.setContentsMargins(16, 14, 16, 14)
+        box.addWidget(make_label("FICHE DU MOTIF", "Caption"))
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        canvas = QWidget()
+        canvas.setObjectName("PanelCanvas")
+        form = QVBoxLayout(canvas)
+        form.setContentsMargins(4, 8, 10, 8)
+        form.setSpacing(8)
+        self.theme_motif_fields: dict[str, QLineEdit | QTextEdit | QComboBox] = {}
+        for label, key, kind, placeholder in (
+            ("NOM", "name", "line", "Ex. une fenêtre condamnée"),
+            ("TYPE", "motif_type", "combo", ""),
+            ("SENS POSSIBLE", "meaning", "text", "Ce motif évoque quoi, sans devoir posséder un sens unique ?"),
+            ("APPARITIONS", "appearances", "text", "Quand revient-il, et dans quelles situations ?"),
+            ("ÉVOLUTION", "evolution", "text", "Comment sa présence ou son sens change-t-il au fil de l’histoire ?"),
+        ):
+            form.addWidget(make_label(label, "Caption"))
+            if kind == "line":
+                field = QLineEdit()
+                field.setPlaceholderText(placeholder)
+            elif kind == "combo":
+                field = QComboBox()
+                field.addItems(THEME_MOTIF_TYPES)
+            else:
+                field = make_editor(96, placeholder)
+                field.setProperty("themeField", True)
+                field.setMinimumHeight(96)
+                field.setMaximumHeight(96)
+            self.theme_motif_fields[key] = field
+            form.addWidget(field)
+        form.addWidget(make_separator())
+        form.addWidget(make_label("CONNEXIONS", "Caption"))
+        form.addWidget(make_label("Relie le motif aux éléments où il existe déjà. Ces liens sont facultatifs.", "Muted", True))
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(8)
+        self.theme_motif_connection_lists: dict[str, QListWidget] = {}
+        sources = (
+            (
+                "locations", "LIEUX",
+                self.db.q("SELECT id,name,category FROM locations WHERE project_id=? ORDER BY name,id", (self.active_project,)),
+                lambda row: f"{row['name'] or 'Sans nom'} · {row['category']}",
+            ),
+            (
+                "events", "ÉVÉNEMENTS",
+                self.db.q("SELECT id,title,category FROM timeline_events WHERE project_id=? ORDER BY time_hours,id", (self.active_project,)),
+                lambda row: f"{row['title'] or 'Sans titre'} · {row['category']}",
+            ),
+            (
+                "images", "IMAGES",
+                self.db.q("SELECT id,title,category FROM image_library WHERE project_id=? ORDER BY title,id", (self.active_project,)),
+                lambda row: f"{row['title'] or 'Sans titre'} · {row['category']}",
+            ),
+        )
+        for index, (key, label, rows, formatter) in enumerate(sources):
+            column = index % 2
+            grid_row = (index // 2) * 2
+            grid.addWidget(make_label(label, "Caption"), grid_row, column)
+            picker = CheckableListWidget()
+            picker.setObjectName("ThemeConnectionPicker")
+            picker.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+            picker.setMinimumHeight(112)
+            picker.setMaximumHeight(112)
+            for row in rows:
+                item = QListWidgetItem(formatter(row))
+                item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(Qt.CheckState.Unchecked)
+                picker.addItem(item)
+            self.theme_motif_connection_lists[key] = picker
+            grid.addWidget(picker, grid_row + 1, column)
+        form.addLayout(grid)
+        form.addStretch()
+        scroll.setWidget(canvas)
+        box.addWidget(scroll, 1)
+        actions = QHBoxLayout()
+        actions.addWidget(make_button("Enregistrer", "primary", self._save_theme_motif))
+        actions.addStretch()
+        actions.addWidget(make_button("Supprimer", "danger", self._delete_theme_motif))
+        box.addLayout(actions)
+        outer.addWidget(detail, 1)
+        self.theme_motif_id: int | None = None
+        self.theme_motif_search.textChanged.connect(self._refresh_theme_motifs)
+        self.theme_motif_filter.currentIndexChanged.connect(self._refresh_theme_motifs)
+        self.theme_motif_list.currentItemChanged.connect(self._theme_motif_selected)
+        self._refresh_theme_motifs(select_first=True)
+        return tab
+
+    def _refresh_theme_motifs(self, _value=None, select_first: bool = False) -> None:
+        if not hasattr(self, "theme_motif_list"):
+            return
+        query = self.theme_motif_search.text().strip().lower()
+        motif_filter = self.theme_motif_filter.currentData() or ""
+        rows = self.db.q(
+            "SELECT * FROM theme_motifs WHERE project_id=? ORDER BY position,id", (self.active_project,)
+        )
+        self.theme_motif_list.blockSignals(True)
+        self.theme_motif_list.clear()
+        selected = None
+        for row in rows:
+            if motif_filter and row["motif_type"] != motif_filter:
+                continue
+            if query and query not in f"{row['name']} {row['motif_type']} {row['meaning']}".lower():
+                continue
+            item = QListWidgetItem(f"{row['name'] or 'Motif sans titre'}\n{row['motif_type']}")
+            item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+            item.setSizeHint(QSize(0, 58))
+            self.theme_motif_list.addItem(item)
+            if int(row["id"]) == self.theme_motif_id:
+                selected = item
+        if selected:
+            self.theme_motif_list.setCurrentItem(selected)
+        elif select_first and self.theme_motif_list.count():
+            self.theme_motif_list.setCurrentRow(0)
+        self.theme_motif_list.blockSignals(False)
+        current = self.theme_motif_list.currentItem()
+        if current:
+            self._load_theme_motif(int(current.data(Qt.ItemDataRole.UserRole)))
+
+    def _theme_motif_selected(self, current: QListWidgetItem | None, _previous=None) -> None:
+        if current:
+            self._load_theme_motif(int(current.data(Qt.ItemDataRole.UserRole)))
+
+    def _load_theme_motif(self, motif_id: int) -> None:
+        row = self.db.one("SELECT * FROM theme_motifs WHERE id=?", (motif_id,))
+        if not row:
+            return
+        self.theme_motif_id = motif_id
+        for key, field in self.theme_motif_fields.items():
+            set_field_value(field, row[key])
+        specs = {
+            "locations": ("theme_motif_locations", "location_id"),
+            "events": ("theme_motif_events", "event_id"),
+            "images": ("theme_motif_images", "image_id"),
+        }
+        for key, picker in self.theme_motif_connection_lists.items():
+            table, column = specs[key]
+            selected = {int(link[0]) for link in self.db.q(
+                f"SELECT {column} FROM {table} WHERE motif_id=?", (motif_id,)
+            )}
+            for index in range(picker.count()):
+                item = picker.item(index)
+                item.setCheckState(
+                    Qt.CheckState.Checked if int(item.data(Qt.ItemDataRole.UserRole)) in selected
+                    else Qt.CheckState.Unchecked
+                )
+
+    def _new_theme_motif(self) -> None:
+        self.theme_motif_id = None
+        self.theme_motif_list.clearSelection()
+        for field in self.theme_motif_fields.values():
+            if isinstance(field, QComboBox):
+                field.setCurrentIndex(0)
+            else:
+                set_field_value(field, "")
+        for picker in self.theme_motif_connection_lists.values():
+            for index in range(picker.count()):
+                picker.item(index).setCheckState(Qt.CheckState.Unchecked)
+        self.theme_motif_fields["name"].setFocus()
+
+    def _save_theme_motif(self) -> None:
+        if not self.active_project:
+            return
+        values = {key: field_value(field) for key, field in self.theme_motif_fields.items()}
+        values["name"] = values["name"] or "Motif sans titre"
+        keys = ("name", "motif_type", "meaning", "appearances", "evolution")
+        if self.theme_motif_id:
+            self.db.run(
+                f"UPDATE theme_motifs SET {','.join(f'{key}=?' for key in keys)},updated_at=? WHERE id=?",
+                [values[key] for key in keys] + [NOW(), self.theme_motif_id],
+            )
+        else:
+            next_position = int(self.db.one(
+                "SELECT COUNT(*) FROM theme_motifs WHERE project_id=?", (self.active_project,)
+            )[0])
+            self.theme_motif_id = self.db.run(
+                f"INSERT INTO theme_motifs(project_id,position,{','.join(keys)},created_at,updated_at) "
+                f"VALUES({','.join('?' * (len(keys) + 4))})",
+                [self.active_project, next_position] + [values[key] for key in keys] + [NOW(), NOW()],
+            ).lastrowid
+        specs = {
+            "locations": ("theme_motif_locations", "location_id"),
+            "events": ("theme_motif_events", "event_id"),
+            "images": ("theme_motif_images", "image_id"),
+        }
+        with self.db.conn:
+            for key, picker in self.theme_motif_connection_lists.items():
+                table, column = specs[key]
+                self.db.conn.execute(f"DELETE FROM {table} WHERE motif_id=?", (self.theme_motif_id,))
+                for index in range(picker.count()):
+                    item = picker.item(index)
+                    if item.checkState() == Qt.CheckState.Checked:
+                        self.db.conn.execute(
+                            f"INSERT OR IGNORE INTO {table}(motif_id,{column}) VALUES(?,?)",
+                            (self.theme_motif_id, int(item.data(Qt.ItemDataRole.UserRole))),
+                        )
+        self._refresh_theme_motifs()
+        self.save_state.setText("Motif enregistré")
+
+    def _delete_theme_motif(self) -> None:
+        if not self.theme_motif_id:
+            return
+        if QMessageBox.question(self, "Supprimer le motif", "Supprimer ce motif du projet ?") != QMessageBox.StandardButton.Yes:
+            return
+        self.db.run("DELETE FROM theme_motifs WHERE id=?", (self.theme_motif_id,))
+        self.theme_motif_id = None
+        self._new_theme_motif()
+        self._refresh_theme_motifs(select_first=True)
+
+    # ---------- Conflict library ----------
+
+    def show_conflicts(self) -> None:
+        page = self._begin_page("Conflits", "conflicts")
+        self._page_header(
+            page,
+            "Forces en présence",
+            "Conflits du projet",
+            "Clarifie ce que chaque force cherche, pourquoi les objectifs se heurtent et comment les choix font évoluer la situation.",
+        )
+        if not self.active_project:
+            page.addWidget(make_label("Crée ou sélectionne d’abord un projet.", "Muted"))
+            page.addStretch()
+            return
+        self.conflict_id: int | None = None
+        self.conflict_fields: dict[str, QLineEdit | QTextEdit | QComboBox] = {}
+        self.conflict_side_lists: dict[tuple[str, str], QListWidget] = {}
+        self.conflict_connection_lists: dict[str, QListWidget] = {}
+
+        workspace = QHBoxLayout()
+        workspace.setSpacing(12)
+        navigation = make_card()
+        navigation.setFixedWidth(300)
+        nav = QVBoxLayout(navigation)
+        nav.setContentsMargins(14, 14, 14, 14)
+        nav.addWidget(make_label("CONFLITS", "Caption"))
+        nav.addWidget(make_label("Principal, secondaire, interne ou relationnel.", "Muted", True))
+        self.conflict_search = QLineEdit()
+        self.conflict_search.setPlaceholderText("Rechercher…")
+        self.conflict_search.setClearButtonEnabled(True)
+        nav.addWidget(self.conflict_search)
+        self.conflict_importance_filter = QComboBox()
+        self.conflict_importance_filter.addItem("Toutes les importances", "")
+        for key, label in CONFLICT_IMPORTANCE:
+            self.conflict_importance_filter.addItem(label, key)
+        nav.addWidget(self.conflict_importance_filter)
+        self.conflict_nature_filter = QComboBox()
+        self.conflict_nature_filter.addItem("Toutes les natures", "")
+        for key, label in CONFLICT_NATURES:
+            self.conflict_nature_filter.addItem(label, key)
+        nav.addWidget(self.conflict_nature_filter)
+        self.conflict_tag_filter = QComboBox()
+        self.conflict_tag_filter.addItem("Tous les tags", 0)
+        for tag in self.db.q(
+            "SELECT id,name FROM tags WHERE project_id=? ORDER BY name COLLATE NOCASE",
+            (self.active_project,),
+        ):
+            self.conflict_tag_filter.addItem(f"#{tag['name']}", int(tag["id"]))
+        nav.addWidget(self.conflict_tag_filter)
+        self.conflict_list = QListWidget()
+        self.conflict_list.setObjectName("ConflictList")
+        nav.addWidget(self.conflict_list, 1)
+        nav.addWidget(make_button("+ Nouveau conflit", "primary", self._new_conflict))
+        workspace.addWidget(navigation)
+
+        detail = make_card()
+        detail_box = QVBoxLayout(detail)
+        detail_box.setContentsMargins(16, 14, 16, 14)
+        detail_head = QHBoxLayout()
+        detail_head.addWidget(make_label("FICHE DU CONFLIT", "Caption"))
+        detail_head.addStretch()
+        self.conflict_diagnostic = make_label("0/5 REPÈRES", "AccentPill")
+        self.conflict_diagnostic.setToolTip(
+            "Forces · incompatibilité · enjeux · progression · résolution"
+        )
+        detail_head.addWidget(self.conflict_diagnostic)
+        detail_head.addWidget(
+            make_button("Préremplir depuis le projet", "secondary", self._prefill_conflict_from_project)
+        )
+        detail_box.addLayout(detail_head)
+        self.conflict_tabs = QTabWidget()
+        self.conflict_tabs.setObjectName("ConflictTabs")
+        self.conflict_tabs.addTab(self._build_conflict_nucleus_tab(), "Noyau")
+        self.conflict_tabs.addTab(self._build_conflict_forces_tab(), "Forces")
+        self.conflict_tabs.addTab(self._build_conflict_progression_tab(), "Progression")
+        self.conflict_tabs.addTab(self._build_conflict_connections_tab(), "Connexions")
+        tab_index = int(self.db.setting(f"conflict_tab_{self.active_project}", "0") or 0)
+        self.conflict_tabs.setCurrentIndex(min(max(tab_index, 0), self.conflict_tabs.count() - 1))
+        self.conflict_tabs.currentChanged.connect(
+            lambda index: self.db.set_setting(f"conflict_tab_{self.active_project}", index)
+        )
+        detail_box.addWidget(self.conflict_tabs, 1)
+        actions = QHBoxLayout()
+        actions.addWidget(make_button("Enregistrer", "primary", self._save_conflict))
+        actions.addStretch()
+        actions.addWidget(make_button("Supprimer", "danger", self._delete_conflict))
+        detail_box.addLayout(actions)
+        workspace.addWidget(detail, 1)
+        page.addLayout(workspace, 1)
+
+        self.conflict_search.textChanged.connect(self._refresh_conflicts)
+        self.conflict_importance_filter.currentIndexChanged.connect(self._refresh_conflicts)
+        self.conflict_nature_filter.currentIndexChanged.connect(self._refresh_conflicts)
+        self.conflict_tag_filter.currentIndexChanged.connect(self._refresh_conflicts)
+        self.conflict_list.currentItemChanged.connect(self._conflict_selected)
+        self._refresh_conflicts(select_first=True)
+        if not self.conflict_list.count():
+            self._new_conflict()
+            project = self.db.one(
+                "SELECT protagonist,objective,opposition,stakes FROM projects WHERE id=?",
+                (self.active_project,),
+            )
+            if project and any(
+                (project[key] or "").strip()
+                for key in ("protagonist", "objective", "opposition", "stakes")
+            ):
+                self._prefill_conflict_from_project()
+
+    def _conflict_scroll_tab(self, kicker: str, title: str, subtitle: str):
+        tab = QWidget()
+        outer = QVBoxLayout(tab)
+        outer.setContentsMargins(0, 12, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        canvas = QWidget()
+        canvas.setObjectName("PanelCanvas")
+        form = QVBoxLayout(canvas)
+        form.setContentsMargins(4, 8, 10, 8)
+        form.setSpacing(8)
+        form.addWidget(make_label(kicker, "Caption"))
+        form.addWidget(make_label(title, "CardTitle", True))
+        form.addWidget(make_label(subtitle, "Muted", True))
+        form.addWidget(make_separator())
+        scroll.setWidget(canvas)
+        outer.addWidget(scroll, 1)
+        return tab, form
+
+    def _add_conflict_field(
+        self,
+        form: QVBoxLayout,
+        label: str,
+        key: str,
+        kind: str,
+        placeholder: str = "",
+    ):
+        form.addWidget(make_label(label, "Caption"))
+        if kind == "line":
+            field = QLineEdit()
+            field.setPlaceholderText(placeholder)
+        elif kind == "importance":
+            field = QComboBox()
+            for value, text in CONFLICT_IMPORTANCE:
+                field.addItem(text, value)
+        elif kind == "nature":
+            field = QComboBox()
+            for value, text in CONFLICT_NATURES:
+                field.addItem(text, value)
+        else:
+            field = make_editor(102, placeholder)
+            field.setProperty("conflictField", True)
+            field.setMinimumHeight(102)
+            field.setMaximumHeight(102)
+        self.conflict_fields[key] = field
+        form.addWidget(field)
+        return field
+
+    def _build_conflict_nucleus_tab(self) -> QWidget:
+        tab, form = self._conflict_scroll_tab(
+            "NOYAU DU CONFLIT",
+            "Deux volontés qui ne peuvent pas réussir ensemble",
+            "L’opposition peut être une personne, une institution, une relation, le monde ou une contradiction intérieure.",
+        )
+        for spec in (
+            ("NOM DU CONFLIT", "title", "line", "Ex. Mina contre le Conseil des portes"),
+            ("IMPORTANCE", "importance", "importance", ""),
+            ("NATURE", "nature", "nature", ""),
+            ("FORCE A", "side_a_label", "line", "Personnage, groupe ou force qui poursuit le premier objectif"),
+            ("CE QUE VEUT LA FORCE A", "side_a_goal", "text", "Quel résultat concret cherche-t-elle à obtenir, préserver ou empêcher ?"),
+            ("FORCE B", "side_b_label", "line", "La force qui poursuit un résultat incompatible"),
+            ("CE QUE VEUT LA FORCE B", "side_b_goal", "text", "Que cherche-t-elle, de son propre point de vue ?"),
+            ("POURQUOI CES VOLONTÉS SONT INCOMPATIBLES", "incompatibility", "text", "Pourquoi l’une ne peut-elle pas simplement laisser l’autre réussir ?"),
+            ("ENJEUX", "stakes", "text", "Que risque-t-on de gagner, perdre ou sacrifier ?"),
+        ):
+            self._add_conflict_field(form, *spec)
+        form.addWidget(make_label("TAGS", "Caption"))
+        self.conflict_tags = QLineEdit()
+        self.conflict_tags.setPlaceholderText("principal, relationnel, à renforcer…")
+        form.addWidget(self.conflict_tags)
+        form.addStretch()
+        return tab
+
+    def _build_conflict_forces_tab(self) -> QWidget:
+        tab, form = self._conflict_scroll_tab(
+            "FORCES EN PRÉSENCE",
+            "Donner à chaque côté les moyens d’agir",
+            "Une opposition forte ne se contente pas de bloquer : elle poursuit quelque chose et modifie la situation.",
+        )
+        for side, title in (("a", "FORCE A"), ("b", "FORCE B")):
+            form.addWidget(make_label(title, "SectionTitle"))
+            for label, suffix, placeholder in (
+                ("STRATÉGIE", "strategy", "Que fait cette force pour obtenir ce qu’elle veut ?"),
+                ("AVANTAGE / POUVOIR", "advantage", "Quelles ressources, informations ou positions lui donnent un avantage ?"),
+                ("VULNÉRABILITÉ", "vulnerability", "Qu’est-ce qui peut la faire échouer ou changer de stratégie ?"),
+                ("CE QU’ELLE REFUSE DE PERDRE", "loss", "Quelle perte rend son engagement personnel ou coûteux ?"),
+            ):
+                self._add_conflict_field(form, label, f"side_{side}_{suffix}", "text", placeholder)
+            grid = QGridLayout()
+            grid.setHorizontalSpacing(10)
+            sources = (
+                (
+                    "characters", "PERSONNAGES",
+                    self.db.q("SELECT id,name,role FROM characters WHERE project_id=? ORDER BY name,id", (self.active_project,)),
+                    lambda row: f"{row['name'] or 'Sans nom'} · {row['role'] or 'Rôle à préciser'}",
+                ),
+                (
+                    "groups", "GROUPES / FACTIONS",
+                    self.db.q("SELECT id,name,group_type FROM character_groups WHERE project_id=? ORDER BY name,id", (self.active_project,)),
+                    lambda row: f"{row['name'] or 'Sans nom'} · {row['group_type'] or 'Groupe'}",
+                ),
+            )
+            for column, (kind, label, rows, formatter) in enumerate(sources):
+                container = QVBoxLayout()
+                container.addWidget(make_label(label, "Caption"))
+                picker = CheckableListWidget()
+                picker.setObjectName("ConflictConnectionPicker")
+                picker.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+                picker.setMinimumHeight(120)
+                picker.setMaximumHeight(120)
+                for row in rows:
+                    item = QListWidgetItem(formatter(row))
+                    item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+                    item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                    item.setCheckState(Qt.CheckState.Unchecked)
+                    picker.addItem(item)
+                self.conflict_side_lists[(kind, side)] = picker
+                container.addWidget(picker)
+                grid.addLayout(container, 0, column)
+            form.addLayout(grid)
+            if side == "a":
+                form.addWidget(make_separator())
+        form.addStretch()
+        return tab
+
+    def _build_conflict_progression_tab(self) -> QWidget:
+        tab, form = self._conflict_scroll_tab(
+            "PROGRESSION ET RÉSOLUTION",
+            "Faire évoluer le conflit plutôt que le répéter",
+            "Chaque étape doit réduire les options, augmenter le prix ou obliger une nouvelle décision.",
+        )
+        for spec in (
+            ("DÉCLENCHEMENT", "trigger_note", "text", "Quel événement rend ce conflit actif ou impossible à ignorer ?"),
+            ("PREMIÈRES ACTIONS", "first_actions", "text", "Que tente chaque force au début ?"),
+            ("AGGRAVATION", "escalation", "text", "Comment les actions et conséquences rendent-elles le conflit plus difficile ?"),
+            ("OPTIONS QUI DISPARAISSENT", "closing_options", "text", "Quelles solutions deviennent impossibles, dangereuses ou trop coûteuses ?"),
+            ("CHOIX DIFFICILE", "difficult_choice", "text", "Quel choix oblige à sacrifier quelque chose d’important ?"),
+            ("CONFRONTATION DÉCISIVE", "decisive_confrontation", "text", "Quelle action ou décision confronte directement le cœur du conflit ?"),
+        ):
+            self._add_conflict_field(form, *spec)
+        form.addWidget(make_separator())
+        form.addWidget(make_label("RÉSOLUTION", "SectionTitle"))
+        for spec in (
+            ("RÉSULTAT CONCRET", "outcome", "text", "Que devient l’objectif de chaque force ?"),
+            ("QUI GAGNE — ET QUOI ?", "winner", "text", "La victoire peut être partielle, ambiguë ou différente de ce qui était recherché."),
+            ("QUI PERD — ET QUOI ?", "loser", "text", "Quelle perte reste visible après la résolution ?"),
+            ("PRIX PAYÉ", "cost", "text", "Quel coût rend la résolution significative ?"),
+            ("CHANGEMENT PRODUIT", "change_note", "text", "Qu’est-ce qui ne peut plus redevenir comme avant ?"),
+            ("NOTES", "notes", "text", "Doutes, variantes ou points à vérifier."),
+        ):
+            self._add_conflict_field(form, *spec)
+        form.addStretch()
+        return tab
+
+    def _build_conflict_connections_tab(self) -> QWidget:
+        tab, form = self._conflict_scroll_tab(
+            "CONNEXIONS",
+            "Retrouver où le conflit agit réellement",
+            "Ces liens n’ajoutent aucun contenu obligatoire : ils relient les éléments qui existent déjà dans le projet.",
+        )
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(8)
+        sources = (
+            (
+                "scenes", "SCÈNES",
+                self.db.q("SELECT id,position,title FROM scene_rows WHERE project_id=? ORDER BY position,id", (self.active_project,)),
+                lambda row: f"{int(row['position']) + 1:02d} · {row['title'] or 'Scène sans titre'}",
+            ),
+            (
+                "nodes", "CARTES DE L’HISTOIRE",
+                self.db.q("SELECT id,title,kind FROM story_map_nodes WHERE project_id=? ORDER BY id", (self.active_project,)),
+                lambda row: f"{row['title'] or 'Carte sans titre'} · {row['kind']}",
+            ),
+            (
+                "events", "ÉVÉNEMENTS",
+                self.db.q("SELECT id,title,category FROM timeline_events WHERE project_id=? ORDER BY time_hours,id", (self.active_project,)),
+                lambda row: f"{row['title'] or 'Événement sans titre'} · {row['category']}",
+            ),
+            (
+                "theme_positions", "POSITIONS THÉMATIQUES",
+                self.db.q("SELECT id,label,position_type FROM theme_positions WHERE project_id=? ORDER BY position,id", (self.active_project,)),
+                lambda row: f"{row['label'] or 'Position sans titre'} · {THEME_POSITION_LABELS.get(row['position_type'], 'Autre')}",
+            ),
+        )
+        for index, (key, label, rows, formatter) in enumerate(sources):
+            column = index % 2
+            grid_row = (index // 2) * 2
+            grid.addWidget(make_label(label, "Caption"), grid_row, column)
+            picker = CheckableListWidget()
+            picker.setObjectName("ConflictConnectionPicker")
+            picker.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+            picker.setMinimumHeight(180)
+            for row in rows:
+                item = QListWidgetItem(formatter(row))
+                item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(Qt.CheckState.Unchecked)
+                picker.addItem(item)
+            self.conflict_connection_lists[key] = picker
+            grid.addWidget(picker, grid_row + 1, column)
+        form.addLayout(grid)
+        form.addStretch()
+        return tab
+
+    def _refresh_conflicts(self, _value=None, select_first: bool = False) -> None:
+        if not hasattr(self, "conflict_list"):
+            return
+        query = self.conflict_search.text().strip().lower()
+        importance = self.conflict_importance_filter.currentData() or ""
+        nature = self.conflict_nature_filter.currentData() or ""
+        tag_id = int(self.conflict_tag_filter.currentData() or 0)
+        tagged_ids = {
+            int(link["entity_id"])
+            for link in self.db.q(
+                """SELECT entity_id FROM entity_tags
+                WHERE tag_id=? AND target_type='conflict'""",
+                (tag_id,),
+            )
+        } if tag_id else set()
+        rows = self.db.q(
+            "SELECT * FROM conflicts WHERE project_id=? ORDER BY position,id", (self.active_project,)
+        )
+        self.conflict_list.blockSignals(True)
+        self.conflict_list.clear()
+        selected = None
+        for row in rows:
+            if importance and row["importance"] != importance:
+                continue
+            if nature and row["nature"] != nature:
+                continue
+            if tag_id and int(row["id"]) not in tagged_ids:
+                continue
+            haystack = f"{row['title']} {row['side_a_label']} {row['side_b_label']}".lower()
+            if query and query not in haystack:
+                continue
+            subtitle = (
+                f"{CONFLICT_IMPORTANCE_LABELS.get(row['importance'], 'Secondaire')} · "
+                f"{CONFLICT_NATURE_LABELS.get(row['nature'], 'Externe')}"
+            )
+            item = QListWidgetItem(f"{row['title'] or 'Conflit sans titre'}\n{subtitle}")
+            item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+            item.setSizeHint(QSize(0, 58))
+            self.conflict_list.addItem(item)
+            if int(row["id"]) == self.conflict_id:
+                selected = item
+        if selected:
+            self.conflict_list.setCurrentItem(selected)
+        elif select_first and self.conflict_list.count():
+            self.conflict_list.setCurrentRow(0)
+        self.conflict_list.blockSignals(False)
+        current = self.conflict_list.currentItem()
+        if current:
+            self._load_conflict(int(current.data(Qt.ItemDataRole.UserRole)))
+
+    def _conflict_selected(self, current: QListWidgetItem | None, _previous=None) -> None:
+        if current:
+            self._load_conflict(int(current.data(Qt.ItemDataRole.UserRole)))
+
+    def _load_conflict(self, conflict_id: int) -> None:
+        row = self.db.one("SELECT * FROM conflicts WHERE id=?", (conflict_id,))
+        if not row:
+            return
+        self.conflict_id = conflict_id
+        self.conflict_tags.setText(
+            self._entity_tag_text("conflict", conflict_id)
+        )
+        for key, field in self.conflict_fields.items():
+            if isinstance(field, QComboBox):
+                field.setCurrentIndex(max(0, field.findData(row[key])))
+            else:
+                set_field_value(field, row[key])
+        self._load_conflict_links(conflict_id)
+        self._refresh_conflict_diagnostic()
+
+    def _set_picker_checks(self, picker: QListWidget, selected: set[int]) -> None:
+        for index in range(picker.count()):
+            item = picker.item(index)
+            item.setCheckState(
+                Qt.CheckState.Checked if int(item.data(Qt.ItemDataRole.UserRole)) in selected
+                else Qt.CheckState.Unchecked
+            )
+
+    def _load_conflict_links(self, conflict_id: int) -> None:
+        side_specs = {"characters": ("conflict_characters", "character_id"), "groups": ("conflict_groups", "group_id")}
+        for (kind, side), picker in self.conflict_side_lists.items():
+            table, column = side_specs[kind]
+            selected = {int(row[0]) for row in self.db.q(
+                f"SELECT {column} FROM {table} WHERE conflict_id=? AND side=?", (conflict_id, side)
+            )}
+            self._set_picker_checks(picker, selected)
+        connection_specs = {
+            "scenes": ("conflict_scenes", "scene_id"),
+            "nodes": ("conflict_story_nodes", "node_id"),
+            "events": ("conflict_events", "event_id"),
+            "theme_positions": ("conflict_theme_positions", "position_id"),
+        }
+        for key, picker in self.conflict_connection_lists.items():
+            table, column = connection_specs[key]
+            selected = {int(row[0]) for row in self.db.q(
+                f"SELECT {column} FROM {table} WHERE conflict_id=?", (conflict_id,)
+            )}
+            self._set_picker_checks(picker, selected)
+
+    def _clear_conflict_pickers(self) -> None:
+        for picker in list(self.conflict_side_lists.values()) + list(self.conflict_connection_lists.values()):
+            self._set_picker_checks(picker, set())
+
+    def _new_conflict(self) -> None:
+        self.conflict_id = None
+        self.conflict_list.clearSelection()
+        for field in self.conflict_fields.values():
+            if isinstance(field, QComboBox):
+                field.setCurrentIndex(0)
+            else:
+                set_field_value(field, "")
+        self.conflict_tags.clear()
+        self._clear_conflict_pickers()
+        self._refresh_conflict_diagnostic()
+        self.conflict_fields["title"].setFocus()
+
+    def _prefill_conflict_from_project(self) -> None:
+        if not self.active_project:
+            return
+        project = self.db.one("SELECT * FROM projects WHERE id=?", (self.active_project,))
+        if not project:
+            return
+        answers = {
+            row["step_key"]: row["answer"]
+            for row in self.db.q("SELECT step_key,answer FROM story_map_answers WHERE project_id=?", (self.active_project,))
+        }
+        values = {
+            "title": "Conflit principal",
+            "side_a_label": project["protagonist"],
+            "side_a_goal": project["objective"],
+            "side_b_label": project["opposition"],
+            "stakes": project["stakes"],
+            "trigger_note": answers.get("disrupting_event", ""),
+            "first_actions": answers.get("first_actions", ""),
+            "escalation": answers.get("escalation", ""),
+            "difficult_choice": answers.get("difficult_choice", ""),
+            "decisive_confrontation": answers.get("final_confrontation", ""),
+            "outcome": answers.get("resolution_change", ""),
+            "change_note": project["change_note"],
+        }
+        self.conflict_fields["importance"].setCurrentIndex(
+            max(0, self.conflict_fields["importance"].findData("primary"))
+        )
+        for key, value in values.items():
+            if value:
+                set_field_value(self.conflict_fields[key], value)
+        protagonist = project["protagonist"].strip().lower()
+        if protagonist:
+            picker = self.conflict_side_lists.get(("characters", "a"))
+            if picker:
+                for index in range(picker.count()):
+                    item = picker.item(index)
+                    if item.text().split(" · ", 1)[0].strip().lower() == protagonist:
+                        item.setCheckState(Qt.CheckState.Checked)
+        self._refresh_conflict_diagnostic()
+        self.save_state.setText("Noyau du projet repris · vérifie puis enregistre")
+
+    def _save_conflict(self) -> None:
+        if not self.active_project:
+            return
+        values = {
+            key: (field.currentData() if isinstance(field, QComboBox) else field_value(field))
+            for key, field in self.conflict_fields.items()
+        }
+        values["title"] = values["title"] or "Conflit sans titre"
+        keys = tuple(self.conflict_fields.keys())
+        if self.conflict_id:
+            self.db.run(
+                f"UPDATE conflicts SET {','.join(f'{key}=?' for key in keys)},updated_at=? WHERE id=?",
+                [values[key] for key in keys] + [NOW(), self.conflict_id],
+            )
+        else:
+            next_position = int(self.db.one(
+                "SELECT COUNT(*) FROM conflicts WHERE project_id=?", (self.active_project,)
+            )[0])
+            self.conflict_id = self.db.run(
+                f"INSERT INTO conflicts(project_id,position,{','.join(keys)},created_at,updated_at) "
+                f"VALUES({','.join('?' * (len(keys) + 4))})",
+                [self.active_project, next_position] + [values[key] for key in keys] + [NOW(), NOW()],
+            ).lastrowid
+        self._save_entity_tag_text(
+            "conflict", self.conflict_id, self.conflict_tags.text()
+        )
+        self._save_conflict_links()
+        self._refresh_conflicts()
+        self._refresh_conflict_diagnostic()
+        self.save_state.setText("Conflit enregistré")
+
+    def _save_conflict_links(self) -> None:
+        if not self.conflict_id:
+            return
+        side_specs = {"characters": ("conflict_characters", "character_id"), "groups": ("conflict_groups", "group_id")}
+        connection_specs = {
+            "scenes": ("conflict_scenes", "scene_id"),
+            "nodes": ("conflict_story_nodes", "node_id"),
+            "events": ("conflict_events", "event_id"),
+            "theme_positions": ("conflict_theme_positions", "position_id"),
+        }
+        with self.db.conn:
+            for table in ("conflict_characters", "conflict_groups", "conflict_scenes", "conflict_story_nodes", "conflict_events", "conflict_theme_positions"):
+                self.db.conn.execute(f"DELETE FROM {table} WHERE conflict_id=?", (self.conflict_id,))
+            for (kind, side), picker in self.conflict_side_lists.items():
+                table, column = side_specs[kind]
+                for index in range(picker.count()):
+                    item = picker.item(index)
+                    if item.checkState() == Qt.CheckState.Checked:
+                        self.db.conn.execute(
+                            f"INSERT OR IGNORE INTO {table}(conflict_id,{column},side) VALUES(?,?,?)",
+                            (self.conflict_id, int(item.data(Qt.ItemDataRole.UserRole)), side),
+                        )
+            for key, picker in self.conflict_connection_lists.items():
+                table, column = connection_specs[key]
+                for index in range(picker.count()):
+                    item = picker.item(index)
+                    if item.checkState() == Qt.CheckState.Checked:
+                        self.db.conn.execute(
+                            f"INSERT OR IGNORE INTO {table}(conflict_id,{column}) VALUES(?,?)",
+                            (self.conflict_id, int(item.data(Qt.ItemDataRole.UserRole))),
+                        )
+
+    def _refresh_conflict_diagnostic(self) -> None:
+        if not hasattr(self, "conflict_diagnostic"):
+            return
+        value = lambda key: field_value(self.conflict_fields[key])
+        checks = (
+            bool(value("side_a_label") and value("side_a_goal") and value("side_b_label")),
+            bool(value("incompatibility")),
+            bool(value("stakes")),
+            bool(value("trigger_note") and value("escalation")),
+            bool(value("decisive_confrontation") and value("outcome")),
+        )
+        score = sum(checks)
+        self.conflict_diagnostic.setText(f"{score}/5 REPÈRES")
+        missing = [
+            label for label, valid in zip(
+                ("forces", "incompatibilité", "enjeux", "progression", "résolution"), checks, strict=True
+            ) if not valid
+        ]
+        self.conflict_diagnostic.setToolTip(
+            "Conflit lisible" if not missing else "À préciser : " + ", ".join(missing)
+        )
+
+    def _delete_conflict(self) -> None:
+        if not self.conflict_id:
+            return
+        if QMessageBox.question(self, "Supprimer le conflit", "Supprimer ce conflit du projet ?") != QMessageBox.StandardButton.Yes:
+            return
+        self._delete_entity_tag_links("conflict", self.conflict_id)
+        self.db.run("DELETE FROM conflicts WHERE id=?", (self.conflict_id,))
+        self.conflict_id = None
+        self._new_conflict()
+        self._refresh_conflicts(select_first=True)
+
+    # ---------- Location library ----------
+
+    def show_locations(self) -> None:
+        page = self._begin_page("Lieux", "locations", compact=True)
+        if not self.active_project:
+            page.addWidget(make_label("Crée ou sélectionne d’abord un projet.", "Muted"))
+            page.addStretch()
+            return
+
+        self.location_id: int | None = int(
+            self.db.setting(f"last_location_{self.active_project}", "0") or 0
+        ) or None
+        self.location_cancel_id: int | None = self.location_id
+        body = QHBoxLayout()
+        body.setSpacing(12)
+
+        library = make_card()
+        self.location_library_card = library
+        library.setFixedWidth(320)
+        library_box = QVBoxLayout(library)
+        library_box.setContentsMargins(14, 14, 14, 14)
+        library_box.setSpacing(8)
+        library_head = QHBoxLayout()
+        library_head.addWidget(make_label("LIEUX DU PROJET", "Caption"))
+        library_head.addStretch()
+        self.location_count = make_label("0 LIEU", "AccentPill")
+        library_head.addWidget(self.location_count)
+        library_box.addLayout(library_head)
+        self.location_search = QLineEdit()
+        self.location_search.setPlaceholderText("Rechercher un lieu…")
+        self.location_search.setClearButtonEnabled(True)
+        library_box.addWidget(self.location_search)
+        self.location_category_filter = QComboBox()
+        self.location_category_filter.addItem("Toutes les catégories", "")
+        for category in LOCATION_CATEGORIES:
+            self.location_category_filter.addItem(category, category)
+        library_box.addWidget(self.location_category_filter)
+        self.location_tag_filter = QComboBox()
+        self.location_tag_filter.addItem("Tous les tags", 0)
+        for tag in self.db.q(
+            "SELECT id,name FROM tags WHERE project_id=? ORDER BY name COLLATE NOCASE",
+            (self.active_project,),
+        ):
+            self.location_tag_filter.addItem(f"#{tag['name']}", int(tag["id"]))
+        library_box.addWidget(self.location_tag_filter)
+        self.location_list = QListWidget()
+        self.location_list.setObjectName("LocationList")
+        self.location_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.location_list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.location_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.location_list.setWordWrap(True)
+        library_box.addWidget(self.location_list, 1)
+        order_actions = QHBoxLayout()
+        order_actions.addWidget(make_button("↑ Monter", "tertiary", lambda: self._move_location(-1)))
+        order_actions.addWidget(make_button("↓ Descendre", "tertiary", lambda: self._move_location(1)))
+        library_box.addLayout(order_actions)
+        library_box.addWidget(make_button("+ Nouveau lieu", "primary", self._new_location))
+        body.addWidget(library)
+
+        visual = make_card()
+        self.location_visual_card = visual
+        visual.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+        visual_box = QVBoxLayout(visual)
+        visual_box.setContentsMargins(14, 14, 14, 14)
+        visual_box.setSpacing(8)
+        visual_head = QHBoxLayout()
+        visual_head.addWidget(make_label("IMAGE ET ATMOSPHÈRE", "Caption"))
+        visual_head.addStretch()
+        self.location_image_count = make_label("0 IMAGE", "AccentPill")
+        visual_head.addWidget(self.location_image_count)
+        visual_box.addLayout(visual_head)
+        self.location_image_preview = AspectPixmapLabel()
+        self.location_image_preview.setObjectName("LocationCover")
+        self.location_image_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.location_image_preview.setMinimumHeight(250)
+        self.location_image_preview.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        visual_box.addWidget(self.location_image_preview, 1)
+        self.location_image_caption = make_label("Aucune image liée", "Muted", True)
+        visual_box.addWidget(self.location_image_caption)
+        self.location_image_list = QListWidget()
+        self.location_image_list.setObjectName("LocationImages")
+        self.location_image_list.setViewMode(QListView.ViewMode.IconMode)
+        self.location_image_list.setFlow(QListView.Flow.LeftToRight)
+        self.location_image_list.setWrapping(False)
+        self.location_image_list.setMovement(QListView.Movement.Static)
+        self.location_image_list.setIconSize(QSize(76, 58))
+        self.location_image_list.setGridSize(QSize(98, 88))
+        self.location_image_list.setMaximumHeight(108)
+        self.location_image_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.location_image_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        visual_box.addWidget(self.location_image_list)
+        image_actions = QGridLayout()
+        image_actions.setHorizontalSpacing(7)
+        image_actions.setVerticalSpacing(7)
+        self.location_add_image_button = make_button(
+            "+ Ajouter une image", "secondary", self._add_location_image
+        )
+        self.location_primary_image_button = make_button(
+            "Définir comme couverture", "secondary", self._set_location_primary_image
+        )
+        self.location_remove_image_button = make_button(
+            "Retirer l’image", "tertiary", self._unlink_location_image
+        )
+        image_actions.addWidget(self.location_add_image_button, 0, 0)
+        image_actions.addWidget(self.location_primary_image_button, 0, 1)
+        image_actions.addWidget(self.location_remove_image_button, 1, 0, 1, 2)
+        visual_box.addLayout(image_actions)
+        visual_box.addSpacing(3)
+        self.location_summary_name = make_label("Nouveau lieu", "CardTitle", True)
+        self.location_summary_function = make_label("Fonction narrative à préciser", "Muted", True)
+        visual_box.addWidget(self.location_summary_name)
+        visual_box.addWidget(self.location_summary_function)
+        body.addWidget(visual, 11)
+
+        detail = make_card()
+        self.location_detail_card = detail
+        detail.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+        detail_box = QVBoxLayout(detail)
+        detail_box.setContentsMargins(16, 12, 16, 14)
+        detail_box.setSpacing(9)
+        detail_box.addWidget(make_label("FICHE DU LIEU", "Caption"))
+        self.location_fields: dict[str, QLineEdit | QTextEdit | QComboBox] = {}
+        self.location_tabs = QTabWidget()
+        self.location_tabs.setObjectName("LocationTabs")
+        self.location_tabs.setDocumentMode(True)
+        self.location_tabs.addTab(
+            self._location_form_tab(
+                (
+                    ("NOM", "name", "line", "Nom utile et reconnaissable"),
+                    ("CATÉGORIE", "category", "category", ""),
+                    ("RÉGION / ENSEMBLE", "region", "line", "Ville, territoire, bâtiment parent…"),
+                    ("ÉPOQUE / PÉRIODE", "epoch", "line", "Période concernée si elle compte"),
+                    ("TAGS", "tags", "line", "Ex. départ, refuge, interdit, pouvoir"),
+                    ("DESCRIPTION", "description", "text", "Ce qu’il faut comprendre ou visualiser rapidement."),
+                )
+            ),
+            "Identité",
+        )
+        self.location_tabs.addTab(
+            self._location_form_tab(
+                (
+                    ("FONCTION NARRATIVE", "narrative_function", "text", "Pourquoi ce lieu est-il utile à l’histoire ?"),
+                    ("ATMOSPHÈRE", "atmosphere", "text", "Quelle impression, tension ou promesse produit-il ?"),
+                    ("CONTRAINTES ET POSSIBILITÉS", "constraints_note", "text", "Qu’est-ce que ce lieu permet, interdit ou complique ?"),
+                    ("ÉVOLUTION DANS L’HISTOIRE", "evolution", "text", "Le sens, l’état ou l’usage du lieu change-t-il ?"),
+                    ("NOTES", "notes", "text", "Détails pratiques, idées à vérifier ou variantes."),
+                )
+            ),
+            "Fonction narrative",
+        )
+        self.location_tabs.addTab(self._location_connections_tab(), "Connexions")
+        self.location_tabs.addTab(
+            self._build_record_template_tab("location", self.location_id or 0),
+            "Modèle de fiche",
+        )
+        detail_box.addWidget(self.location_tabs, 1)
+        location_save_button = make_button("Enregistrer", "primary", self._save_location)
+        location_cancel_button = make_button("Annuler", "tertiary", self._cancel_location_edits)
+        self.location_delete_button = make_button(
+            "Supprimer le lieu", "danger", self._delete_location
+        )
+        if self.width() < 1500:
+            primary_actions = QHBoxLayout()
+            primary_actions.addWidget(location_save_button)
+            primary_actions.addStretch()
+            detail_box.addLayout(primary_actions)
+            final_actions = QHBoxLayout()
+            final_actions.addStretch()
+            final_actions.addWidget(location_cancel_button)
+            final_actions.addWidget(self.location_delete_button)
+            detail_box.addLayout(final_actions)
+        else:
+            detail_actions = QHBoxLayout()
+            detail_actions.addWidget(location_save_button)
+            detail_actions.addStretch()
+            detail_actions.addWidget(location_cancel_button)
+            detail_actions.addWidget(self.location_delete_button)
+            detail_box.addLayout(detail_actions)
+        body.addWidget(detail, 10)
+        page.addLayout(body, 1)
+
+        self.location_search.textChanged.connect(self._refresh_locations)
+        self.location_category_filter.currentIndexChanged.connect(self._refresh_locations)
+        self.location_tag_filter.currentIndexChanged.connect(self._refresh_locations)
+        self.location_list.currentItemChanged.connect(self._location_selected)
+        self.location_image_list.currentItemChanged.connect(self._location_image_selected)
+        self.location_image_list.itemDoubleClicked.connect(lambda _item: self._set_location_primary_image())
+        self._refresh_locations(select_first=True)
+
+    def _location_form_tab(self, definitions: tuple[tuple[str, str, str, str], ...]) -> QWidget:
+        tab = QWidget()
+        outer = QVBoxLayout(tab)
+        outer.setContentsMargins(0, 8, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        canvas = QWidget()
+        canvas.setObjectName("PanelCanvas")
+        form = QVBoxLayout(canvas)
+        form.setContentsMargins(4, 6, 10, 8)
+        form.setSpacing(8)
+        for label, key, kind, placeholder in definitions:
+            form.addWidget(make_label(label, "Caption"))
+            if kind == "category":
+                field = QComboBox()
+                field.addItems(LOCATION_CATEGORIES)
+            elif kind == "text":
+                field = make_editor(104, placeholder)
+                field.setProperty("locationField", True)
+            else:
+                field = QLineEdit()
+                field.setPlaceholderText(placeholder)
+            self.location_fields[key] = field
+            form.addWidget(field)
+        form.addStretch()
+        scroll.setWidget(canvas)
+        outer.addWidget(scroll, 1)
+        return tab
+
+    def _location_connections_tab(self) -> QWidget:
+        tab = QWidget()
+        outer = QVBoxLayout(tab)
+        outer.setContentsMargins(0, 10, 0, 0)
+        outer.addWidget(
+            make_label(
+                "Coche uniquement les éléments qui utilisent réellement ce lieu. Les images cochées alimentent aussi le panneau visuel.",
+                "Muted",
+                True,
+            )
+        )
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        canvas = QWidget()
+        canvas.setObjectName("PanelCanvas")
+        grid = QGridLayout(canvas)
+        grid.setContentsMargins(2, 8, 10, 8)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(8)
+        self.location_connection_lists: dict[str, QListWidget] = {}
+        sources = (
+            (
+                "characters",
+                "PERSONNAGES",
+                self.db.q("SELECT id,name,role FROM characters WHERE project_id=? ORDER BY name,id", (self.active_project,)),
+                lambda row: f"{row['name'] or 'Sans nom'} · {row['role'] or 'Rôle à préciser'}",
+            ),
+            (
+                "events",
+                "ÉVÉNEMENTS",
+                self.db.q("SELECT id,title,display_label FROM timeline_events WHERE project_id=? ORDER BY time_hours,id", (self.active_project,)),
+                lambda row: f"{row['display_label'] or 'Sans repère'} · {row['title'] or 'Sans titre'}",
+            ),
+            (
+                "scenes",
+                "SCÈNES",
+                self.db.q("SELECT id,position,title FROM scene_rows WHERE project_id=? ORDER BY position,id", (self.active_project,)),
+                lambda row: f"{int(row['position']) + 1:02d} · {row['title'] or 'Scène sans titre'}",
+            ),
+            (
+                "images",
+                "IMAGES DU PROJET",
+                self.db.q("SELECT id,title,category FROM image_library WHERE project_id=? ORDER BY title,id", (self.active_project,)),
+                lambda row: f"{row['title'] or 'Sans titre'} · {row['category'] or 'Autre'}",
+            ),
+        )
+        for index, (key, label, rows, formatter) in enumerate(sources):
+            column = index % 2
+            grid_row = (index // 2) * 2
+            grid.addWidget(make_label(label, "Caption"), grid_row, column)
+            picker = CheckableListWidget()
+            picker.setObjectName("LocationConnectionPicker")
+            picker.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+            picker.setMinimumHeight(150)
+            for row in rows:
+                item = QListWidgetItem(formatter(row))
+                item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(Qt.CheckState.Unchecked)
+                picker.addItem(item)
+            self.location_connection_lists[key] = picker
+            grid.addWidget(picker, grid_row + 1, column)
+        scroll.setWidget(canvas)
+        outer.addWidget(scroll, 1)
+        return tab
+
+    def _refresh_locations(self, _value=None, select_first: bool = False) -> None:
+        if not hasattr(self, "location_list"):
+            return
+        rows = self.db.q(
+            "SELECT * FROM locations WHERE project_id=? ORDER BY position,name COLLATE NOCASE,id",
+            (self.active_project,),
+        )
+        total = len(rows)
+        query = self.location_search.text().strip().casefold()
+        category = self.location_category_filter.currentData() or ""
+        selected_tag = int(self.location_tag_filter.currentData() or 0)
+        tagged_ids = {
+            int(row["entity_id"])
+            for row in self.db.q(
+                """SELECT entity_id FROM entity_tags
+                WHERE tag_id=? AND target_type='location'""",
+                (selected_tag,),
+            )
+        } if selected_tag else set()
+        visible_rows = [
+            row for row in rows
+            if (not category or row["category"] == category)
+            and (not selected_tag or int(row["id"]) in tagged_ids)
+            and (
+                not query
+                or query in f"{row['name']} {row['category']} {row['region']} {row['tags']} {row['description']}".casefold()
+            )
+        ]
+        self.location_list.blockSignals(True)
+        self.location_list.clear()
+        selected_item = None
+        for row in visible_rows:
+            secondary = " · ".join(value for value in (row["category"], row["region"]) if value)
+            item = QListWidgetItem(f"{row['name'] or 'Lieu sans nom'}\n{secondary or 'Catégorie à préciser'}")
+            item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+            item.setToolTip(f"{row['name'] or 'Lieu sans nom'}\n{secondary}")
+            item.setSizeHint(QSize(0, 68))
+            self.location_list.addItem(item)
+            if int(row["id"]) == self.location_id:
+                selected_item = item
+        if selected_item:
+            self.location_list.setCurrentItem(selected_item)
+        elif select_first and self.location_list.count():
+            self.location_list.setCurrentRow(0)
+            selected_item = self.location_list.currentItem()
+        self.location_list.blockSignals(False)
+        visible = len(visible_rows)
+        suffix = "LIEU" if total == 1 else "LIEUX"
+        self.location_count.setText(f"{visible} / {total} {suffix}" if visible != total else f"{total} {suffix}")
+        if selected_item:
+            self._load_location(int(selected_item.data(Qt.ItemDataRole.UserRole)))
+        elif not visible_rows:
+            self._new_location(clear_filters=False)
+
+    def _location_selected(self, current: QListWidgetItem | None, _previous=None) -> None:
+        if current:
+            self._load_location(int(current.data(Qt.ItemDataRole.UserRole)))
+
+    def _load_location(self, location_id: int) -> None:
+        row = self.db.one("SELECT * FROM locations WHERE id=? AND project_id=?", (location_id, self.active_project))
+        if not row:
+            return
+        self.location_id = location_id
+        self.location_cancel_id = location_id
+        self.db.set_setting(f"last_location_{self.active_project}", location_id)
+        for key, field in self.location_fields.items():
+            set_field_value(field, row[key])
+        tag_text = self._entity_tag_text("location", location_id)
+        if tag_text:
+            set_field_value(self.location_fields["tags"], tag_text)
+        elif row["tags"]:
+            self._save_entity_tag_text("location", location_id, row["tags"])
+        self.location_summary_name.setText(row["name"] or "Lieu sans nom")
+        self.location_summary_function.setText(row["narrative_function"] or "Fonction narrative à préciser")
+        self._load_location_connections()
+        self._refresh_location_images()
+        self._load_record_template_values("location", self.location_id)
+        self.location_delete_button.setEnabled(True)
+
+    def _new_location(self, _checked: bool = False, clear_filters: bool = True) -> None:
+        if self.location_id:
+            self.location_cancel_id = self.location_id
+        self.location_id = None
+        self.db.set_setting(f"last_location_{self.active_project}", 0)
+        if clear_filters and hasattr(self, "location_list"):
+            self.location_list.clearSelection()
+        for field in getattr(self, "location_fields", {}).values():
+            if isinstance(field, QComboBox):
+                field.setCurrentIndex(0)
+            else:
+                set_field_value(field, "")
+        self._clear_location_connections()
+        self.location_summary_name.setText("Nouveau lieu")
+        self.location_summary_function.setText("Fonction narrative à préciser")
+        self._refresh_location_images()
+        self._load_record_template_values("location", 0)
+        self.location_delete_button.setEnabled(False)
+        name = self.location_fields.get("name")
+        if isinstance(name, QLineEdit):
+            name.setFocus()
+
+    def _save_location(self, _checked: bool = False) -> None:
+        if not self.active_project:
+            return
+        values = {key: field_value(field) for key, field in self.location_fields.items()}
+        values["name"] = values["name"] or "Lieu sans nom"
+        keys = (
+            "name", "category", "region", "epoch", "tags", "description",
+            "narrative_function", "atmosphere", "constraints_note", "evolution", "notes",
+        )
+        if self.location_id:
+            self.db.run(
+                f"UPDATE locations SET {','.join(f'{key}=?' for key in keys)},updated_at=? WHERE id=?",
+                [values[key] for key in keys] + [NOW(), self.location_id],
+            )
+        else:
+            position = int(self.db.one(
+                "SELECT COUNT(*) FROM locations WHERE project_id=?", (self.active_project,)
+            )[0])
+            self.location_id = self.db.run(
+                f"INSERT INTO locations(project_id,position,{','.join(keys)},created_at,updated_at) "
+                f"VALUES({','.join('?' * (len(keys) + 4))})",
+                [self.active_project, position] + [values[key] for key in keys] + [NOW(), NOW()],
+            ).lastrowid
+        self.db.set_setting(f"last_location_{self.active_project}", self.location_id)
+        self.location_cancel_id = self.location_id
+        self._save_entity_tag_text("location", self.location_id, values["tags"])
+        self._save_location_connections()
+        self._save_record_template_values(
+            target_type="location", entity_id=self.location_id, silent=True
+        )
+        self._refresh_locations()
+        self.save_state.setText("Lieu enregistré")
+        QTimer.singleShot(2200, lambda: self.save_state.setText(""))
+
+    def _cancel_location_edits(self) -> None:
+        """Restore the saved location, or return to the selection preceding a new draft."""
+
+        target_id = self.location_id or self.location_cancel_id
+        if target_id and self.db.one(
+            "SELECT 1 FROM locations WHERE id=? AND project_id=?",
+            (target_id, self.active_project),
+        ):
+            self._load_location(int(target_id))
+            for index in range(self.location_list.count()):
+                item = self.location_list.item(index)
+                if int(item.data(Qt.ItemDataRole.UserRole)) == int(target_id):
+                    self.location_list.setCurrentItem(item)
+                    break
+            return
+        self._new_location(clear_filters=False)
+
+    def _clear_location_connections(self) -> None:
+        for picker in getattr(self, "location_connection_lists", {}).values():
+            for index in range(picker.count()):
+                picker.item(index).setCheckState(Qt.CheckState.Unchecked)
+
+    def _load_location_connections(self) -> None:
+        if not self.location_id:
+            self._clear_location_connections()
+            return
+        table_specs = {
+            "characters": ("location_characters", "character_id"),
+            "events": ("location_events", "event_id"),
+            "scenes": ("location_scenes", "scene_id"),
+            "images": ("location_images", "image_id"),
+        }
+        for key, picker in self.location_connection_lists.items():
+            table, column = table_specs[key]
+            selected_ids = {
+                int(row[0]) for row in self.db.q(
+                    f"SELECT {column} FROM {table} WHERE location_id=?", (self.location_id,)
+                )
+            }
+            for index in range(picker.count()):
+                item = picker.item(index)
+                item.setCheckState(
+                    Qt.CheckState.Checked
+                    if int(item.data(Qt.ItemDataRole.UserRole)) in selected_ids
+                    else Qt.CheckState.Unchecked
+                )
+
+    def _save_location_connections(self) -> None:
+        if not self.location_id:
+            return
+        table_specs = {
+            "characters": ("location_characters", "character_id"),
+            "events": ("location_events", "event_id"),
+            "scenes": ("location_scenes", "scene_id"),
+        }
+        with self.db.conn:
+            for key, (table, column) in table_specs.items():
+                picker = self.location_connection_lists[key]
+                self.db.conn.execute(f"DELETE FROM {table} WHERE location_id=?", (self.location_id,))
+                for index in range(picker.count()):
+                    item = picker.item(index)
+                    if item.checkState() == Qt.CheckState.Checked:
+                        self.db.conn.execute(
+                            f"INSERT OR IGNORE INTO {table}(location_id,{column}) VALUES(?,?)",
+                            (self.location_id, int(item.data(Qt.ItemDataRole.UserRole))),
+                        )
+            image_picker = self.location_connection_lists["images"]
+            previous_primary = self.db.conn.execute(
+                "SELECT image_id FROM location_images WHERE location_id=? AND is_primary=1 LIMIT 1",
+                (self.location_id,),
+            ).fetchone()
+            selected_images = [
+                int(image_picker.item(index).data(Qt.ItemDataRole.UserRole))
+                for index in range(image_picker.count())
+                if image_picker.item(index).checkState() == Qt.CheckState.Checked
+            ]
+            primary_id = int(previous_primary[0]) if previous_primary and int(previous_primary[0]) in selected_images else (
+                selected_images[0] if selected_images else 0
+            )
+            self.db.conn.execute("DELETE FROM location_images WHERE location_id=?", (self.location_id,))
+            for position, image_id in enumerate(selected_images):
+                self.db.conn.execute(
+                    "INSERT INTO location_images(location_id,image_id,position,is_primary) VALUES(?,?,?,?)",
+                    (self.location_id, image_id, position, 1 if image_id == primary_id else 0),
+                )
+        self._refresh_location_images()
+
+    def _location_pixmap(self, image_id: int) -> QPixmap:
+        """Decode a location image once, then reuse it while browsing places."""
+
+        cached = self._location_pixmap_cache.get(image_id)
+        if cached is not None:
+            return cached
+        row = self.db.one(
+            "SELECT image_data FROM image_library WHERE id=? AND project_id=?",
+            (image_id, self.active_project),
+        )
+        pixmap = QPixmap()
+        if row:
+            pixmap.loadFromData(bytes(row["image_data"]))
+            if pixmap.width() > 1800 or pixmap.height() > 1400:
+                pixmap = pixmap.scaled(
+                    QSize(1800, 1400),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+        self._location_pixmap_cache[image_id] = pixmap
+        return pixmap
+
+    def _location_thumbnail(self, image_id: int) -> QPixmap:
+        cached = self._location_thumbnail_cache.get(image_id)
+        if cached is not None:
+            return cached
+        pixmap = self._location_pixmap(image_id)
+        thumbnail = pixmap.scaled(
+            QSize(76, 58),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        ) if not pixmap.isNull() else QPixmap()
+        self._location_thumbnail_cache[image_id] = thumbnail
+        return thumbnail
+
+    def _refresh_location_images(self) -> None:
+        if not hasattr(self, "location_image_list"):
+            return
+        self.location_image_list.blockSignals(True)
+        self.location_image_list.clear()
+        rows = []
+        if self.location_id:
+            rows = self.db.q(
+                """SELECT image.id,image.title,image.file_name,link.is_primary,link.position
+                FROM location_images link
+                JOIN image_library image ON image.id=link.image_id
+                WHERE link.location_id=? ORDER BY link.is_primary DESC,link.position,image.id""",
+                (self.location_id,),
+            )
+        for row in rows:
+            image_id = int(row["id"])
+            title = row["title"] or row["file_name"] or "Image"
+            item = QListWidgetItem(title)
+            cached_thumbnail = self._location_thumbnail_cache.get(image_id)
+            if cached_thumbnail is not None and not cached_thumbnail.isNull():
+                item.setIcon(QIcon(cached_thumbnail))
+            item.setData(Qt.ItemDataRole.UserRole, image_id)
+            item.setToolTip(("Couverture · " if row["is_primary"] else "") + title)
+            self.location_image_list.addItem(item)
+        count = len(rows)
+        self.location_image_count.setText(f"{count} IMAGE{'S' if count != 1 else ''}")
+        if rows:
+            self.location_image_list.setCurrentRow(0)
+            self.location_image_list.blockSignals(False)
+            self._show_location_image_row(rows[0])
+        else:
+            self.location_image_list.blockSignals(False)
+            self.location_image_preview.set_source_pixmap(QPixmap())
+            self.location_image_preview.setText("Ajoute une image pour donner une identité visuelle au lieu.")
+            self.location_image_caption.setText("Aucune image liée")
+        has_selection = bool(rows and self.location_id)
+        if hasattr(self, "location_primary_image_button"):
+            self.location_primary_image_button.setEnabled(has_selection)
+        if hasattr(self, "location_remove_image_button"):
+            self.location_remove_image_button.setEnabled(has_selection)
+
+    def _show_location_image_row(self, row) -> None:
+        image_id = int(row["id"])
+        pixmap = self._location_pixmap(image_id)
+        self.location_image_preview.setText("")
+        self.location_image_preview.set_source_pixmap(pixmap)
+        prefix = "Couverture · " if row["is_primary"] else ""
+        self.location_image_caption.setText(prefix + (row["title"] or row["file_name"] or "Image"))
+        current = self.location_image_list.currentItem()
+        if current and int(current.data(Qt.ItemDataRole.UserRole)) == image_id:
+            thumbnail = self._location_thumbnail(image_id)
+            if not thumbnail.isNull():
+                current.setIcon(QIcon(thumbnail))
+
+    def _location_image_selected(self, current: QListWidgetItem | None, _previous=None) -> None:
+        has_selection = bool(current and self.location_id)
+        self.location_primary_image_button.setEnabled(has_selection)
+        self.location_remove_image_button.setEnabled(has_selection)
+        if not current or not self.location_id:
+            return
+        row = self.db.one(
+            """SELECT image.id,image.title,image.file_name,link.is_primary
+            FROM location_images link
+            JOIN image_library image ON image.id=link.image_id
+            WHERE link.location_id=? AND image.id=?""",
+            (self.location_id, int(current.data(Qt.ItemDataRole.UserRole))),
+        )
+        if row:
+            self._show_location_image_row(row)
+
+    def _add_location_image(self) -> None:
+        if not self.location_id:
+            self._save_location()
+        if not self.location_id:
+            return
+        selected, _filter = QFileDialog.getOpenFileName(
+            self,
+            "Ajouter une image au lieu",
+            "",
+            "Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif)",
+        )
+        if not selected:
+            return
+        source = Path(selected)
+        try:
+            data = source.read_bytes()
+        except OSError as exc:
+            QMessageBox.warning(self, "Image inaccessible", str(exc))
+            return
+        pixmap = QPixmap()
+        if len(data) > IDEA_ATTACHMENT_LIMIT or not pixmap.loadFromData(data):
+            QMessageBox.warning(self, "Image inutilisable", "Choisis une image valide de moins de 25 Mo.")
+            return
+        title, accepted = QInputDialog.getText(
+            self, "Titre de l’image", "Nom de la référence", text=source.stem
+        )
+        if not accepted:
+            return
+        with self.db.conn:
+            image_id = self.db.conn.execute(
+                """INSERT INTO image_library(
+                project_id,title,category,notes,file_name,mime_type,image_data,created_at,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?)""",
+                (
+                    self.active_project,
+                    title.strip() or source.stem,
+                    "Lieu / décor",
+                    "",
+                    source.name,
+                    mimetypes.guess_type(source.name)[0] or "image/png",
+                    data,
+                    NOW(),
+                    NOW(),
+                ),
+            ).lastrowid
+            if pixmap.width() > 1800 or pixmap.height() > 1400:
+                pixmap = pixmap.scaled(
+                    QSize(1800, 1400),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            self._location_pixmap_cache[int(image_id)] = pixmap
+            count = int(self.db.conn.execute(
+                "SELECT COUNT(*) FROM location_images WHERE location_id=?", (self.location_id,)
+            ).fetchone()[0])
+            self.db.conn.execute(
+                "INSERT INTO location_images(location_id,image_id,position,is_primary) VALUES(?,?,?,?)",
+                (self.location_id, image_id, count, 1 if count == 0 else 0),
+            )
+        self.db.set_setting(f"last_location_{self.active_project}", self.location_id)
+        self.show_locations()
+
+    def _set_location_primary_image(self) -> None:
+        item = self.location_image_list.currentItem() if hasattr(self, "location_image_list") else None
+        if not self.location_id or not item:
+            return
+        image_id = int(item.data(Qt.ItemDataRole.UserRole))
+        with self.db.conn:
+            self.db.conn.execute("UPDATE location_images SET is_primary=0 WHERE location_id=?", (self.location_id,))
+            self.db.conn.execute(
+                "UPDATE location_images SET is_primary=1 WHERE location_id=? AND image_id=?",
+                (self.location_id, image_id),
+            )
+        self._refresh_location_images()
+
+    def _unlink_location_image(self) -> None:
+        item = self.location_image_list.currentItem() if hasattr(self, "location_image_list") else None
+        if not self.location_id or not item:
+            return
+        image_id = int(item.data(Qt.ItemDataRole.UserRole))
+        self.db.run(
+            "DELETE FROM location_images WHERE location_id=? AND image_id=?",
+            (self.location_id, image_id),
+        )
+        remaining = self.db.one(
+            "SELECT image_id FROM location_images WHERE location_id=? ORDER BY position,image_id LIMIT 1",
+            (self.location_id,),
+        )
+        if remaining and not self.db.one(
+            "SELECT 1 FROM location_images WHERE location_id=? AND is_primary=1", (self.location_id,)
+        ):
+            self.db.run(
+                "UPDATE location_images SET is_primary=1 WHERE location_id=? AND image_id=?",
+                (self.location_id, int(remaining["image_id"])),
+            )
+        image_picker = self.location_connection_lists.get("images")
+        if image_picker:
+            for index in range(image_picker.count()):
+                candidate = image_picker.item(index)
+                if int(candidate.data(Qt.ItemDataRole.UserRole)) == image_id:
+                    candidate.setCheckState(Qt.CheckState.Unchecked)
+                    break
+        self._refresh_location_images()
+
+    def _move_location(self, delta: int) -> None:
+        if not self.location_id or delta not in {-1, 1}:
+            return
+        rows = list(self.db.q(
+            "SELECT id FROM locations WHERE project_id=? ORDER BY position,id", (self.active_project,)
+        ))
+        ids = [int(row["id"]) for row in rows]
+        if self.location_id not in ids:
+            return
+        old_index = ids.index(self.location_id)
+        new_index = old_index + delta
+        if not 0 <= new_index < len(ids):
+            return
+        ids[old_index], ids[new_index] = ids[new_index], ids[old_index]
+        with self.db.conn:
+            for position, location_id in enumerate(ids):
+                self.db.conn.execute("UPDATE locations SET position=? WHERE id=?", (position, location_id))
+        self._refresh_locations()
+
+    def _delete_location(self) -> None:
+        if not self.location_id:
+            return
+        if QMessageBox.question(
+            self,
+            "Supprimer le lieu",
+            "Supprimer cette fiche ? Les personnages, scènes, événements et images resteront conservés.",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        self._delete_entity_tag_links("location", self.location_id)
+        self.db.run("DELETE FROM locations WHERE id=?", (self.location_id,))
+        self.location_id = None
+        self.db.set_setting(f"last_location_{self.active_project}", 0)
+        self._refresh_locations(select_first=True)
+
+    # ---------- Character library ----------
+
+    def show_characters(self) -> None:
+        page = self._begin_page("Personnages", "characters", compact=True)
+        if not self.active_project:
+            page.addWidget(make_label("Crée ou sélectionne d’abord un projet.", "Muted"))
+            page.addStretch()
+            return
+
+        self.character_id: int | None = int(
+            self.db.setting(f"last_character_{self.active_project}", "0") or 0
+        ) or None
+        self.character_cancel_id: int | None = self.character_id
+        self.character_portrait_name = ""
+        self.character_portrait_mime = ""
+        self.character_portrait_data = b""
+        # Keep decoded artwork available while moving through the roster.
+        # Large portraits and moodboards must not be decoded again on every
+        # selection change.
+        self._character_portrait_cache: dict[int, QPixmap] = {}
+        self._character_reference_icon_cache: dict[int, QIcon] = {}
+
+        # The combo remains as a small internal selection model so the
+        # existing save/navigation logic stays stable. The visible selector is
+        # now the scrollable library in the first column.
+        self.character_selector = QComboBox(self)
+        self.character_selector.hide()
+
+        body = QHBoxLayout()
+        body.setSpacing(12)
+
+        roster = make_card()
+        self.character_roster_card = roster
+        roster.setFixedWidth(320)
+        roster.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        roster_box = QVBoxLayout(roster)
+        roster_box.setContentsMargins(14, 14, 14, 14)
+        roster_box.setSpacing(8)
+        roster_head = QHBoxLayout()
+        roster_head.addWidget(make_label("PERSONNAGES", "Caption"))
+        roster_head.addStretch()
+        self.character_count = make_label("0", "AccentPill")
+        roster_head.addWidget(self.character_count)
+        roster_box.addLayout(roster_head)
+        self.character_list_search = QLineEdit()
+        self.character_list_search.setPlaceholderText("Rechercher…")
+        self.character_list_search.setClearButtonEnabled(True)
+        roster_box.addWidget(self.character_list_search)
+        self.character_list_role_filter = QComboBox()
+        self.character_list_role_filter.addItem("Tous les rôles", "")
+        roster_box.addWidget(self.character_list_role_filter)
+        self.character_list_tag_filter = QComboBox()
+        self.character_list_tag_filter.addItem("Tous les tags", 0)
+        for tag in self.db.q(
+            "SELECT id,name FROM tags WHERE project_id=? ORDER BY name COLLATE NOCASE",
+            (self.active_project,),
+        ):
+            self.character_list_tag_filter.addItem(f"#{tag['name']}", int(tag["id"]))
+        roster_box.addWidget(self.character_list_tag_filter)
+        self.character_list = QListWidget()
+        self.character_list.setObjectName("CharacterRoster")
+        self.character_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.character_list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.character_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.character_list.setWordWrap(True)
+        roster_box.addWidget(self.character_list, 1)
+        roster_box.addWidget(make_button("+ Nouveau personnage", "primary", self._new_character))
+        body.addWidget(roster, 0)
+
+        left = make_card()
+        self.character_portrait_card = left
+        left.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+        left_box = QVBoxLayout(left)
+        left_box.setContentsMargins(14, 14, 14, 14)
+        left_box.setSpacing(8)
+        left_box.addWidget(make_label("SILHOUETTE ET RÉFÉRENCES", "Caption"))
+        gender_row = QHBoxLayout()
+        gender_row.addWidget(make_label("Silhouette", "Muted"))
+        self.character_gender = QComboBox()
+        self.character_gender.addItem("Non précisée", "unspecified")
+        self.character_gender.addItem("Femme", "female")
+        self.character_gender.addItem("Homme", "male")
+        self.character_gender.currentIndexChanged.connect(self._render_character_portrait)
+        gender_row.addWidget(self.character_gender, 1)
+        left_box.addLayout(gender_row)
+        self.character_portrait_preview = AspectPixmapLabel()
+        self.character_portrait_preview.setObjectName("CharacterPortrait")
+        self.character_portrait_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.character_portrait_preview.setMinimumHeight(220)
+        self.character_portrait_preview.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        left_box.addWidget(self.character_portrait_preview, 1)
+        portrait_actions = QHBoxLayout()
+        self.character_add_portrait_button = make_button(
+            "+ Ajouter une image", "secondary", self._choose_character_portrait
+        )
+        self.character_remove_portrait_button = make_button(
+            "Retirer le portrait", "tertiary", self._remove_character_portrait
+        )
+        portrait_actions.addWidget(self.character_add_portrait_button)
+        portrait_actions.addWidget(self.character_remove_portrait_button)
+        left_box.addLayout(portrait_actions)
+        left_box.addSpacing(3)
+        moodboard_head = QHBoxLayout()
+        moodboard_head.addWidget(make_label("MOODBOARD", "Caption"))
+        moodboard_head.addStretch()
+        self.character_reference_count = make_label("0 IMAGE", "AccentPill")
+        moodboard_head.addWidget(self.character_reference_count)
+        left_box.addLayout(moodboard_head)
+        self.character_reference_list = QListWidget()
+        self.character_reference_list.setObjectName("CharacterReferences")
+        self.character_reference_list.setViewMode(QListView.ViewMode.IconMode)
+        self.character_reference_list.setFlow(QListView.Flow.LeftToRight)
+        self.character_reference_list.setWrapping(False)
+        self.character_reference_list.setMovement(QListView.Movement.Static)
+        self.character_reference_list.setIconSize(QSize(64, 58))
+        self.character_reference_list.setGridSize(QSize(92, 86))
+        self.character_reference_list.setMaximumHeight(104)
+        self.character_reference_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.character_reference_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.character_reference_list.itemDoubleClicked.connect(self._use_character_reference_as_portrait)
+        self.character_reference_list.currentItemChanged.connect(
+            lambda current, _previous: self.character_remove_reference_button.setEnabled(
+                current is not None
+            )
+        )
+        left_box.addWidget(self.character_reference_list)
+        reference_actions = QHBoxLayout()
+        self.character_add_reference_button = make_button(
+            "+ Ajouter une référence", "secondary", self._add_character_references
+        )
+        self.character_remove_reference_button = make_button(
+            "Retirer la référence", "tertiary", self._delete_character_reference
+        )
+        self.character_remove_reference_button.setEnabled(False)
+        reference_actions.addWidget(self.character_add_reference_button)
+        reference_actions.addWidget(self.character_remove_reference_button)
+        left_box.addLayout(reference_actions)
+        left_box.addSpacing(3)
+        self.character_summary_name = make_label("Nouveau personnage", "CardTitle")
+        self.character_summary_role = make_label("Rôle à préciser", "Muted")
+        left_box.addWidget(self.character_summary_name)
+        left_box.addWidget(self.character_summary_role)
+        body.addWidget(left, 11)
+
+        detail = make_card()
+        self.character_detail_card = detail
+        detail.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+        detail_box = QVBoxLayout(detail)
+        detail_box.setContentsMargins(16, 12, 16, 14)
+        detail_box.setSpacing(9)
+        detail_box.addWidget(make_label("FICHE DU PERSONNAGE", "Caption"))
+        self.character_fields: dict[str, QLineEdit | QTextEdit | QComboBox] = {}
+        self.character_tabs = QTabWidget()
+        self.character_tabs.setObjectName("CharacterTabs")
+        self.character_tabs.setMinimumWidth(0)
+        self.character_tabs.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+        self.character_tabs.setDocumentMode(True)
+        self.character_tabs.setUsesScrollButtons(False)
+        self.character_tabs.tabBar().setMinimumWidth(0)
+        self.character_tabs.tabBar().setElideMode(Qt.TextElideMode.ElideNone)
+        self.character_tabs.addTab(
+            self._character_form_tab(
+                (
+                    ("NOM", "name", False, "Nom provisoire"),
+                    ("ÂGE", "age", False, "Âge réel ou apparent"),
+                    ("RÔLE", "role", False, "Protagoniste, allié, opposition, secondaire…"),
+                    ("OCCUPATION", "occupation", False, "Métier, fonction sociale ou activité"),
+                    ("FONCTION DANS L’HISTOIRE", "story_function", True, "Pourquoi cette personne est-elle nécessaire au récit ?"),
+                    ("DESCRIPTION", "description", True, "Ce qui permet de la comprendre rapidement"),
+                    ("APPARENCE UTILE", "appearance", True, "Détails visibles qui racontent quelque chose"),
+                    ("TAGS", "__tags__", False, ""),
+                    ("GROUPES / FACTIONS", "__groups__", False, ""),
+                )
+            ),
+            "Essentiel",
+        )
+        self.character_tabs.addTab(
+            self._character_form_tab(
+                (
+                    ("DÉSIR", "desire", False, "Ce qu’il ou elle veut profondément"),
+                    ("OBJECTIF CONCRET", "objective", False, "Ce qu’il ou elle cherche à obtenir dans l’histoire"),
+                    ("BESOIN", "need", False, "Ce qu’il ou elle doit comprendre ou accepter"),
+                    ("PEUR", "fear", False, "Ce qu’il ou elle cherche à éviter"),
+                    ("FAIBLESSE", "weakness", False, "Comportement qui crée des problèmes"),
+                    ("BLESSURE", "wound", True, "Expérience passée qui influence encore ses décisions"),
+                    ("CONFLIT", "conflict", True, "Ce qui résiste extérieurement et intérieurement"),
+                    ("CONTRADICTIONS", "contradictions", True, "Deux tendances incompatibles mais vraies chez cette personne"),
+                    ("SECRETS", "secrets", True, "Information cachée qui peut modifier les relations ou l’action"),
+                )
+            ),
+            "Dramaturgie",
+        )
+        self.character_tabs.addTab(
+            self._character_form_tab(
+                (
+                    ("SITUATION AU DÉBUT", "start_situation", True, "Qui est cette personne avant l’épreuve principale ?"),
+                    ("BACKSTORY UTILE", "backstory", True, "Seulement le passé qui agit encore sur le présent"),
+                    ("TRANSFORMATION / ARC", "arc", True, "Qu’est-ce qui change par ses décisions et leurs conséquences ?"),
+                    ("SITUATION À LA FIN", "end_situation", True, "Qui est-elle devenue, ou qu’a-t-elle refusé de devenir ?"),
+                )
+            ),
+            "Arc et transformation",
+        )
+        self.character_tabs.addTab(
+            self._character_form_tab(
+                (
+                    ("PERSONNALITÉ EN ACTION", "personality", True, "Comportements observables plutôt qu’une liste d’adjectifs"),
+                    ("VALEURS", "values_note", True, "Ce qui compte réellement dans ses choix"),
+                    ("CROYANCES", "beliefs", True, "Ce qu’elle tient pour vrai au début de l’histoire"),
+                    ("MANIÈRE DE PARLER", "speaking_style", True, "Rythme, vocabulaire, détours, silences ou habitudes"),
+                    ("NOTES LIBRES", "notes", True, "Relations, gestes, détails utiles, idées à vérifier…"),
+                )
+            ),
+            "Voix et notes",
+        )
+        self.character_connections_tab_index = self.character_tabs.addTab(
+            self._character_connections_tab(), "Connexions"
+        )
+        self.character_template_tab_index = self.character_tabs.addTab(
+            self._build_record_template_tab("character", self.character_id or 0),
+            "Modèle de fiche",
+        )
+        self.character_custom_tab_index = self.character_tabs.addTab(
+            self._character_custom_fields_tab(), "Champs libres"
+        )
+        self.character_tabs.tabBar().hide()
+        character_tab_grid = QGridLayout()
+        character_tab_grid.setContentsMargins(0, 0, 0, 0)
+        character_tab_grid.setHorizontalSpacing(4)
+        character_tab_grid.setVerticalSpacing(2)
+        self.character_tab_group = QButtonGroup(self)
+        self.character_tab_group.setExclusive(True)
+        self.character_tab_buttons: list[QPushButton] = []
+        character_tab_columns = 2 if self.width() < 1500 else 3
+        for index in range(self.character_tabs.count()):
+            button = QPushButton(self.character_tabs.tabText(index))
+            button.setProperty("studioTab", True)
+            button.setCheckable(True)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(
+                lambda _checked=False, tab_index=index: self.character_tabs.setCurrentIndex(tab_index)
+            )
+            self.character_tab_group.addButton(button)
+            self.character_tab_buttons.append(button)
+            character_tab_grid.addWidget(
+                button,
+                index // character_tab_columns,
+                index % character_tab_columns,
+            )
+        self.character_tab_buttons[0].setChecked(True)
+        self.character_tabs.currentChanged.connect(self._character_tab_changed)
+        detail_box.addLayout(character_tab_grid)
+        detail_box.addWidget(self.character_tabs, 1)
+        character_save_button = make_button("Enregistrer", "primary", self._save_character)
+        character_relations_button = make_button(
+            "Relations", "secondary", self._edit_character_relationships
+        )
+        character_cancel_button = make_button(
+            "Annuler", "tertiary", self._cancel_character_edits
+        )
+        self.character_delete_button = make_button(
+            "Supprimer le personnage", "danger", self._delete_character
+        )
+        if self.width() < 1500:
+            primary_actions = QHBoxLayout()
+            primary_actions.addWidget(character_save_button)
+            primary_actions.addWidget(character_relations_button)
+            primary_actions.addStretch()
+            detail_box.addLayout(primary_actions)
+            final_actions = QHBoxLayout()
+            final_actions.addStretch()
+            final_actions.addWidget(character_cancel_button)
+            final_actions.addWidget(self.character_delete_button)
+            detail_box.addLayout(final_actions)
+        else:
+            actions = QHBoxLayout()
+            actions.addWidget(character_save_button)
+            actions.addWidget(character_relations_button)
+            actions.addStretch()
+            actions.addWidget(character_cancel_button)
+            actions.addWidget(self.character_delete_button)
+            detail_box.addLayout(actions)
+        body.addWidget(detail, 10)
+        page.addLayout(body, 1)
+        self.character_list_search.textChanged.connect(self._refresh_character_list)
+        self.character_list_role_filter.currentIndexChanged.connect(self._refresh_character_list)
+        self.character_list_tag_filter.currentIndexChanged.connect(self._refresh_character_list)
+        self.character_list.currentItemChanged.connect(self._character_list_selected)
+        self.character_selector.currentIndexChanged.connect(self._load_character)
+        self._render_character_portrait()
+        self._refresh_character_group_choices()
+        self._refresh_characters(select_first=True)
+
+    def _character_form_tab(self, definitions) -> QScrollArea:
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        form = QWidget()
+        form.setObjectName("PanelCanvas")
+        box = QVBoxLayout(form)
+        box.setContentsMargins(6, 10, 10, 10)
+        box.setSpacing(7)
+        for label, key, multiline, placeholder in definitions:
+            box.addWidget(make_label(label, "Caption"))
+            if key == "__tags__":
+                self.character_tags = QLineEdit()
+                self.character_tags.setPlaceholderText(
+                    "principal, à revoir, famille, secret…"
+                )
+                box.addWidget(self.character_tags)
+                continue
+            if key == "__groups__":
+                self.character_group_membership = QListWidget()
+                self.character_group_membership.setObjectName("CharacterGroups")
+                self.character_group_membership.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
+                self.character_group_membership.setMaximumHeight(104)
+                box.addWidget(self.character_group_membership)
+                group_actions = QHBoxLayout()
+                group_actions.addWidget(make_label("Sélectionne les groupes auxquels appartient ce personnage.", "Muted", True), 1)
+                group_actions.addWidget(make_button("Gérer les groupes", "secondary", self._manage_character_groups))
+                box.addLayout(group_actions)
+                continue
+            if multiline:
+                field = make_editor(112, placeholder)
+                field.setMinimumHeight(112)
+                field.setMaximumHeight(112)
+            elif key == "role":
+                field = QComboBox()
+                field.setEditable(False)
+                field.addItem("Rôle à préciser", "")
+                for role in CHARACTER_ROLES:
+                    field.addItem(role, role)
+            else:
+                field = QLineEdit()
+                field.setPlaceholderText(placeholder)
+                field.setMinimumHeight(42)
+            field.setProperty("characterField", True)
+            self.character_fields[key] = field
+            box.addWidget(field)
+        box.addStretch()
+        area.setWidget(form)
+        return area
+
+    def _character_connections_tab(self) -> QScrollArea:
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        panel = QWidget()
+        panel.setObjectName("PanelCanvas")
+        box = QVBoxLayout(panel)
+        box.setContentsMargins(6, 10, 10, 10)
+        box.setSpacing(7)
+        intro = make_label(
+            "Ces éléments se mettent à jour depuis la Liste de scènes, la Carte de l’histoire et la Chronologie.",
+            "Muted",
+            True,
+        )
+        box.addWidget(intro)
+        box.addWidget(make_label("SCÈNES OÙ LE PERSONNAGE APPARAÎT", "Caption"))
+        self.character_scene_connections = QListWidget()
+        self.character_scene_connections.setObjectName("CharacterConnections")
+        self.character_scene_connections.setMaximumHeight(128)
+        box.addWidget(self.character_scene_connections)
+        box.addWidget(make_label("CARTES DE L’HISTOIRE LIÉES", "Caption"))
+        self.character_map_connections = QListWidget()
+        self.character_map_connections.setObjectName("CharacterConnections")
+        self.character_map_connections.setMaximumHeight(128)
+        box.addWidget(self.character_map_connections)
+        box.addWidget(make_label("ÉVÉNEMENTS DE LA CHRONOLOGIE", "Caption"))
+        self.character_timeline_connections = QListWidget()
+        self.character_timeline_connections.setObjectName("CharacterConnections")
+        self.character_timeline_connections.setMaximumHeight(128)
+        box.addWidget(self.character_timeline_connections)
+        box.addStretch()
+        area.setWidget(panel)
+        return area
+
+    def _character_custom_fields_tab(self) -> QWidget:
+        panel = QWidget()
+        panel.setObjectName("PanelCanvas")
+        box = QVBoxLayout(panel)
+        box.setContentsMargins(6, 10, 10, 10)
+        box.setSpacing(8)
+        box.addWidget(make_label("Ajoute uniquement les informations particulières utiles à ce personnage.", "Muted", True))
+        self.character_custom_table = QTableWidget(0, 2)
+        self.character_custom_table.setObjectName("CharacterCustomTable")
+        self.character_custom_table.setHorizontalHeaderLabels(["Champ", "Valeur"])
+        self.character_custom_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.character_custom_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.character_custom_table.verticalHeader().setVisible(False)
+        self.character_custom_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        box.addWidget(self.character_custom_table, 1)
+        actions = QHBoxLayout()
+        actions.addWidget(make_button("+ Champ personnalisé", "secondary", self._add_character_custom_field_row))
+        actions.addWidget(make_button("Supprimer la ligne", "quiet", self._remove_character_custom_field_row))
+        actions.addStretch()
+        box.addLayout(actions)
+        return panel
+
+    def _character_list_selected(
+        self,
+        current: QListWidgetItem | None,
+        _previous: QListWidgetItem | None = None,
+    ) -> None:
+        if not current:
+            return
+        character_id = int(current.data(Qt.ItemDataRole.UserRole))
+        index = self.character_selector.findData(character_id)
+        if index >= 0 and index != self.character_selector.currentIndex():
+            self.character_selector.setCurrentIndex(index)
+
+    def _character_tab_changed(self, index: int) -> None:
+        if 0 <= index < len(getattr(self, "character_tab_buttons", [])):
+            self.character_tab_buttons[index].setChecked(True)
+        if not getattr(self, "character_id", None):
+            return
+        # These panels are comparatively expensive and invisible most of the
+        # time. Refresh only the one the author actually opens.
+        if index == getattr(self, "character_connections_tab_index", -1):
+            self._refresh_character_connections()
+        elif index == getattr(self, "character_template_tab_index", -1):
+            self._load_record_template_values("character", self.character_id)
+        elif index == getattr(self, "character_custom_tab_index", -1):
+            self._load_character_custom_fields()
+
+    def _sync_character_roster_selection(self) -> None:
+        if not hasattr(self, "character_list") or not self.character_id:
+            return
+        current = self.character_list.currentItem()
+        if current and int(current.data(Qt.ItemDataRole.UserRole)) == self.character_id:
+            return
+        self.character_list.blockSignals(True)
+        for index in range(self.character_list.count()):
+            item = self.character_list.item(index)
+            if int(item.data(Qt.ItemDataRole.UserRole)) == self.character_id:
+                self.character_list.setCurrentItem(item)
+                break
+        self.character_list.blockSignals(False)
+
+    def _refresh_character_list(self, _value=None) -> None:
+        if not hasattr(self, "character_list"):
+            return
+        query = self.character_list_search.text().strip().casefold()
+        selected_role = self.character_list_role_filter.currentData() or ""
+        selected_tag = int(self.character_list_tag_filter.currentData() or 0)
+        tagged_ids = {
+            int(row["entity_id"])
+            for row in self.db.q(
+                """SELECT entity_id FROM entity_tags
+                WHERE tag_id=? AND target_type='character'""",
+                (selected_tag,),
+            )
+        } if selected_tag else set()
+        rows = self.db.q(
+            """SELECT character.id,character.name,character.role,
+            GROUP_CONCAT(group_row.name, ' · ') group_names
+            FROM characters character
+            LEFT JOIN character_group_members member ON member.character_id=character.id
+            LEFT JOIN character_groups group_row ON group_row.id=member.group_id
+            WHERE character.project_id=? GROUP BY character.id
+            ORDER BY character.name COLLATE NOCASE,character.id""",
+            (self.active_project,),
+        )
+        self.character_list.blockSignals(True)
+        self.character_list.clear()
+        selected_item = None
+        for row in rows:
+            group_names = row["group_names"] or ""
+            haystack = f"{row['name']} {row['role']} {group_names}".casefold()
+            if query and query not in haystack:
+                continue
+            if selected_role and row["role"] != selected_role:
+                continue
+            if selected_tag and int(row["id"]) not in tagged_ids:
+                continue
+            secondary = row["role"] or "Rôle à préciser"
+            if group_names:
+                secondary += f" · {group_names}"
+            item = QListWidgetItem(f"{row['name'] or 'Personnage sans nom'}\n{secondary}")
+            item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+            item.setToolTip(f"{row['name'] or 'Personnage sans nom'}\n{secondary}")
+            item.setSizeHint(QSize(0, 72))
+            self.character_list.addItem(item)
+            if int(row["id"]) == self.character_id:
+                selected_item = item
+        if selected_item:
+            self.character_list.setCurrentItem(selected_item)
+        self.character_list.blockSignals(False)
+
+    def _refresh_characters(self, select_first: bool = False) -> None:
+        selected_id = self.character_id
+        rows = self.db.q(
+            "SELECT id,name,role FROM characters WHERE project_id=? ORDER BY name COLLATE NOCASE,id",
+            (self.active_project,),
+        )
+        self.character_selector.blockSignals(True)
+        self.character_selector.clear()
+        for row in rows:
+            self.character_selector.addItem(
+                f"{row['name'] or 'Personnage sans nom'}  ·  {row['role'] or 'Rôle à préciser'}",
+                int(row["id"]),
+            )
+        index = self.character_selector.findData(selected_id)
+        if index < 0 and rows and select_first:
+            index = 0
+        self.character_selector.setCurrentIndex(index)
+        self.character_selector.setEnabled(bool(rows))
+        self.character_selector.blockSignals(False)
+        count = len(rows)
+        self.character_count.setText(str(count))
+        self.character_count.setToolTip(f"{count} personnage{'s' if count != 1 else ''}")
+        if hasattr(self, "character_library_button"):
+            self.character_library_button.setText(f"Bibliothèque · {count}")
+        selected_role = self.character_list_role_filter.currentData() or ""
+        roles = sorted({row["role"] for row in rows if row["role"]}, key=str.casefold)
+        self.character_list_role_filter.blockSignals(True)
+        self.character_list_role_filter.clear()
+        self.character_list_role_filter.addItem("Tous les rôles", "")
+        for role in roles:
+            self.character_list_role_filter.addItem(role, role)
+        role_index = self.character_list_role_filter.findData(selected_role)
+        self.character_list_role_filter.setCurrentIndex(max(0, role_index))
+        self.character_list_role_filter.blockSignals(False)
+        if index >= 0:
+            self._load_character()
+        elif not rows:
+            self._new_character()
+        self._refresh_character_list()
+
+    def _new_character(self) -> None:
+        if self.character_id:
+            self.character_cancel_id = self.character_id
+        self.character_id = None
+        self.character_selector.blockSignals(True)
+        self.character_selector.setCurrentIndex(-1)
+        self.character_selector.blockSignals(False)
+        self.character_list.clearSelection()
+        for field in self.character_fields.values():
+            set_field_value(field, "")
+        self.character_portrait_name = ""
+        self.character_portrait_mime = ""
+        self.character_portrait_data = b""
+        self.character_gender.setCurrentIndex(0)
+        self.character_tags.clear()
+        self.character_group_membership.clearSelection()
+        self.character_reference_list.clear()
+        self.character_reference_count.setText("0 IMAGE")
+        self.character_custom_table.setRowCount(0)
+        self._load_record_template_values("character", 0)
+        self._clear_character_connections()
+        self._render_character_portrait()
+        self._update_character_summary()
+        self.character_tabs.setCurrentIndex(0)
+        self.character_delete_button.setEnabled(False)
+        self.character_fields["name"].setFocus()
+
+    def _load_character(self, _index: int = -1) -> None:
+        selected_id = self.character_selector.currentData()
+        if not selected_id:
+            return
+        self.character_id = int(selected_id)
+        self.character_cancel_id = self.character_id
+        self.db.set_setting(f"last_character_{self.active_project}", self.character_id)
+        row = self.db.one("SELECT * FROM characters WHERE id=?", (self.character_id,))
+        if row:
+            for key, field in self.character_fields.items():
+                if key == "role" and isinstance(field, QComboBox):
+                    role = row[key] or ""
+                    if role and field.findText(role) < 0:
+                        field.addItem(role, role)
+                    field.setCurrentIndex(max(0, field.findText(role)))
+                else:
+                    set_field_value(field, row[key])
+            gender_index = self.character_gender.findData(row["gender"] or "unspecified")
+            self.character_gender.blockSignals(True)
+            self.character_gender.setCurrentIndex(max(0, gender_index))
+            self.character_gender.blockSignals(False)
+            self.character_portrait_name = row["portrait_name"] or ""
+            self.character_portrait_mime = row["portrait_mime"] or ""
+            self.character_portrait_data = bytes(row["portrait_data"]) if row["portrait_data"] else b""
+            self._render_character_portrait()
+            self.character_tags.setText(
+                self._entity_tag_text("character", self.character_id)
+            )
+            self._update_character_summary()
+            self._load_character_group_memberships()
+            self._refresh_character_references()
+            self._character_tab_changed(self.character_tabs.currentIndex())
+            self._sync_character_roster_selection()
+            self.character_delete_button.setEnabled(True)
+
+    def _save_character(self) -> None:
+        if not self.active_project:
+            return
+        values = {key: field_value(field) for key, field in self.character_fields.items()}
+        values["role"] = self.character_fields["role"].currentData() or ""
+        values["name"] = values["name"] or "Personnage sans nom"
+        keys = [
+            "name", "role", "story_function", "desire", "conflict", "arc", "notes",
+            "age", "occupation", "description", "appearance", "personality", "objective", "need",
+            "fear", "weakness", "wound", "values_note", "beliefs", "contradictions", "secrets",
+            "backstory", "start_situation", "end_situation", "speaking_style",
+        ]
+        gender = self.character_gender.currentData() or "unspecified"
+        if self.character_id:
+            self.db.run(
+                f"UPDATE characters SET {','.join(f'{key}=?' for key in keys)},"
+                "gender=?,portrait_name=?,portrait_mime=?,portrait_data=?,updated_at=? WHERE id=?",
+                [values[key] for key in keys]
+                + [
+                    gender,
+                    self.character_portrait_name,
+                    self.character_portrait_mime,
+                    self.character_portrait_data or None,
+                    NOW(),
+                    self.character_id,
+                ],
+            )
+        else:
+            insert_keys = keys + ["gender", "portrait_name", "portrait_mime", "portrait_data"]
+            insert_values = [values[key] for key in keys] + [
+                gender,
+                self.character_portrait_name,
+                self.character_portrait_mime,
+                self.character_portrait_data or None,
+            ]
+            self.character_id = self.db.run(
+                f"INSERT INTO characters(project_id,{','.join(insert_keys)},created_at,updated_at) "
+                f"VALUES({','.join('?' * (len(insert_keys) + 3))})",
+                [self.active_project] + insert_values + [NOW(), NOW()],
+            ).lastrowid
+        self.character_cancel_id = self.character_id
+        self._save_entity_tag_text(
+            "character", self.character_id, self.character_tags.text()
+        )
+        self._save_character_group_memberships()
+        self._save_character_custom_fields()
+        self._save_record_template_values(
+            target_type="character", entity_id=self.character_id, silent=True
+        )
+        self._refresh_characters()
+        self.save_state.setText("Personnage enregistré")
+        QTimer.singleShot(2200, lambda: self.save_state.setText(""))
+
+    def _cancel_character_edits(self) -> None:
+        """Restore saved values, or leave a new draft and return to its previous fiche."""
+
+        target_id = self.character_id or self.character_cancel_id
+        if target_id and self.db.one(
+            "SELECT 1 FROM characters WHERE id=? AND project_id=?",
+            (target_id, self.active_project),
+        ):
+            index = self.character_selector.findData(int(target_id))
+            if index >= 0:
+                if index == self.character_selector.currentIndex():
+                    self._load_character()
+                else:
+                    self.character_selector.setCurrentIndex(index)
+            return
+        self._new_character()
+
+    def _delete_character(self) -> None:
+        if not self.character_id:
+            return
+        if QMessageBox.question(self, "Supprimer le personnage", "Supprimer cette fiche ?") != QMessageBox.StandardButton.Yes:
+            return
+        self._delete_entity_tag_links("character", self.character_id)
+        self.db.run("DELETE FROM characters WHERE id=?", (self.character_id,))
+        self.character_id = None
+        self._refresh_characters(select_first=True)
+
+    def _previous_character(self) -> None:
+        count = self.character_selector.count()
+        if count:
+            self.character_selector.setCurrentIndex((self.character_selector.currentIndex() - 1) % count)
+
+    def _next_character(self) -> None:
+        count = self.character_selector.count()
+        if count:
+            self.character_selector.setCurrentIndex((self.character_selector.currentIndex() + 1) % count)
+
+    def _refresh_character_group_choices(self) -> None:
+        if not hasattr(self, "character_group_membership"):
+            return
+        selected_ids = {
+            int(item.data(Qt.ItemDataRole.UserRole))
+            for item in self.character_group_membership.selectedItems()
+        }
+        self.character_group_membership.clear()
+        for row in self.db.q(
+            "SELECT id,name,group_type FROM character_groups WHERE project_id=? ORDER BY name COLLATE NOCASE,id",
+            (self.active_project,),
+        ):
+            item = QListWidgetItem(f"{row['name'] or 'Groupe sans nom'} · {row['group_type']}")
+            item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+            self.character_group_membership.addItem(item)
+            item.setSelected(int(row["id"]) in selected_ids)
+
+    def _load_character_group_memberships(self) -> None:
+        self._refresh_character_group_choices()
+        if not self.character_id:
+            return
+        memberships = {
+            int(row["group_id"])
+            for row in self.db.q(
+                "SELECT group_id FROM character_group_members WHERE character_id=?",
+                (self.character_id,),
+            )
+        }
+        for index in range(self.character_group_membership.count()):
+            item = self.character_group_membership.item(index)
+            item.setSelected(int(item.data(Qt.ItemDataRole.UserRole)) in memberships)
+
+    def _save_character_group_memberships(self) -> None:
+        if not self.character_id:
+            return
+        with self.db.conn:
+            self.db.conn.execute("DELETE FROM character_group_members WHERE character_id=?", (self.character_id,))
+            for item in self.character_group_membership.selectedItems():
+                self.db.conn.execute(
+                    """INSERT OR IGNORE INTO character_group_members(group_id,character_id,role_in_group)
+                    VALUES(?,?,?)""",
+                    (int(item.data(Qt.ItemDataRole.UserRole)), self.character_id, ""),
+                )
+
+    def _manage_character_groups(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Groupes et factions")
+        dialog.resize(760, 520)
+        root = QVBoxLayout(dialog)
+        root.setContentsMargins(22, 20, 22, 20)
+        root.setSpacing(10)
+        root.addWidget(make_label("ORGANISATION DU CASTING", "Caption"))
+        root.addWidget(make_label("Groupes et factions", "SectionTitle"))
+        content = QHBoxLayout()
+        groups = QListWidget()
+        groups.setMinimumWidth(250)
+        content.addWidget(groups, 2)
+        form = QVBoxLayout()
+        form.addWidget(make_label("NOM", "Caption"))
+        name = QLineEdit()
+        name.setPlaceholderText("Famille Morel, garde municipale…")
+        form.addWidget(name)
+        form.addWidget(make_label("TYPE", "Caption"))
+        group_type = QComboBox()
+        group_type.setEditable(True)
+        group_type.addItems(CHARACTER_GROUP_TYPES)
+        form.addWidget(group_type)
+        form.addWidget(make_label("DESCRIPTION", "Caption"))
+        description = make_editor(120, "Ce qui rassemble ces personnages et ce que le groupe cherche à obtenir.")
+        form.addWidget(description)
+        form.addStretch()
+        content.addLayout(form, 3)
+        root.addLayout(content, 1)
+        selected_group_id: int | None = None
+
+        def refresh_groups() -> None:
+            groups.clear()
+            selected_item = None
+            for row in self.db.q(
+                """SELECT group_row.*,COUNT(member.character_id) member_count
+                FROM character_groups group_row
+                LEFT JOIN character_group_members member ON member.group_id=group_row.id
+                WHERE group_row.project_id=? GROUP BY group_row.id
+                ORDER BY group_row.name COLLATE NOCASE,group_row.id""",
+                (self.active_project,),
+            ):
+                item = QListWidgetItem(
+                    f"{row['name'] or 'Groupe sans nom'}\n{row['group_type']} · {row['member_count']} membre(s)"
+                )
+                item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+                groups.addItem(item)
+                if int(row["id"]) == selected_group_id:
+                    selected_item = item
+            if selected_item:
+                groups.setCurrentItem(selected_item)
+
+        def load_group() -> None:
+            nonlocal selected_group_id
+            selected = groups.currentItem()
+            if not selected:
+                return
+            selected_group_id = int(selected.data(Qt.ItemDataRole.UserRole))
+            row = self.db.one("SELECT * FROM character_groups WHERE id=?", (selected_group_id,))
+            if row:
+                name.setText(row["name"])
+                group_type.setCurrentText(row["group_type"])
+                description.setPlainText(row["description"])
+
+        def new_group() -> None:
+            nonlocal selected_group_id
+            selected_group_id = None
+            groups.clearSelection()
+            name.clear()
+            group_type.setCurrentText("Famille")
+            description.clear()
+            name.setFocus()
+
+        def save_group() -> None:
+            nonlocal selected_group_id
+            values = (
+                name.text().strip() or "Groupe sans nom",
+                group_type.currentText().strip() or "Groupe",
+                description.toPlainText().strip(),
+            )
+            if selected_group_id:
+                self.db.run(
+                    """UPDATE character_groups SET name=?,group_type=?,description=?,updated_at=? WHERE id=?""",
+                    (*values, NOW(), selected_group_id),
+                )
+            else:
+                selected_group_id = self.db.run(
+                    """INSERT INTO character_groups(
+                    project_id,name,group_type,description,color,created_at,updated_at
+                    ) VALUES(?,?,?,?,?,?,?)""",
+                    (self.active_project, *values, "", NOW(), NOW()),
+                ).lastrowid
+            refresh_groups()
+
+        def delete_group() -> None:
+            nonlocal selected_group_id
+            if not selected_group_id:
+                return
+            if QMessageBox.question(
+                dialog,
+                "Supprimer le groupe",
+                "Supprimer ce groupe ? Les personnages eux-mêmes seront conservés.",
+            ) != QMessageBox.StandardButton.Yes:
+                return
+            self.db.run("DELETE FROM character_groups WHERE id=?", (selected_group_id,))
+            selected_group_id = None
+            new_group()
+            refresh_groups()
+
+        groups.itemSelectionChanged.connect(load_group)
+        refresh_groups()
+        buttons = QHBoxLayout()
+        buttons.addWidget(make_button("Nouveau groupe", "secondary", new_group))
+        buttons.addWidget(make_button("Enregistrer", "primary", save_group))
+        buttons.addWidget(make_button("Supprimer", "danger", delete_group))
+        buttons.addStretch()
+        buttons.addWidget(make_button("Fermer", "secondary", dialog.accept))
+        root.addLayout(buttons)
+        dialog.exec()
+        self._refresh_character_group_choices()
+        self._load_character_group_memberships()
+
+    def _add_character_references(self) -> None:
+        if not self.character_id:
+            QMessageBox.information(self, "Moodboard", "Enregistre d’abord le personnage avant d’ajouter des références.")
+            return
+        paths, _selected = QFileDialog.getOpenFileNames(
+            self,
+            "Ajouter des références visuelles",
+            "",
+            "Images (*.png *.jpg *.jpeg *.webp *.bmp)",
+        )
+        for path in paths:
+            source = Path(path)
+            try:
+                data = source.read_bytes()
+            except OSError:
+                continue
+            pixmap = QPixmap()
+            if len(data) > IDEA_ATTACHMENT_LIMIT or not pixmap.loadFromData(data):
+                continue
+            self.db.run(
+                """INSERT INTO character_references(
+                project_id,character_id,title,category,notes,file_name,mime_type,image_data,created_at,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    self.active_project,
+                    self.character_id,
+                    source.stem,
+                    "Référence",
+                    "",
+                    source.name,
+                    mimetypes.guess_type(source.name)[0] or "image/png",
+                    data,
+                    NOW(),
+                    NOW(),
+                ),
+            )
+        self._refresh_character_references()
+
+    def _refresh_character_references(self) -> None:
+        self.character_reference_list.clear()
+        if not self.character_id:
+            self.character_reference_count.setText("0 IMAGE")
+            self.character_remove_reference_button.setEnabled(False)
+            return
+        rows = self.db.q(
+            "SELECT id,title,file_name,image_data FROM character_references WHERE character_id=? ORDER BY id",
+            (self.character_id,),
+        )
+        for row in rows:
+            item = QListWidgetItem(row["title"] or row["file_name"] or "Référence")
+            reference_id = int(row["id"])
+            item.setData(Qt.ItemDataRole.UserRole, reference_id)
+            icon = self._character_reference_icon_cache.get(reference_id)
+            if icon is None:
+                icon = QIcon(
+                    self._character_portrait_pixmap(
+                        bytes(row["image_data"]), QSize(64, 58)
+                    )
+                )
+                self._character_reference_icon_cache[reference_id] = icon
+            item.setIcon(icon)
+            item.setToolTip(
+                f"{row['title'] or row['file_name']}\nDouble-clique pour utiliser comme portrait."
+            )
+            self.character_reference_list.addItem(item)
+        count = len(rows)
+        self.character_reference_count.setText(f"{count} IMAGE{'S' if count != 1 else ''}")
+        if count:
+            self.character_reference_list.setCurrentRow(0)
+        self.character_remove_reference_button.setEnabled(bool(count))
+
+    def _use_character_reference_as_portrait(self, item: QListWidgetItem) -> None:
+        row = self.db.one(
+            "SELECT file_name,mime_type,image_data FROM character_references WHERE id=?",
+            (int(item.data(Qt.ItemDataRole.UserRole)),),
+        )
+        if not row:
+            return
+        self.character_portrait_name = row["file_name"]
+        self.character_portrait_mime = row["mime_type"]
+        self.character_portrait_data = bytes(row["image_data"])
+        self._character_portrait_cache.pop(int(self.character_id or 0), None)
+        self._render_character_portrait()
+
+    def _delete_character_reference(self) -> None:
+        selected = self.character_reference_list.currentItem()
+        if not selected:
+            return
+        if QMessageBox.question(
+            self,
+            "Retirer la référence",
+            "Retirer cette image du moodboard du personnage ?",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        self.db.run(
+            "DELETE FROM character_references WHERE id=?",
+            (int(selected.data(Qt.ItemDataRole.UserRole)),),
+        )
+        self._refresh_character_references()
+
+    def _add_character_custom_field_row(self, label: str | bool = "", value: str = "") -> None:
+        if isinstance(label, bool):
+            label = ""
+        row = self.character_custom_table.rowCount()
+        self.character_custom_table.insertRow(row)
+        self.character_custom_table.setItem(row, 0, QTableWidgetItem(label))
+        self.character_custom_table.setItem(row, 1, QTableWidgetItem(value))
+        self.character_custom_table.setCurrentCell(row, 0)
+
+    def _remove_character_custom_field_row(self) -> None:
+        row = self.character_custom_table.currentRow()
+        if row >= 0:
+            self.character_custom_table.removeRow(row)
+
+    def _load_character_custom_fields(self) -> None:
+        self.character_custom_table.setRowCount(0)
+        if not self.character_id:
+            return
+        for row in self.db.q(
+            "SELECT label,value FROM character_custom_fields WHERE character_id=? ORDER BY position,id",
+            (self.character_id,),
+        ):
+            self._add_character_custom_field_row(row["label"], row["value"])
+
+    def _save_character_custom_fields(self) -> None:
+        if not self.character_id:
+            return
+        with self.db.conn:
+            self.db.conn.execute("DELETE FROM character_custom_fields WHERE character_id=?", (self.character_id,))
+            for position in range(self.character_custom_table.rowCount()):
+                label_item = self.character_custom_table.item(position, 0)
+                value_item = self.character_custom_table.item(position, 1)
+                label = label_item.text().strip() if label_item else ""
+                value = value_item.text().strip() if value_item else ""
+                if label or value:
+                    self.db.conn.execute(
+                        """INSERT INTO character_custom_fields(character_id,label,value,position)
+                        VALUES(?,?,?,?)""",
+                        (self.character_id, label or "Champ", value, position),
+                    )
+
+    def _clear_character_connections(self) -> None:
+        for widget in (
+            self.character_scene_connections,
+            self.character_map_connections,
+            self.character_timeline_connections,
+        ):
+            widget.clear()
+            item = QListWidgetItem("Aucune connexion pour le moment")
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+            widget.addItem(item)
+
+    def _refresh_character_connections(self) -> None:
+        self._clear_character_connections()
+        if not self.character_id:
+            return
+
+        def fill(widget: QListWidget, rows, formatter) -> None:
+            widget.clear()
+            if not rows:
+                item = QListWidgetItem("Aucune connexion pour le moment")
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+                widget.addItem(item)
+                return
+            for row in rows:
+                widget.addItem(formatter(row))
+
+        scenes = self.db.q(
+            """SELECT scene.position,scene.title,scene.duration FROM scene_rows scene
+            JOIN scene_characters link ON link.scene_id=scene.id
+            WHERE link.character_id=? ORDER BY scene.position,scene.id""",
+            (self.character_id,),
+        )
+        fill(
+            self.character_scene_connections,
+            scenes,
+            lambda row: f"Scène {int(row['position']) + 1:02d} · {row['title'] or 'Sans titre'} · {float(row['duration']):g} min",
+        )
+        cards = self.db.q(
+            """SELECT node.title,node.kind FROM story_map_nodes node
+            JOIN story_map_node_characters link ON link.node_id=node.id
+            WHERE link.character_id=? ORDER BY node.id""",
+            (self.character_id,),
+        )
+        fill(
+            self.character_map_connections,
+            cards,
+            lambda row: f"{dict(STORY_CARD_KINDS).get(row['kind'], 'Carte')} · {row['title'] or 'Carte sans titre'}",
+        )
+        events = self.db.q(
+            """SELECT event.title,event.display_label,event.time_hours,event.category FROM timeline_events event
+            JOIN timeline_event_characters link ON link.event_id=event.id
+            WHERE link.character_id=? ORDER BY event.time_hours,event.id""",
+            (self.character_id,),
+        )
+        unit_key = self.db.setting(f"timeline_unit_{self.active_project}", "day")
+        factor = TIMELINE_UNITS.get(unit_key, TIMELINE_UNITS["day"])[1]
+        fill(
+            self.character_timeline_connections,
+            events,
+            lambda row: (
+                f"{TimelineView.relative_label(float(row['time_hours']) / factor, unit_key, row['display_label'])}"
+                f" · {row['title'] or 'Événement sans titre'} · {row['category']}"
+            ),
+        )
+
+    def _choose_character_portrait(self) -> None:
+        path, _selected = QFileDialog.getOpenFileName(
+            self,
+            "Choisir une image du personnage",
+            "",
+            "Images (*.png *.jpg *.jpeg *.webp *.bmp)",
+        )
+        if not path:
+            return
+        source = Path(path)
+        try:
+            data = source.read_bytes()
+        except OSError as exc:
+            QMessageBox.warning(self, "Image inaccessible", str(exc))
+            return
+        if len(data) > IDEA_ATTACHMENT_LIMIT:
+            QMessageBox.warning(self, "Image trop lourde", "Choisis une image de moins de 25 Mo.")
+            return
+        pixmap = QPixmap()
+        if not pixmap.loadFromData(data):
+            QMessageBox.warning(self, "Image illisible", "StoryForge ne reconnaît pas ce fichier comme une image.")
+            return
+        self.character_portrait_name = source.name
+        self.character_portrait_mime = mimetypes.guess_type(source.name)[0] or "image/png"
+        self.character_portrait_data = data
+        self._character_portrait_cache.pop(int(self.character_id or 0), None)
+        self._render_character_portrait()
+
+    def _remove_character_portrait(self) -> None:
+        self.character_portrait_name = ""
+        self.character_portrait_mime = ""
+        self.character_portrait_data = b""
+        self._character_portrait_cache.pop(int(self.character_id or 0), None)
+        self._render_character_portrait()
+
+    def _character_default_pixmap(self, size: QSize | None = None) -> QPixmap:
+        size = size or QSize(360, 420)
+        pixmap = QPixmap(size)
+        pixmap.fill(QColor(self.palette.surface_raised))
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(self.palette.border))
+        painter.drawEllipse(QRectF(size.width() * .14, size.height() * .14, size.width() * .72, size.width() * .72))
+        painter.setBrush(QColor(self.palette.muted))
+        center_x = size.width() / 2
+        painter.drawEllipse(QRectF(center_x - 37, 70, 74, 74))
+        body = QPainterPath()
+        gender = (
+            self.character_gender.currentData()
+            if isinstance(getattr(self, "character_gender", None), QComboBox)
+            else "unspecified"
+        )
+        if gender == "male":
+            body.moveTo(center_x - 62, 160)
+            body.quadTo(center_x, 139, center_x + 62, 160)
+            body.lineTo(center_x + 50, 300)
+            body.lineTo(center_x + 25, 300)
+        else:
+            body.moveTo(center_x - 46, 160)
+            body.quadTo(center_x, 139, center_x + 46, 160)
+            body.lineTo(center_x + 62, 306)
+            body.lineTo(center_x + 30, 306)
+        body.lineTo(center_x + 23, 386)
+        body.lineTo(center_x + 2, 386)
+        body.lineTo(center_x, 309)
+        body.lineTo(center_x - 2, 309)
+        body.lineTo(center_x - 23, 386)
+        body.lineTo(center_x - 25, 386)
+        if gender == "male":
+            body.lineTo(center_x - 25, 300)
+            body.lineTo(center_x - 50, 300)
+        else:
+            body.lineTo(center_x - 44, 386)
+            body.lineTo(center_x - 35, 306)
+            body.lineTo(center_x - 62, 306)
+        body.closeSubpath()
+        painter.drawPath(body)
+        painter.setBrush(QColor(self.palette.border_strong))
+        painter.drawEllipse(QRectF(center_x - 82, 393, 164, 12))
+        painter.end()
+        return pixmap
+
+    def _character_portrait_pixmap(self, data: bytes | None = None, size: QSize | None = None) -> QPixmap:
+        size = size or QSize(360, 420)
+        pixmap = QPixmap()
+        source = data if data is not None else self.character_portrait_data
+        if source and pixmap.loadFromData(source):
+            return pixmap.scaled(size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        return self._character_default_pixmap().scaled(
+            size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+
+    def _render_character_portrait(self) -> None:
+        if not hasattr(self, "character_portrait_preview"):
+            return
+        character_id = int(getattr(self, "character_id", 0) or 0)
+        pixmap = (
+            self._character_portrait_cache.get(character_id)
+            if character_id and self.character_portrait_data
+            else None
+        )
+        if pixmap is None:
+            pixmap = self._character_portrait_pixmap()
+            if character_id and self.character_portrait_data:
+                self._character_portrait_cache[character_id] = pixmap
+        self.character_portrait_preview.set_source_pixmap(pixmap)
+        self.character_portrait_preview.setToolTip(self.character_portrait_name or "Silhouette provisoire")
+        if hasattr(self, "character_remove_portrait_button"):
+            self.character_remove_portrait_button.setEnabled(bool(self.character_portrait_data))
+
+    def _update_character_summary(self) -> None:
+        if not hasattr(self, "character_summary_name"):
+            return
+        name = field_value(self.character_fields["name"]) if self.character_fields else ""
+        role = field_value(self.character_fields["role"]) if self.character_fields else ""
+        self.character_summary_name.setText(name or "Nouveau personnage")
+        self.character_summary_role.setText(role or "Rôle à préciser")
+
+    def _open_character_library(self) -> None:
+        rows = [dict(row) for row in self.db.q(
+            """SELECT character.id,character.name,character.role,character.portrait_data,
+            GROUP_CONCAT(group_row.id) group_ids,GROUP_CONCAT(group_row.name, ' · ') group_names
+            FROM characters character
+            LEFT JOIN character_group_members member ON member.character_id=character.id
+            LEFT JOIN character_groups group_row ON group_row.id=member.group_id
+            WHERE character.project_id=? GROUP BY character.id
+            ORDER BY character.name COLLATE NOCASE,character.id""",
+            (self.active_project,),
+        )]
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Bibliothèque de personnages")
+        dialog.resize(780, 560)
+        box = QVBoxLayout(dialog)
+        box.setContentsMargins(22, 20, 22, 20)
+        box.setSpacing(10)
+        box.addWidget(make_label("CASTING DU PROJET", "Caption"))
+        box.addWidget(make_label(f"Bibliothèque · {len(rows)} personnages", "SectionTitle"))
+        filters = QHBoxLayout()
+        search = QLineEdit()
+        search.setPlaceholderText("Rechercher par nom ou rôle…")
+        role_filter = QComboBox()
+        role_filter.addItem("Tous les rôles", "")
+        for role in sorted({row["role"] for row in rows if row["role"]}, key=str.casefold):
+            role_filter.addItem(role, role)
+        group_filter = QComboBox()
+        group_filter.addItem("Tous les groupes", 0)
+        for group in self.db.q(
+            "SELECT id,name FROM character_groups WHERE project_id=? ORDER BY name COLLATE NOCASE,id",
+            (self.active_project,),
+        ):
+            group_filter.addItem(group["name"] or "Groupe sans nom", int(group["id"]))
+        filters.addWidget(search, 1)
+        filters.addWidget(role_filter)
+        filters.addWidget(group_filter)
+        box.addLayout(filters)
+        library = QListWidget()
+        library.setObjectName("CharacterLibrary")
+        library.setViewMode(QListView.ViewMode.IconMode)
+        library.setResizeMode(QListView.ResizeMode.Adjust)
+        library.setMovement(QListView.Movement.Static)
+        library.setGridSize(QSize(220, 88))
+        library.setIconSize(QSize(46, 52))
+        library.setSpacing(7)
+        library.setWordWrap(True)
+        box.addWidget(library, 1)
+
+        def refresh_library() -> None:
+            query = search.text().strip().casefold()
+            selected_role = role_filter.currentData() or ""
+            selected_group = int(group_filter.currentData() or 0)
+            library.clear()
+            for row in rows:
+                haystack = f"{row['name']} {row['role']} {row['group_names'] or ''}".casefold()
+                if query and query not in haystack:
+                    continue
+                if selected_role and row["role"] != selected_role:
+                    continue
+                group_ids = {
+                    int(group_id)
+                    for group_id in (row["group_ids"] or "").split(",")
+                    if group_id
+                }
+                if selected_group and selected_group not in group_ids:
+                    continue
+                item = QListWidgetItem(
+                    f"{row['name'] or 'Sans nom'} · {row['role'] or 'Rôle à préciser'}"
+                )
+                item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+                item.setSizeHint(QSize(210, 78))
+                tooltip = f"{row['name'] or 'Sans nom'}\n{row['role'] or 'Rôle à préciser'}"
+                if row["group_names"]:
+                    tooltip += f"\n{row['group_names']}"
+                item.setToolTip(tooltip)
+                portrait_data = bytes(row["portrait_data"]) if row["portrait_data"] else None
+                item.setIcon(QIcon(self._character_portrait_pixmap(portrait_data, QSize(46, 52))))
+                library.addItem(item)
+                if int(row["id"]) == self.character_id:
+                    library.setCurrentItem(item)
+
+        search.textChanged.connect(refresh_library)
+        role_filter.currentIndexChanged.connect(refresh_library)
+        group_filter.currentIndexChanged.connect(refresh_library)
+        library.itemDoubleClicked.connect(lambda _item: dialog.accept())
+        refresh_library()
+        actions = QHBoxLayout()
+        actions.addWidget(make_button("+ Nouveau personnage", "secondary", lambda: (dialog.reject(), self._new_character())))
+        actions.addStretch()
+        actions.addWidget(make_button("Fermer", "secondary", dialog.reject))
+        actions.addWidget(make_button("Ouvrir la fiche", "primary", dialog.accept))
+        box.addLayout(actions)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        selected = library.currentItem()
+        if selected:
+            index = self.character_selector.findData(int(selected.data(Qt.ItemDataRole.UserRole)))
+            if index >= 0:
+                self.character_selector.setCurrentIndex(index)
+
+    def _edit_character_relationships(self) -> None:
+        if not self.character_id:
+            QMessageBox.information(self, "Relations", "Sélectionne ou enregistre d’abord un personnage.")
+            return
+        self._save_character()
+        character_count = self.db.one(
+            "SELECT COUNT(*) FROM characters WHERE project_id=?",
+            (self.active_project,),
+        )[0]
+        if character_count < 2:
+            QMessageBox.information(self, "Relations", "Ajoute au moins un autre personnage au projet.")
+            return
+        dialog = RelationshipMapDialog(
+            self,
+            self.db,
+            self.active_project,
+            self.palette,
+            self.character_id,
+        )
+        self.relationship_map_dialog = dialog
+        dialog.exec()
+
+    def _edit_character_relationships_legacy(self) -> None:
+        if not self.character_id:
+            QMessageBox.information(self, "Relations", "Sélectionne ou enregistre d’abord un personnage.")
+            return
+        self._save_character()
+        others = self.db.q(
+            "SELECT id,name FROM characters WHERE project_id=? AND id<>? ORDER BY name,id",
+            (self.active_project, self.character_id),
+        )
+        if not others:
+            QMessageBox.information(self, "Relations", "Ajoute au moins un autre personnage au projet.")
+            return
+        current_name = self.db.one("SELECT name FROM characters WHERE id=?", (self.character_id,))["name"]
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Relations de {current_name}")
+        dialog.resize(680, 520)
+        box = QVBoxLayout(dialog)
+        box.setContentsMargins(22, 20, 22, 20)
+        box.setSpacing(8)
+        box.addWidget(make_label("PERSONNAGES CONNECTÉS", "Caption"))
+        box.addWidget(make_label(f"Relations de {current_name}", "SectionTitle"))
+        relation_list = QListWidget()
+        relation_list.setMaximumHeight(145)
+        box.addWidget(relation_list)
+        form = QGridLayout()
+        form.setHorizontalSpacing(10)
+        form.setVerticalSpacing(7)
+        other = QComboBox()
+        for character in others:
+            other.addItem(character["name"] or "Personnage sans nom", int(character["id"]))
+        relation_type = QComboBox()
+        relation_type.addItems(["Famille", "Amitié", "Amour", "Rivalité", "Autorité", "Alliance", "Autre"])
+        description = make_editor(76, "Comment cette relation fonctionne-t-elle concrètement ?")
+        tension = make_editor(64, "Que veut chacun de l’autre ? Qu’est-ce qui résiste ?")
+        form.addWidget(make_label("AUTRE PERSONNAGE", "Caption"), 0, 0)
+        form.addWidget(make_label("TYPE", "Caption"), 0, 1)
+        form.addWidget(other, 1, 0)
+        form.addWidget(relation_type, 1, 1)
+        form.addWidget(make_label("RELATION", "Caption"), 2, 0, 1, 2)
+        form.addWidget(description, 3, 0, 1, 2)
+        form.addWidget(make_label("TENSION / DÉSÉQUILIBRE", "Caption"), 4, 0, 1, 2)
+        form.addWidget(tension, 5, 0, 1, 2)
+        box.addLayout(form)
+        selected_relation_id: int | None = None
+
+        def refresh_relations() -> None:
+            nonlocal selected_relation_id
+            relation_list.clear()
+            rows = self.db.q(
+                """SELECT relation.*,a.name name_a,b.name name_b
+                FROM character_relationships relation
+                JOIN characters a ON a.id=relation.character_a_id
+                JOIN characters b ON b.id=relation.character_b_id
+                WHERE relation.project_id=? AND (relation.character_a_id=? OR relation.character_b_id=?)
+                ORDER BY relation.id DESC""",
+                (self.active_project, self.character_id, self.character_id),
+            )
+            selected_item = None
+            for row in rows:
+                other_name = row["name_b"] if int(row["character_a_id"]) == self.character_id else row["name_a"]
+                item = QListWidgetItem(f"{other_name} · {row['relationship_type']}")
+                item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+                relation_list.addItem(item)
+                if int(row["id"]) == selected_relation_id:
+                    selected_item = item
+            if selected_item:
+                relation_list.setCurrentItem(selected_item)
+
+        def load_relation() -> None:
+            nonlocal selected_relation_id
+            selected = relation_list.selectedItems()
+            if not selected:
+                return
+            selected_relation_id = int(selected[0].data(Qt.ItemDataRole.UserRole))
+            row = self.db.one("SELECT * FROM character_relationships WHERE id=?", (selected_relation_id,))
+            if not row:
+                return
+            other_id = int(row["character_b_id"]) if int(row["character_a_id"]) == self.character_id else int(row["character_a_id"])
+            other.setCurrentIndex(max(0, other.findData(other_id)))
+            relation_type.setCurrentText(row["relationship_type"])
+            description.setPlainText(row["description"])
+            tension.setPlainText(row["tension"])
+
+        def new_relation() -> None:
+            nonlocal selected_relation_id
+            selected_relation_id = None
+            relation_list.clearSelection()
+            other.setCurrentIndex(0)
+            relation_type.setCurrentText("Autre")
+            description.clear()
+            tension.clear()
+
+        def save_relation() -> None:
+            nonlocal selected_relation_id
+            other_id = int(other.currentData())
+            values = (
+                self.active_project, self.character_id, other_id, relation_type.currentText(),
+                description.toPlainText().strip(), tension.toPlainText().strip(),
+            )
+            if selected_relation_id:
+                self.db.run(
+                    """UPDATE character_relationships SET
+                    project_id=?,character_a_id=?,character_b_id=?,relationship_type=?,description=?,tension=?,updated_at=?
+                    WHERE id=?""",
+                    (*values, NOW(), selected_relation_id),
+                )
+            else:
+                selected_relation_id = self.db.run(
+                    """INSERT INTO character_relationships(
+                    project_id,character_a_id,character_b_id,relationship_type,description,tension,created_at,updated_at
+                    ) VALUES(?,?,?,?,?,?,?,?)""",
+                    (*values, NOW(), NOW()),
+                ).lastrowid
+            refresh_relations()
+
+        def delete_relation() -> None:
+            nonlocal selected_relation_id
+            if not selected_relation_id:
+                return
+            self.db.run("DELETE FROM character_relationships WHERE id=?", (selected_relation_id,))
+            selected_relation_id = None
+            new_relation()
+            refresh_relations()
+
+        relation_list.itemSelectionChanged.connect(load_relation)
+        refresh_relations()
+        buttons = QHBoxLayout()
+        buttons.addWidget(make_button("Nouvelle relation", "secondary", new_relation))
+        buttons.addWidget(make_button("Enregistrer la relation", "primary", save_relation))
+        buttons.addWidget(make_button("Supprimer", "danger", delete_relation))
+        buttons.addStretch()
+        buttons.addWidget(make_button("Fermer", "secondary", dialog.accept))
+        box.addLayout(buttons)
+        dialog.exec()
+
+    # ---------- Character arcs and transformations ----------
+
+    def show_arcs(self) -> None:
+        page = self._begin_page("Arcs", "arcs", compact=True)
+        if not self.active_project:
+            page.addWidget(make_label("Crée ou sélectionne d’abord un projet.", "Muted"))
+            page.addStretch()
+            return
+
+        stored_arc_character = int(
+            self.db.setting(f"last_arc_character_{self.active_project}", "0") or 0
+        )
+        stored_character_exists = bool(
+            stored_arc_character
+            and self.db.one(
+                "SELECT 1 FROM characters WHERE id=? AND project_id=?",
+                (stored_arc_character, self.active_project),
+            )
+        )
+        self.arc_character_id: int | None = (
+            stored_arc_character if stored_character_exists else None
+        )
+        if stored_arc_character and not stored_character_exists:
+            self.db.set_setting(f"last_arc_character_{self.active_project}", 0)
+        self.character_arc_id: int | None = None
+        self._arc_loading = False
+
+        body = QHBoxLayout()
+        body.setSpacing(12)
+        library = make_card()
+        library.setFixedWidth(270)
+        library_box = QVBoxLayout(library)
+        library_box.setContentsMargins(14, 14, 14, 14)
+        library_box.setSpacing(8)
+        library_head = QHBoxLayout()
+        library_head.addWidget(make_label("PERSONNAGES DU PROJET", "Caption"))
+        library_head.addStretch()
+        self.arc_character_count = make_label("0", "AccentPill")
+        library_head.addWidget(self.arc_character_count)
+        library_box.addLayout(library_head)
+        self.arc_search = QLineEdit()
+        self.arc_search.setPlaceholderText("Rechercher…")
+        self.arc_search.setClearButtonEnabled(True)
+        library_box.addWidget(self.arc_search)
+        self.arc_role_filter = QComboBox()
+        self.arc_role_filter.addItem("Tous les rôles", "")
+        library_box.addWidget(self.arc_role_filter)
+        self.arc_character_list = QListWidget()
+        self.arc_character_list.setObjectName("ArcCharacterList")
+        self.arc_character_list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.arc_character_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.arc_character_list.setWordWrap(True)
+        library_box.addWidget(self.arc_character_list, 1)
+        library_box.addWidget(make_button("Ouvrir la fiche Personnage", "secondary", self._open_arc_character))
+        body.addWidget(library)
+
+        workspace = make_card()
+        workspace_box = QVBoxLayout(workspace)
+        workspace_box.setContentsMargins(16, 14, 16, 14)
+        workspace_box.setSpacing(8)
+        heading = QHBoxLayout()
+        heading.addWidget(make_label("ARCS ET TRANSFORMATIONS", "Caption"))
+        heading.addStretch()
+        self.arc_diagnostic = make_label("0/6 REPÈRES", "AccentPill")
+        heading.addWidget(self.arc_diagnostic)
+        workspace_box.addLayout(heading)
+        self.arc_selected_name = make_label("Sélectionne un personnage", "SectionTitle")
+        workspace_box.addWidget(self.arc_selected_name)
+        workspace_box.addWidget(
+            make_label(
+                "Observe ce qui change sous la pression de l’histoire et quel choix rend cette évolution visible.",
+                "Muted",
+                True,
+            )
+        )
+        arc_sync_note = make_label(
+            "Début, transformation et fin restent synchronisés avec la fiche Personnage.",
+            "Muted",
+        )
+        arc_sync_note.setWordWrap(False)
+        workspace_box.addWidget(arc_sync_note)
+        self.arc_tabs = QTabWidget()
+        self.arc_tabs.setObjectName("ArcTabs")
+        self.arc_tabs.setDocumentMode(True)
+        self.arc_overview_table = self._build_arc_overview_tab()
+        self.arc_tabs.addTab(self.arc_overview_table, "Vue d’ensemble")
+        self.arc_tabs.addTab(self._build_arc_trajectory_tab(), "Trajectoire")
+        self.arc_tabs.addTab(self._build_arc_connections_tab(), "Connexions")
+        workspace_box.addWidget(self.arc_tabs, 1)
+        actions = QHBoxLayout()
+        actions.addWidget(make_button("Enregistrer l’arc", "primary", self._save_character_arc))
+        actions.addWidget(make_button("Ouvrir sa fiche", "secondary", self._open_arc_character))
+        actions.addStretch()
+        workspace_box.addLayout(actions)
+        body.addWidget(workspace, 1)
+        page.addLayout(body, 1)
+
+        self.arc_search.textChanged.connect(self._refresh_arc_characters)
+        self.arc_role_filter.currentIndexChanged.connect(self._refresh_arc_characters)
+        self.arc_character_list.currentItemChanged.connect(self._arc_character_selected)
+        self._refresh_arc_characters(select_first=True)
+
+    def _build_arc_overview_tab(self) -> QTableWidget:
+        table = QTableWidget(0, 6)
+        table.setObjectName("ArcOverview")
+        table.setHorizontalHeaderLabels(
+            ["Personnage", "Début", "Épreuve", "Choix", "Transformation", "Fin"]
+        )
+        table.verticalHeader().setVisible(False)
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.setWordWrap(True)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        for column in range(1, 6):
+            table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
+        table.cellClicked.connect(self._arc_overview_selected)
+        table.cellDoubleClicked.connect(self._arc_overview_open_trajectory)
+        return table
+
+    def _build_arc_trajectory_tab(self) -> QWidget:
+        tab = QWidget()
+        outer = QVBoxLayout(tab)
+        outer.setContentsMargins(0, 8, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        canvas = QWidget()
+        canvas.setObjectName("PanelCanvas")
+        grid = QGridLayout(canvas)
+        grid.setContentsMargins(4, 6, 10, 10)
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(7)
+        self.arc_fields: dict[str, QComboBox | QTextEdit] = {}
+
+        arc_type = QComboBox()
+        arc_type.addItems(CHARACTER_ARC_TYPES)
+        arc_type.setProperty("arcField", True)
+        self.arc_fields["arc_type"] = arc_type
+        grid.addWidget(make_label("TYPE D’ARC — REPÈRE FACULTATIF", "Caption"), 0, 0, 1, 2)
+        grid.addWidget(arc_type, 1, 0, 1, 2)
+
+        definitions = (
+            ("ÉTAT AU DÉBUT", "start_situation", "Qui est cette personne avant l’épreuve principale ?"),
+            ("CROYANCE DE DÉPART", "initial_belief", "Que tient-elle pour vrai au début ?"),
+            ("ÉPREUVE CENTRALE", "main_trial", "Quelle pression l’oblige à se révéler ou à évoluer ?"),
+            ("PRESSIONS SUCCESSIVES", "pressures", "Quelles difficultés rendent l’ancien fonctionnement intenable ?"),
+            ("POINT DE RUPTURE", "breaking_point", "Quand ne peut-elle plus continuer comme avant ?"),
+            ("CHOIX DÉCISIF", "decisive_choice", "Quel choix confirme, refuse ou détourne le changement ?"),
+            ("TRANSFORMATION", "transformation", "Qu’est-ce qui change réellement dans sa manière d’agir ?"),
+            ("PRIX PAYÉ", "cost", "Que perd-elle ou accepte-t-elle pour changer ?"),
+            ("ÉTAT À LA FIN", "end_situation", "Qui est-elle devenue, ou qu’a-t-elle refusé de devenir ?"),
+            ("PREUVE VISIBLE", "visible_proof", "Quel comportement permet au spectateur de constater le changement ?"),
+        )
+        row = 2
+        for index in range(0, len(definitions), 2):
+            for column, (label, key, placeholder) in enumerate(definitions[index:index + 2]):
+                grid.addWidget(make_label(label, "Caption"), row, column)
+                field = make_editor(88, placeholder)
+                field.setProperty("arcField", True)
+                field.setMinimumHeight(88)
+                field.setMaximumHeight(118)
+                self.arc_fields[key] = field
+                grid.addWidget(field, row + 1, column)
+            row += 2
+        grid.addWidget(make_label("NOTES", "Caption"), row, 0, 1, 2)
+        notes = make_editor(88, "Variantes, hésitations ou éléments à vérifier.")
+        notes.setProperty("arcField", True)
+        self.arc_fields["notes"] = notes
+        grid.addWidget(notes, row + 1, 0, 1, 2)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        grid.setRowStretch(row + 2, 1)
+        scroll.setWidget(canvas)
+        outer.addWidget(scroll, 1)
+        return tab
+
+    def _build_arc_connections_tab(self) -> QWidget:
+        tab = QWidget()
+        outer = QVBoxLayout(tab)
+        outer.setContentsMargins(0, 10, 0, 0)
+        outer.addWidget(
+            make_label(
+                "Relie seulement les moments qui mettent réellement cet arc sous pression ou rendent son évolution visible.",
+                "Muted",
+                True,
+            )
+        )
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        canvas = QWidget()
+        canvas.setObjectName("PanelCanvas")
+        grid = QGridLayout(canvas)
+        grid.setContentsMargins(4, 8, 10, 10)
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(8)
+        self.arc_connection_lists: dict[str, QListWidget] = {}
+        sources = (
+            (
+                "scenes",
+                "SCÈNES",
+                self.db.q("SELECT id,position,title FROM scene_rows WHERE project_id=? ORDER BY position,id", (self.active_project,)),
+                lambda row: f"{int(row['position']) + 1:02d} · {row['title'] or 'Scène sans titre'}",
+            ),
+            (
+                "story_nodes",
+                "CARTES DE L’HISTOIRE",
+                self.db.q("SELECT id,title,kind FROM story_map_nodes WHERE project_id=? ORDER BY id", (self.active_project,)),
+                lambda row: f"{row['title'] or 'Carte sans titre'} · {row['kind'] or 'idée'}",
+            ),
+            (
+                "events",
+                "ÉVÉNEMENTS",
+                self.db.q("SELECT id,title,display_label FROM timeline_events WHERE project_id=? ORDER BY time_hours,id", (self.active_project,)),
+                lambda row: f"{row['display_label'] or 'Sans repère'} · {row['title'] or 'Sans titre'}",
+            ),
+            (
+                "conflicts",
+                "CONFLITS",
+                self.db.q("SELECT id,title,importance FROM conflicts WHERE project_id=? ORDER BY position,id", (self.active_project,)),
+                lambda row: f"{row['title'] or 'Conflit sans titre'} · {'principal' if row['importance'] == 'main' else 'secondaire'}",
+            ),
+        )
+        for index, (key, label, rows, formatter) in enumerate(sources):
+            column = index % 2
+            grid_row = (index // 2) * 2
+            grid.addWidget(make_label(label, "Caption"), grid_row, column)
+            picker = CheckableListWidget()
+            picker.setObjectName("ArcConnectionPicker")
+            picker.setMinimumHeight(170)
+            for row in rows:
+                item = QListWidgetItem(formatter(row))
+                item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(Qt.CheckState.Unchecked)
+                picker.addItem(item)
+            self.arc_connection_lists[key] = picker
+            grid.addWidget(picker, grid_row + 1, column)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        scroll.setWidget(canvas)
+        outer.addWidget(scroll, 1)
+        return tab
+
+    def _refresh_arc_characters(self, _value=None, select_first: bool = False) -> None:
+        if not hasattr(self, "arc_character_list"):
+            return
+        rows = self.db.q(
+            """SELECT character.id,character.name,character.role,character.start_situation,
+            character.arc,character.end_situation,arc_row.arc_type,arc_row.main_trial,
+            arc_row.decisive_choice,arc_row.visible_proof
+            FROM characters character
+            LEFT JOIN character_arcs arc_row ON arc_row.character_id=character.id
+            WHERE character.project_id=? ORDER BY character.name COLLATE NOCASE,character.id""",
+            (self.active_project,),
+        )
+        selected_role = self.arc_role_filter.currentData() or ""
+        roles = sorted({row["role"] for row in rows if row["role"]}, key=str.casefold)
+        current_role = selected_role
+        self.arc_role_filter.blockSignals(True)
+        self.arc_role_filter.clear()
+        self.arc_role_filter.addItem("Tous les rôles", "")
+        for role in roles:
+            self.arc_role_filter.addItem(role, role)
+        self.arc_role_filter.setCurrentIndex(max(0, self.arc_role_filter.findData(current_role)))
+        self.arc_role_filter.blockSignals(False)
+        query = self.arc_search.text().strip().casefold()
+        self.arc_character_list.blockSignals(True)
+        self.arc_character_list.clear()
+        selected_item = None
+        visible = 0
+        for row in rows:
+            if selected_role and row["role"] != selected_role:
+                continue
+            haystack = f"{row['name']} {row['role']} {row['arc_type']}".casefold()
+            if query and query not in haystack:
+                continue
+            visible += 1
+            arc_type = row["arc_type"] or "Arc à préciser"
+            item = QListWidgetItem(
+                f"{row['name'] or 'Personnage sans nom'}\n{row['role'] or 'Rôle à préciser'} · {arc_type}"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+            item.setSizeHint(QSize(0, 68))
+            self.arc_character_list.addItem(item)
+            if int(row["id"]) == self.arc_character_id:
+                selected_item = item
+        if selected_item:
+            self.arc_character_list.setCurrentItem(selected_item)
+        elif select_first and self.arc_character_list.count():
+            self.arc_character_list.setCurrentRow(0)
+            selected_item = self.arc_character_list.currentItem()
+        self.arc_character_list.blockSignals(False)
+        self.arc_character_count.setText(f"{visible}/{len(rows)}" if visible != len(rows) else str(len(rows)))
+        self._refresh_arc_overview()
+        if selected_item:
+            self._load_character_arc(int(selected_item.data(Qt.ItemDataRole.UserRole)))
+        elif not rows:
+            self.arc_character_id = None
+            self.character_arc_id = None
+            self.arc_selected_name.setText("Aucun personnage dans ce projet")
+            self.arc_diagnostic.setText("0/6 REPÈRES")
+
+    def _arc_character_selected(self, current: QListWidgetItem | None, _previous=None) -> None:
+        if not current or self._arc_loading:
+            return
+        character_id = int(current.data(Qt.ItemDataRole.UserRole))
+        if self.arc_character_id and self.arc_character_id != character_id:
+            self._save_character_arc(silent=True, refresh=False)
+        self._load_character_arc(character_id)
+
+    def _load_character_arc(self, character_id: int) -> None:
+        character = self.db.one(
+            "SELECT * FROM characters WHERE id=? AND project_id=?",
+            (character_id, self.active_project),
+        )
+        if not character:
+            return
+        self._arc_loading = True
+        self.arc_character_id = character_id
+        self.db.set_setting(f"last_arc_character_{self.active_project}", character_id)
+        arc = self.db.one("SELECT * FROM character_arcs WHERE character_id=?", (character_id,))
+        self.character_arc_id = int(arc["id"]) if arc else None
+        self.arc_selected_name.setText(
+            f"{character['name'] or 'Personnage sans nom'} · {character['role'] or 'Rôle à préciser'}"
+        )
+        character_values = {
+            "start_situation": character["start_situation"],
+            "transformation": character["arc"],
+            "end_situation": character["end_situation"],
+        }
+        arc_values = dict(arc) if arc else {}
+        for key, field in self.arc_fields.items():
+            if key == "arc_type" and isinstance(field, QComboBox):
+                value = arc_values.get(key, "") or "À préciser"
+                field.setCurrentIndex(max(0, field.findText(value)))
+            else:
+                set_field_value(field, character_values.get(key, arc_values.get(key, "")))
+        self._load_arc_connections()
+        self._update_arc_diagnostic()
+        for row in range(self.arc_overview_table.rowCount()):
+            item = self.arc_overview_table.item(row, 0)
+            if item and int(item.data(Qt.ItemDataRole.UserRole)) == character_id:
+                self.arc_overview_table.selectRow(row)
+                break
+        self._arc_loading = False
+
+    def _save_character_arc(
+        self,
+        _checked: bool = False,
+        silent: bool = False,
+        refresh: bool = True,
+    ) -> None:
+        if not self.arc_character_id or not hasattr(self, "arc_fields"):
+            return
+        if not self.db.one(
+            "SELECT 1 FROM characters WHERE id=? AND project_id=?",
+            (self.arc_character_id, self.active_project),
+        ):
+            # A character may have been deleted while its last-selection
+            # setting remains. Leaving the page must never try to recreate an
+            # arc linked to that stale identifier.
+            self.arc_character_id = None
+            self.character_arc_id = None
+            self.db.set_setting(f"last_arc_character_{self.active_project}", 0)
+            return
+        values = {key: field_value(field) for key, field in self.arc_fields.items()}
+        arc_type = "" if values["arc_type"] == "À préciser" else values["arc_type"]
+        self.db.run(
+            """UPDATE characters SET start_situation=?,arc=?,end_situation=?,updated_at=?
+            WHERE id=? AND project_id=?""",
+            (
+                values["start_situation"],
+                values["transformation"],
+                values["end_situation"],
+                NOW(),
+                self.arc_character_id,
+                self.active_project,
+            ),
+        )
+        arc_keys = (
+            "initial_belief", "main_trial", "pressures", "breaking_point",
+            "decisive_choice", "cost", "visible_proof", "notes",
+        )
+        if self.character_arc_id:
+            self.db.run(
+                f"UPDATE character_arcs SET arc_type=?,{','.join(f'{key}=?' for key in arc_keys)},updated_at=? WHERE id=?",
+                [arc_type] + [values[key] for key in arc_keys] + [NOW(), self.character_arc_id],
+            )
+        else:
+            self.character_arc_id = self.db.run(
+                f"INSERT INTO character_arcs(project_id,character_id,arc_type,{','.join(arc_keys)},created_at,updated_at) "
+                f"VALUES({','.join('?' * (len(arc_keys) + 5))})",
+                [self.active_project, self.arc_character_id, arc_type]
+                + [values[key] for key in arc_keys]
+                + [NOW(), NOW()],
+            ).lastrowid
+        self._save_arc_connections()
+        self._update_arc_diagnostic()
+        if refresh:
+            self._refresh_arc_overview()
+            self._refresh_arc_list_labels()
+        if not silent:
+            self.save_state.setText("Arc enregistré")
+            QTimer.singleShot(2200, lambda: self.save_state.setText(""))
+
+    def _refresh_arc_list_labels(self) -> None:
+        for index in range(self.arc_character_list.count()):
+            item = self.arc_character_list.item(index)
+            character_id = int(item.data(Qt.ItemDataRole.UserRole))
+            row = self.db.one(
+                """SELECT character.name,character.role,arc.arc_type
+                FROM characters character LEFT JOIN character_arcs arc ON arc.character_id=character.id
+                WHERE character.id=?""",
+                (character_id,),
+            )
+            if row:
+                item.setText(
+                    f"{row['name'] or 'Personnage sans nom'}\n"
+                    f"{row['role'] or 'Rôle à préciser'} · {row['arc_type'] or 'Arc à préciser'}"
+                )
+
+    def _refresh_arc_overview(self) -> None:
+        if not hasattr(self, "arc_overview_table"):
+            return
+        rows = self.db.q(
+            """SELECT character.id,character.name,character.role,character.start_situation,
+            character.arc transformation,character.end_situation,arc.main_trial,arc.decisive_choice
+            FROM characters character LEFT JOIN character_arcs arc ON arc.character_id=character.id
+            WHERE character.project_id=? ORDER BY character.name COLLATE NOCASE,character.id""",
+            (self.active_project,),
+        )
+        self.arc_overview_table.setRowCount(len(rows))
+        for row_index, row in enumerate(rows):
+            values = (
+                f"{row['name'] or 'Sans nom'}\n{row['role'] or 'Rôle à préciser'}",
+                row["start_situation"],
+                row["main_trial"],
+                row["decisive_choice"],
+                row["transformation"],
+                row["end_situation"],
+            )
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value or "—")
+                item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+                item.setToolTip(value or "À préciser")
+                self.arc_overview_table.setItem(row_index, column, item)
+            self.arc_overview_table.setRowHeight(row_index, 86)
+
+    def _arc_overview_selected(self, row: int, _column: int) -> None:
+        item = self.arc_overview_table.item(row, 0)
+        if not item:
+            return
+        character_id = int(item.data(Qt.ItemDataRole.UserRole))
+        for index in range(self.arc_character_list.count()):
+            candidate = self.arc_character_list.item(index)
+            if int(candidate.data(Qt.ItemDataRole.UserRole)) == character_id:
+                self.arc_character_list.setCurrentItem(candidate)
+                break
+
+    def _arc_overview_open_trajectory(self, row: int, column: int) -> None:
+        self._arc_overview_selected(row, column)
+        self.arc_tabs.setCurrentIndex(1)
+
+    def _clear_arc_connections(self) -> None:
+        for picker in getattr(self, "arc_connection_lists", {}).values():
+            for index in range(picker.count()):
+                picker.item(index).setCheckState(Qt.CheckState.Unchecked)
+
+    def _load_arc_connections(self) -> None:
+        self._clear_arc_connections()
+        if not self.character_arc_id:
+            return
+        specs = {
+            "scenes": ("character_arc_scenes", "scene_id"),
+            "story_nodes": ("character_arc_story_nodes", "node_id"),
+            "events": ("character_arc_events", "event_id"),
+            "conflicts": ("character_arc_conflicts", "conflict_id"),
+        }
+        for key, picker in self.arc_connection_lists.items():
+            table, column = specs[key]
+            selected = {
+                int(row[0]) for row in self.db.q(
+                    f"SELECT {column} FROM {table} WHERE arc_id=?",
+                    (self.character_arc_id,),
+                )
+            }
+            for index in range(picker.count()):
+                item = picker.item(index)
+                item.setCheckState(
+                    Qt.CheckState.Checked
+                    if int(item.data(Qt.ItemDataRole.UserRole)) in selected
+                    else Qt.CheckState.Unchecked
+                )
+
+    def _save_arc_connections(self) -> None:
+        if not self.character_arc_id:
+            return
+        specs = {
+            "scenes": ("character_arc_scenes", "scene_id"),
+            "story_nodes": ("character_arc_story_nodes", "node_id"),
+            "events": ("character_arc_events", "event_id"),
+            "conflicts": ("character_arc_conflicts", "conflict_id"),
+        }
+        with self.db.conn:
+            for key, picker in self.arc_connection_lists.items():
+                table, column = specs[key]
+                self.db.conn.execute(f"DELETE FROM {table} WHERE arc_id=?", (self.character_arc_id,))
+                for index in range(picker.count()):
+                    item = picker.item(index)
+                    if item.checkState() == Qt.CheckState.Checked:
+                        self.db.conn.execute(
+                            f"INSERT OR IGNORE INTO {table}(arc_id,{column}) VALUES(?,?)",
+                            (self.character_arc_id, int(item.data(Qt.ItemDataRole.UserRole))),
+                        )
+
+    def _update_arc_diagnostic(self) -> None:
+        if not self.arc_character_id:
+            self.arc_diagnostic.setText("0/6 REPÈRES")
+            return
+        values = {key: field_value(field) for key, field in self.arc_fields.items()}
+        checks = (
+            ("début", values["start_situation"]),
+            ("épreuve", values["main_trial"] or values["pressures"]),
+            ("rupture", values["breaking_point"]),
+            ("choix", values["decisive_choice"]),
+            ("transformation", values["transformation"]),
+            ("fin visible", values["end_situation"] and values["visible_proof"]),
+        )
+        completed = sum(bool(value.strip()) for _label, value in checks)
+        missing = [label for label, value in checks if not value.strip()]
+        self.arc_diagnostic.setText(f"{completed}/6 REPÈRES")
+        self.arc_diagnostic.setToolTip(
+            "Arc suffisamment décrit pour être vérifié"
+            if not missing
+            else "À préciser : " + ", ".join(missing)
+        )
+
+    def _open_arc_character(self) -> None:
+        if not self.arc_character_id:
+            return
+        self._save_character_arc(silent=True)
+        self.db.set_setting(f"last_character_{self.active_project}", self.arc_character_id)
+        self.show_characters()
+
+    # ---------- Hook, narrative promises and desired moments ----------
+
+    def show_promises(self) -> None:
+        page = self._begin_page("Accroche et promesses", "promises", compact=True)
+        if not self.active_project:
+            page.addWidget(make_label("Crée ou sélectionne d’abord un projet.", "Muted"))
+            page.addStretch()
+            return
+
+        self._promise_loading = False
+        self.story_promise_id: int | None = None
+        self.story_moment_id: int | None = None
+
+        workspace = make_card()
+        box = QVBoxLayout(workspace)
+        box.setContentsMargins(16, 14, 16, 14)
+        box.setSpacing(8)
+        heading = QHBoxLayout()
+        heading.addWidget(make_label("ACCROCHE ET PROMESSES", "Caption"))
+        heading.addStretch()
+        self.promise_diagnostic = make_label("0 À SUIVRE", "AccentPill")
+        heading.addWidget(self.promise_diagnostic)
+        box.addLayout(heading)
+        box.addWidget(make_label("Ce que l’histoire fait attendre", "SectionTitle"))
+        box.addWidget(
+            make_label(
+                "Conserve l’envie de continuer, les attentes créées et les moments que tu veux réellement faire exister.",
+                "Muted",
+                True,
+            )
+        )
+        self.promise_tabs = QTabWidget()
+        self.promise_tabs.setObjectName("PromiseTabs")
+        self.promise_tabs.setDocumentMode(True)
+        self.promise_tabs.addTab(self._build_hook_tab(), "Accroche")
+        self.promise_tabs.addTab(self._build_promises_tab(), "Promesses")
+        self.promise_tabs.addTab(self._build_story_moments_tab(), "Moments forts")
+        self.promise_tabs.addTab(self._build_promise_control_tab(), "Vue de contrôle")
+        box.addWidget(self.promise_tabs, 1)
+        page.addWidget(workspace, 1)
+
+        self._load_hook_profile()
+        self._refresh_story_promises(select_first=True)
+        self._refresh_story_moments(select_first=True)
+        self._refresh_promise_control()
+
+    def _build_hook_tab(self) -> QWidget:
+        tab = QWidget()
+        outer = QVBoxLayout(tab)
+        outer.setContentsMargins(0, 10, 0, 0)
+        outer.setSpacing(8)
+        outer.addWidget(
+            make_label(
+                "L’accroche n’est pas obligatoirement spectaculaire : elle peut être une question, une contradiction, une relation ou une situation étrange.",
+                "Muted",
+                True,
+            )
+        )
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(8)
+        self.hook_fields: dict[str, QTextEdit] = {}
+        definitions = (
+            ("QUESTION D’ACCROCHE", "hook_question", "Quelle question donne envie de découvrir la suite ?"),
+            ("SITUATION PARTICULIÈRE", "unusual_situation", "Quelle situation rend cette histoire immédiatement reconnaissable ?"),
+            ("ATTENTE DU SPECTATEUR", "audience_question", "Qu’est-ce que le spectateur veut maintenant voir, comprendre ou ressentir ?"),
+            ("RÉPONSE RETENUE", "withheld_answer", "Quelle réponse doit rester momentanément hors de portée ?"),
+        )
+        for index, (label, key, placeholder) in enumerate(definitions):
+            row, column = divmod(index, 2)
+            cell = make_card()
+            cell_box = QVBoxLayout(cell)
+            cell_box.setContentsMargins(14, 12, 14, 14)
+            cell_box.setSpacing(7)
+            cell_box.addWidget(make_label(label, "Caption"))
+            editor = make_editor(140, placeholder)
+            editor.setProperty("promiseField", True)
+            self.hook_fields[key] = editor
+            cell_box.addWidget(editor, 1)
+            grid.addWidget(cell, row, column)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        grid.setRowStretch(0, 1)
+        grid.setRowStretch(1, 1)
+        outer.addLayout(grid, 1)
+        actions = QHBoxLayout()
+        actions.addWidget(make_button("Enregistrer l’accroche", "primary", self._save_hook_profile))
+        actions.addStretch()
+        actions.addWidget(make_label("Une formulation provisoire suffit : elle pourra évoluer avec l’histoire.", "Muted"))
+        outer.addLayout(actions)
+        return tab
+
+    def _build_promises_tab(self) -> QWidget:
+        tab = QWidget()
+        body = QHBoxLayout(tab)
+        body.setContentsMargins(0, 10, 0, 0)
+        body.setSpacing(12)
+
+        library = make_card()
+        library.setFixedWidth(300)
+        library_box = QVBoxLayout(library)
+        library_box.setContentsMargins(12, 12, 12, 12)
+        library_box.setSpacing(8)
+        head = QHBoxLayout()
+        head.addWidget(make_label("PROMESSES", "Caption"))
+        head.addStretch()
+        self.story_promise_count = make_label("0", "AccentPill")
+        head.addWidget(self.story_promise_count)
+        library_box.addLayout(head)
+        self.story_promise_search = QLineEdit()
+        self.story_promise_search.setPlaceholderText("Rechercher…")
+        self.story_promise_search.setClearButtonEnabled(True)
+        library_box.addWidget(self.story_promise_search)
+        self.story_promise_filter = QComboBox()
+        self.story_promise_filter.addItem("Tous les types", "")
+        for item in STORY_PROMISE_TYPES:
+            self.story_promise_filter.addItem(item, item)
+        library_box.addWidget(self.story_promise_filter)
+        self.story_promise_list = QListWidget()
+        self.story_promise_list.setObjectName("StoryPromiseList")
+        self.story_promise_list.setWordWrap(True)
+        self.story_promise_list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        library_box.addWidget(self.story_promise_list, 1)
+        library_box.addWidget(make_button("+ Nouvelle promesse", "primary", self._new_story_promise))
+        body.addWidget(library)
+
+        detail = make_card()
+        detail_box = QVBoxLayout(detail)
+        detail_box.setContentsMargins(14, 12, 14, 12)
+        detail_box.setSpacing(8)
+        self.story_promise_heading = make_label("Sélectionne une promesse", "CardTitle")
+        detail_box.addWidget(self.story_promise_heading)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        canvas = QWidget()
+        canvas.setObjectName("PanelCanvas")
+        form = QGridLayout(canvas)
+        form.setContentsMargins(2, 2, 10, 8)
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(7)
+        self.story_promise_fields: dict[str, QLineEdit | QTextEdit | QComboBox] = {}
+        title = QLineEdit()
+        title.setPlaceholderText("Ex. Mina devra choisir entre son frère et la vérité")
+        promise_type = QComboBox()
+        promise_type.addItems(STORY_PROMISE_TYPES)
+        status = QComboBox()
+        status.addItems(STORY_PROMISE_STATUSES)
+        self.story_promise_fields.update(title=title, promise_type=promise_type, status=status)
+        form.addWidget(make_label("TITRE", "Caption"), 0, 0, 1, 2)
+        form.addWidget(title, 1, 0, 1, 2)
+        form.addWidget(make_label("TYPE", "Caption"), 2, 0)
+        form.addWidget(make_label("ÉTAT", "Caption"), 2, 1)
+        form.addWidget(promise_type, 3, 0)
+        form.addWidget(status, 3, 1)
+        definitions = (
+            ("PROMESSE", "description", "Qu’est-ce que le concept fait attendre au spectateur ?"),
+            ("INTRODUCTION", "planted_note", "Où et comment cette attente est-elle créée ?"),
+            ("DÉVELOPPEMENT", "development_note", "Comment l’histoire nourrit-elle cette attente sans simplement la répéter ?"),
+            ("ACCOMPLISSEMENT", "payoff_note", "Où et comment la promesse trouve-t-elle une réponse ?"),
+        )
+        row = 4
+        for index, (label, key, placeholder) in enumerate(definitions):
+            column = index % 2
+            local_row = row + (index // 2) * 2
+            form.addWidget(make_label(label, "Caption"), local_row, column)
+            editor = make_editor(92, placeholder)
+            editor.setProperty("promiseField", True)
+            editor.setMaximumHeight(124)
+            self.story_promise_fields[key] = editor
+            form.addWidget(editor, local_row + 1, column)
+        connection_row = 8
+        form.addWidget(make_label("CONNEXIONS — CARTE DE L’HISTOIRE", "Caption"), connection_row, 0)
+        form.addWidget(make_label("CONNEXIONS — SCÈNES", "Caption"), connection_row, 1)
+        self.story_promise_connections = {
+            "story_nodes": self._make_promise_picker(
+                self.db.q("SELECT id,title,kind FROM story_map_nodes WHERE project_id=? ORDER BY id", (self.active_project,)),
+                lambda item: f"{item['title'] or 'Carte sans titre'} · {item['kind'] or 'idée'}",
+            ),
+            "scenes": self._make_promise_picker(
+                self.db.q("SELECT id,position,title FROM scene_rows WHERE project_id=? ORDER BY position,id", (self.active_project,)),
+                lambda item: f"{int(item['position']) + 1:02d} · {item['title'] or 'Scène sans titre'}",
+            ),
+        }
+        form.addWidget(self.story_promise_connections["story_nodes"], connection_row + 1, 0)
+        form.addWidget(self.story_promise_connections["scenes"], connection_row + 1, 1)
+        form.setColumnStretch(0, 1)
+        form.setColumnStretch(1, 1)
+        scroll.setWidget(canvas)
+        detail_box.addWidget(scroll, 1)
+        actions = QHBoxLayout()
+        actions.addWidget(make_button("Enregistrer", "primary", self._save_story_promise))
+        actions.addStretch()
+        actions.addWidget(make_button("Supprimer", "danger", self._delete_story_promise))
+        detail_box.addLayout(actions)
+        body.addWidget(detail, 1)
+
+        self.story_promise_search.textChanged.connect(self._refresh_story_promises)
+        self.story_promise_filter.currentIndexChanged.connect(self._refresh_story_promises)
+        self.story_promise_list.currentItemChanged.connect(self._story_promise_selected)
+        return tab
+
+    def _build_story_moments_tab(self) -> QWidget:
+        tab = QWidget()
+        body = QHBoxLayout(tab)
+        body.setContentsMargins(0, 10, 0, 0)
+        body.setSpacing(12)
+        library = make_card()
+        library.setFixedWidth(300)
+        library_box = QVBoxLayout(library)
+        library_box.setContentsMargins(12, 12, 12, 12)
+        library_box.setSpacing(8)
+        head = QHBoxLayout()
+        head.addWidget(make_label("MOMENTS DÉSIRÉS", "Caption"))
+        head.addStretch()
+        self.story_moment_count = make_label("0", "AccentPill")
+        head.addWidget(self.story_moment_count)
+        library_box.addLayout(head)
+        self.story_moment_search = QLineEdit()
+        self.story_moment_search.setPlaceholderText("Rechercher…")
+        self.story_moment_search.setClearButtonEnabled(True)
+        library_box.addWidget(self.story_moment_search)
+        self.story_moment_filter = QComboBox()
+        self.story_moment_filter.addItem("Tous les types", "")
+        for item in STORY_MOMENT_TYPES:
+            self.story_moment_filter.addItem(item, item)
+        library_box.addWidget(self.story_moment_filter)
+        self.story_moment_list = QListWidget()
+        self.story_moment_list.setObjectName("StoryMomentList")
+        self.story_moment_list.setWordWrap(True)
+        self.story_moment_list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        library_box.addWidget(self.story_moment_list, 1)
+        library_box.addWidget(make_button("+ Nouveau moment", "primary", self._new_story_moment))
+        body.addWidget(library)
+
+        detail = make_card()
+        detail_box = QVBoxLayout(detail)
+        detail_box.setContentsMargins(14, 12, 14, 12)
+        detail_box.setSpacing(8)
+        self.story_moment_heading = make_label("Sélectionne un moment fort", "CardTitle")
+        detail_box.addWidget(self.story_moment_heading)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        canvas = QWidget()
+        canvas.setObjectName("PanelCanvas")
+        form = QGridLayout(canvas)
+        form.setContentsMargins(2, 2, 10, 8)
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(7)
+        self.story_moment_fields: dict[str, QLineEdit | QTextEdit | QComboBox] = {}
+        title = QLineEdit()
+        title.setPlaceholderText("Ex. Mina témoigne devant toute la ville")
+        moment_type = QComboBox()
+        moment_type.addItems(STORY_MOMENT_TYPES)
+        status = QComboBox()
+        status.addItems(STORY_MOMENT_STATUSES)
+        self.story_moment_fields.update(title=title, moment_type=moment_type, status=status)
+        form.addWidget(make_label("TITRE", "Caption"), 0, 0, 1, 2)
+        form.addWidget(title, 1, 0, 1, 2)
+        form.addWidget(make_label("TYPE", "Caption"), 2, 0)
+        form.addWidget(make_label("ÉTAT", "Caption"), 2, 1)
+        form.addWidget(moment_type, 3, 0)
+        form.addWidget(status, 3, 1)
+        definitions = (
+            ("CE QUI SE PASSE", "description", "Décris le moment en quelques phrases, sans devoir écrire toute la scène."),
+            ("FONCTION NARRATIVE", "narrative_function", "Pourquoi ce moment mérite-t-il d’exister ? Que change-t-il ?"),
+            ("PLACE ENVISAGÉE", "placement_note", "Avant ou après quoi devrait-il arriver ?"),
+        )
+        for index, (label, key, placeholder) in enumerate(definitions):
+            row = 4 + index * 2
+            form.addWidget(make_label(label, "Caption"), row, 0, 1, 2)
+            editor = make_editor(84, placeholder)
+            editor.setProperty("promiseField", True)
+            editor.setMaximumHeight(112)
+            self.story_moment_fields[key] = editor
+            form.addWidget(editor, row + 1, 0, 1, 2)
+        connection_sources = (
+            ("story_nodes", "CARTES", "story_map_nodes", "id,title,kind", "id", "ORDER BY id", lambda x: x["title"] or "Carte sans titre"),
+            ("sequences", "SÉQUENCES", "sequence_blocks", "id,position,title", "id", "ORDER BY position,id", lambda x: f"{int(x['position']) + 1:02d} · {x['title'] or 'Séquence sans titre'}"),
+            ("scenes", "SCÈNES", "scene_rows", "id,position,title", "id", "ORDER BY position,id", lambda x: f"{int(x['position']) + 1:02d} · {x['title'] or 'Scène sans titre'}"),
+            ("events", "ÉVÉNEMENTS", "timeline_events", "id,title,display_label", "id", "ORDER BY time_hours,id", lambda x: f"{x['display_label'] or 'Sans repère'} · {x['title'] or 'Sans titre'}"),
+            ("conflicts", "CONFLITS", "conflicts", "id,title,importance", "id", "ORDER BY position,id", lambda x: x["title"] or "Conflit sans titre"),
+        )
+        self.story_moment_connections: dict[str, QListWidget] = {}
+        base_row = 10
+        for index, (key, label, table, columns, _id_col, order, formatter) in enumerate(connection_sources):
+            column = index % 2
+            row = base_row + (index // 2) * 2
+            form.addWidget(make_label(label, "Caption"), row, column)
+            rows = self.db.q(f"SELECT {columns} FROM {table} WHERE project_id=? {order}", (self.active_project,))
+            picker = self._make_promise_picker(rows, formatter)
+            self.story_moment_connections[key] = picker
+            form.addWidget(picker, row + 1, column)
+        form.setColumnStretch(0, 1)
+        form.setColumnStretch(1, 1)
+        scroll.setWidget(canvas)
+        detail_box.addWidget(scroll, 1)
+        actions = QHBoxLayout()
+        actions.addWidget(make_button("Enregistrer", "primary", self._save_story_moment))
+        actions.addWidget(make_button("Créer une carte", "secondary", lambda: self._convert_story_moment("story_node")))
+        actions.addWidget(make_button("Créer une séquence", "secondary", lambda: self._convert_story_moment("sequence")))
+        actions.addWidget(make_button("Créer une scène", "secondary", lambda: self._convert_story_moment("scene")))
+        actions.addStretch()
+        actions.addWidget(make_button("Supprimer", "danger", self._delete_story_moment))
+        detail_box.addLayout(actions)
+        body.addWidget(detail, 1)
+        self.story_moment_search.textChanged.connect(self._refresh_story_moments)
+        self.story_moment_filter.currentIndexChanged.connect(self._refresh_story_moments)
+        self.story_moment_list.currentItemChanged.connect(self._story_moment_selected)
+        return tab
+
+    def _build_promise_control_tab(self) -> QWidget:
+        tab = QWidget()
+        box = QVBoxLayout(tab)
+        box.setContentsMargins(0, 10, 0, 0)
+        box.setSpacing(8)
+        box.addWidget(
+            make_label(
+                "Cette vue signale des éléments à suivre ; elle ne décide jamais qu’une promesse doit être conservée.",
+                "Muted",
+                True,
+            )
+        )
+        self.promise_control_table = QTableWidget(0, 6)
+        self.promise_control_table.setObjectName("PromiseControlTable")
+        self.promise_control_table.setHorizontalHeaderLabels(
+            ["Élément", "Titre", "État", "Introduction / place", "Développement / fonction", "Accomplissement / liens"]
+        )
+        self.promise_control_table.verticalHeader().setVisible(False)
+        self.promise_control_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.promise_control_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.promise_control_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.promise_control_table.setWordWrap(True)
+        box.addWidget(self.promise_control_table, 1)
+        return tab
+
+    def _make_promise_picker(self, rows, formatter) -> QListWidget:
+        picker = CheckableListWidget()
+        picker.setObjectName("PromiseConnectionPicker")
+        picker.setMinimumHeight(126)
+        for row in rows:
+            item = QListWidgetItem(formatter(row))
+            item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Unchecked)
+            picker.addItem(item)
+        return picker
+
+    @staticmethod
+    def _picker_checked_ids(picker: QListWidget) -> list[int]:
+        return [
+            int(picker.item(index).data(Qt.ItemDataRole.UserRole))
+            for index in range(picker.count())
+            if picker.item(index).checkState() == Qt.CheckState.Checked
+        ]
+
+    @staticmethod
+    def _set_picker_checked_ids(picker: QListWidget, selected: set[int]) -> None:
+        for index in range(picker.count()):
+            item = picker.item(index)
+            item.setCheckState(
+                Qt.CheckState.Checked
+                if int(item.data(Qt.ItemDataRole.UserRole)) in selected
+                else Qt.CheckState.Unchecked
+            )
+
+    def _load_hook_profile(self) -> None:
+        row = self.db.one("SELECT * FROM hook_profiles WHERE project_id=?", (self.active_project,))
+        values = dict(row) if row else {}
+        for key, field in self.hook_fields.items():
+            field.setPlainText(values.get(key, "") or "")
+
+    def _save_hook_profile(self, _checked: bool = False, silent: bool = False) -> None:
+        if not hasattr(self, "hook_fields") or not self.active_project:
+            return
+        values = {key: field.toPlainText().strip() for key, field in self.hook_fields.items()}
+        if not any(values.values()):
+            self.db.run("DELETE FROM hook_profiles WHERE project_id=?", (self.active_project,))
+            self._refresh_promise_control()
+            return
+        self.db.run(
+            """INSERT INTO hook_profiles(
+            project_id,hook_question,unusual_situation,audience_question,withheld_answer,created_at,updated_at
+            ) VALUES(?,?,?,?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET
+            hook_question=excluded.hook_question,unusual_situation=excluded.unusual_situation,
+            audience_question=excluded.audience_question,withheld_answer=excluded.withheld_answer,
+            updated_at=excluded.updated_at""",
+            (
+                self.active_project, values["hook_question"], values["unusual_situation"],
+                values["audience_question"], values["withheld_answer"], NOW(), NOW(),
+            ),
+        )
+        self._refresh_promise_control()
+        if not silent:
+            self.save_state.setText("Accroche enregistrée")
+            QTimer.singleShot(2200, lambda: self.save_state.setText(""))
+
+    def _refresh_story_promises(self, _value=None, select_first: bool = False) -> None:
+        if not hasattr(self, "story_promise_list"):
+            return
+        query = self.story_promise_search.text().strip().casefold()
+        selected_type = self.story_promise_filter.currentData() or ""
+        rows = self.db.q(
+            "SELECT * FROM story_promises WHERE project_id=? ORDER BY position,id",
+            (self.active_project,),
+        )
+        self.story_promise_list.blockSignals(True)
+        self.story_promise_list.clear()
+        selected_item = None
+        visible = 0
+        for row in rows:
+            if selected_type and row["promise_type"] != selected_type:
+                continue
+            if query and query not in f"{row['title']} {row['description']} {row['promise_type']}".casefold():
+                continue
+            visible += 1
+            item = QListWidgetItem(f"{row['title'] or 'Promesse sans titre'}\n{row['promise_type']} · {row['status']}")
+            item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+            item.setSizeHint(QSize(0, 66))
+            self.story_promise_list.addItem(item)
+            if int(row["id"]) == self.story_promise_id:
+                selected_item = item
+        if selected_item:
+            self.story_promise_list.setCurrentItem(selected_item)
+        elif select_first and self.story_promise_list.count():
+            self.story_promise_list.setCurrentRow(0)
+            selected_item = self.story_promise_list.currentItem()
+        self.story_promise_list.blockSignals(False)
+        self.story_promise_count.setText(f"{visible}/{len(rows)}" if visible != len(rows) else str(len(rows)))
+        if selected_item:
+            self._load_story_promise(int(selected_item.data(Qt.ItemDataRole.UserRole)))
+
+    def _story_promise_selected(self, current: QListWidgetItem | None, _previous=None) -> None:
+        if not current or self._promise_loading:
+            return
+        target_id = int(current.data(Qt.ItemDataRole.UserRole))
+        if self.story_promise_id and self.story_promise_id != target_id:
+            self._save_story_promise(silent=True, refresh=False)
+        self._load_story_promise(target_id)
+
+    def _load_story_promise(self, promise_id: int) -> None:
+        row = self.db.one(
+            "SELECT * FROM story_promises WHERE id=? AND project_id=?",
+            (promise_id, self.active_project),
+        )
+        if not row:
+            return
+        self._promise_loading = True
+        self.story_promise_id = promise_id
+        self.story_promise_heading.setText(row["title"] or "Promesse sans titre")
+        for key, field in self.story_promise_fields.items():
+            set_field_value(field, row[key] or "")
+        specs = {
+            "story_nodes": ("story_promise_story_nodes", "node_id"),
+            "scenes": ("story_promise_scenes", "scene_id"),
+        }
+        for key, picker in self.story_promise_connections.items():
+            table, column = specs[key]
+            selected = {int(item[0]) for item in self.db.q(f"SELECT {column} FROM {table} WHERE promise_id=?", (promise_id,))}
+            self._set_picker_checked_ids(picker, selected)
+        self._promise_loading = False
+
+    def _new_story_promise(self) -> None:
+        self._save_story_promise(silent=True, refresh=False)
+        position = int(self.db.one("SELECT COUNT(*) FROM story_promises WHERE project_id=?", (self.active_project,))[0])
+        self.story_promise_id = self.db.run(
+            """INSERT INTO story_promises(
+            project_id,position,promise_type,title,status,created_at,updated_at
+            ) VALUES(?,?,?,?,?,?,?)""",
+            (self.active_project, position, "Concept", "Nouvelle promesse", "À placer", NOW(), NOW()),
+        ).lastrowid
+        self._refresh_story_promises(select_first=True)
+        self._refresh_promise_control()
+
+    def _save_story_promise(self, _checked: bool = False, silent: bool = False, refresh: bool = True) -> None:
+        if not self.story_promise_id or not hasattr(self, "story_promise_fields"):
+            return
+        values = {key: field_value(field) for key, field in self.story_promise_fields.items()}
+        self.db.run(
+            """UPDATE story_promises SET promise_type=?,title=?,description=?,planted_note=?,
+            development_note=?,payoff_note=?,status=?,updated_at=? WHERE id=? AND project_id=?""",
+            (
+                values["promise_type"], values["title"], values["description"],
+                values["planted_note"], values["development_note"], values["payoff_note"],
+                values["status"], NOW(), self.story_promise_id, self.active_project,
+            ),
+        )
+        specs = {
+            "story_nodes": ("story_promise_story_nodes", "node_id"),
+            "scenes": ("story_promise_scenes", "scene_id"),
+        }
+        with self.db.conn:
+            for key, picker in self.story_promise_connections.items():
+                table, column = specs[key]
+                self.db.conn.execute(f"DELETE FROM {table} WHERE promise_id=?", (self.story_promise_id,))
+                for target_id in self._picker_checked_ids(picker):
+                    self.db.conn.execute(
+                        f"INSERT OR IGNORE INTO {table}(promise_id,{column}) VALUES(?,?)",
+                        (self.story_promise_id, target_id),
+                    )
+        self.story_promise_heading.setText(values["title"] or "Promesse sans titre")
+        if refresh:
+            self._refresh_story_promises()
+            self._refresh_promise_control()
+        if not silent:
+            self.save_state.setText("Promesse enregistrée")
+            QTimer.singleShot(2200, lambda: self.save_state.setText(""))
+
+    def _delete_story_promise(self) -> None:
+        if not self.story_promise_id:
+            return
+        if QMessageBox.question(self, "Supprimer la promesse", "Supprimer cette promesse ?") != QMessageBox.StandardButton.Yes:
+            return
+        self.db.run("DELETE FROM story_promises WHERE id=? AND project_id=?", (self.story_promise_id, self.active_project))
+        self.story_promise_id = None
+        self._refresh_story_promises(select_first=True)
+        self._refresh_promise_control()
+
+    def _refresh_story_moments(self, _value=None, select_first: bool = False) -> None:
+        if not hasattr(self, "story_moment_list"):
+            return
+        query = self.story_moment_search.text().strip().casefold()
+        selected_type = self.story_moment_filter.currentData() or ""
+        rows = self.db.q("SELECT * FROM story_moments WHERE project_id=? ORDER BY position,id", (self.active_project,))
+        self.story_moment_list.blockSignals(True)
+        self.story_moment_list.clear()
+        selected_item = None
+        visible = 0
+        for row in rows:
+            if selected_type and row["moment_type"] != selected_type:
+                continue
+            if query and query not in f"{row['title']} {row['description']} {row['moment_type']}".casefold():
+                continue
+            visible += 1
+            item = QListWidgetItem(f"{row['title'] or 'Moment sans titre'}\n{row['moment_type']} · {row['status']}")
+            item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+            item.setSizeHint(QSize(0, 66))
+            self.story_moment_list.addItem(item)
+            if int(row["id"]) == self.story_moment_id:
+                selected_item = item
+        if selected_item:
+            self.story_moment_list.setCurrentItem(selected_item)
+        elif select_first and self.story_moment_list.count():
+            self.story_moment_list.setCurrentRow(0)
+            selected_item = self.story_moment_list.currentItem()
+        self.story_moment_list.blockSignals(False)
+        self.story_moment_count.setText(f"{visible}/{len(rows)}" if visible != len(rows) else str(len(rows)))
+        if selected_item:
+            self._load_story_moment(int(selected_item.data(Qt.ItemDataRole.UserRole)))
+
+    def _story_moment_selected(self, current: QListWidgetItem | None, _previous=None) -> None:
+        if not current or self._promise_loading:
+            return
+        target_id = int(current.data(Qt.ItemDataRole.UserRole))
+        if self.story_moment_id and self.story_moment_id != target_id:
+            self._save_story_moment(silent=True, refresh=False)
+        self._load_story_moment(target_id)
+
+    def _load_story_moment(self, moment_id: int) -> None:
+        row = self.db.one("SELECT * FROM story_moments WHERE id=? AND project_id=?", (moment_id, self.active_project))
+        if not row:
+            return
+        self._promise_loading = True
+        self.story_moment_id = moment_id
+        self.story_moment_heading.setText(row["title"] or "Moment sans titre")
+        for key, field in self.story_moment_fields.items():
+            set_field_value(field, row[key] or "")
+        specs = {
+            "story_nodes": ("story_moment_story_nodes", "node_id"),
+            "sequences": ("story_moment_sequences", "sequence_id"),
+            "scenes": ("story_moment_scenes", "scene_id"),
+            "events": ("story_moment_events", "event_id"),
+            "conflicts": ("story_moment_conflicts", "conflict_id"),
+        }
+        for key, picker in self.story_moment_connections.items():
+            table, column = specs[key]
+            selected = {int(item[0]) for item in self.db.q(f"SELECT {column} FROM {table} WHERE moment_id=?", (moment_id,))}
+            self._set_picker_checked_ids(picker, selected)
+        self._promise_loading = False
+
+    def _new_story_moment(self) -> None:
+        self._save_story_moment(silent=True, refresh=False)
+        position = int(self.db.one("SELECT COUNT(*) FROM story_moments WHERE project_id=?", (self.active_project,))[0])
+        self.story_moment_id = self.db.run(
+            """INSERT INTO story_moments(
+            project_id,position,moment_type,title,status,created_at,updated_at
+            ) VALUES(?,?,?,?,?,?,?)""",
+            (self.active_project, position, "Confrontation", "Nouveau moment", "Idée", NOW(), NOW()),
+        ).lastrowid
+        self._refresh_story_moments(select_first=True)
+        self._refresh_promise_control()
+
+    def _save_story_moment(self, _checked: bool = False, silent: bool = False, refresh: bool = True) -> None:
+        if not self.story_moment_id or not hasattr(self, "story_moment_fields"):
+            return
+        values = {key: field_value(field) for key, field in self.story_moment_fields.items()}
+        self.db.run(
+            """UPDATE story_moments SET moment_type=?,title=?,description=?,narrative_function=?,
+            placement_note=?,status=?,updated_at=? WHERE id=? AND project_id=?""",
+            (
+                values["moment_type"], values["title"], values["description"],
+                values["narrative_function"], values["placement_note"], values["status"],
+                NOW(), self.story_moment_id, self.active_project,
+            ),
+        )
+        specs = {
+            "story_nodes": ("story_moment_story_nodes", "node_id"),
+            "sequences": ("story_moment_sequences", "sequence_id"),
+            "scenes": ("story_moment_scenes", "scene_id"),
+            "events": ("story_moment_events", "event_id"),
+            "conflicts": ("story_moment_conflicts", "conflict_id"),
+        }
+        with self.db.conn:
+            for key, picker in self.story_moment_connections.items():
+                table, column = specs[key]
+                self.db.conn.execute(f"DELETE FROM {table} WHERE moment_id=?", (self.story_moment_id,))
+                for target_id in self._picker_checked_ids(picker):
+                    self.db.conn.execute(
+                        f"INSERT OR IGNORE INTO {table}(moment_id,{column}) VALUES(?,?)",
+                        (self.story_moment_id, target_id),
+                    )
+        self.story_moment_heading.setText(values["title"] or "Moment sans titre")
+        if refresh:
+            self._refresh_story_moments()
+            self._refresh_promise_control()
+        if not silent:
+            self.save_state.setText("Moment enregistré")
+            QTimer.singleShot(2200, lambda: self.save_state.setText(""))
+
+    def _delete_story_moment(self) -> None:
+        if not self.story_moment_id:
+            return
+        if QMessageBox.question(self, "Supprimer le moment", "Supprimer ce moment fort ?") != QMessageBox.StandardButton.Yes:
+            return
+        self.db.run("DELETE FROM story_moments WHERE id=? AND project_id=?", (self.story_moment_id, self.active_project))
+        self.story_moment_id = None
+        self._refresh_story_moments(select_first=True)
+        self._refresh_promise_control()
+
+    def _convert_story_moment(self, target: str) -> None:
+        if not self.story_moment_id:
+            return
+        self._save_story_moment(silent=True, refresh=False)
+        row = self.db.one("SELECT * FROM story_moments WHERE id=?", (self.story_moment_id,))
+        if not row:
+            return
+        title = row["title"] or "Moment sans titre"
+        description = row["description"] or ""
+        if target == "story_node":
+            count = int(self.db.one("SELECT COUNT(*) FROM story_map_nodes WHERE project_id=?", (self.active_project,))[0])
+            target_id = self.db.create_story_map_node(
+                self.active_project, title, description, "moment", 80 + (count % 5) * 290, 80 + (count // 5) * 210,
+            )
+            table, column, key, label = "story_moment_story_nodes", "node_id", "story_nodes", title
+        elif target == "sequence":
+            count = int(self.db.one("SELECT COUNT(*) FROM sequence_blocks WHERE project_id=?", (self.active_project,))[0])
+            target_id = self.db.create_sequence_block(
+                self.active_project, count, title, row["narrative_function"] or "", description, "",
+            )
+            table, column, key, label = "story_moment_sequences", "sequence_id", "sequences", f"{count + 1:02d} · {title}"
+        else:
+            count = int(self.db.one("SELECT COUNT(*) FROM scene_rows WHERE project_id=?", (self.active_project,))[0])
+            target_id = self.db.run(
+                """INSERT INTO scene_rows(
+                project_id,position,title,duration,objective,change_note,created_at,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?)""",
+                (self.active_project, count, title, 0, row["narrative_function"] or "", description, NOW(), NOW()),
+            ).lastrowid
+            table, column, key, label = "story_moment_scenes", "scene_id", "scenes", f"{count + 1:02d} · {title}"
+        self.db.run(f"INSERT OR IGNORE INTO {table}(moment_id,{column}) VALUES(?,?)", (self.story_moment_id, target_id))
+        picker = self.story_moment_connections[key]
+        item = QListWidgetItem(label)
+        item.setData(Qt.ItemDataRole.UserRole, int(target_id))
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        item.setCheckState(Qt.CheckState.Checked)
+        picker.addItem(item)
+        status = self.story_moment_fields["status"]
+        if isinstance(status, QComboBox) and status.currentText() == "Idée":
+            status.setCurrentText("Placée")
+        self._save_story_moment(silent=True)
+        self.save_state.setText("Moment ajouté au projet")
+        QTimer.singleShot(2200, lambda: self.save_state.setText(""))
+
+    def _save_promise_workspace(self, _checked: bool = False, silent: bool = False) -> None:
+        if not hasattr(self, "hook_fields") or not self.active_project:
+            return
+        self._save_hook_profile(silent=True)
+        self._save_story_promise(silent=True, refresh=False)
+        self._save_story_moment(silent=True, refresh=False)
+        self._refresh_promise_control()
+        if not silent:
+            self.save_state.setText("Accroche et promesses enregistrées")
+            QTimer.singleShot(2200, lambda: self.save_state.setText(""))
+
+    def _refresh_promise_control(self) -> None:
+        if not hasattr(self, "promise_control_table"):
+            return
+        rows: list[tuple[str, str, str, str, str, str, bool]] = []
+        promises = self.db.q("SELECT * FROM story_promises WHERE project_id=? ORDER BY position,id", (self.active_project,))
+        for item in promises:
+            needs_attention = item["status"] not in {"Accomplie", "Abandonnée"} and not item["payoff_note"].strip()
+            rows.append((
+                "Promesse", item["title"] or "Sans titre", item["status"],
+                item["planted_note"] or "—", item["development_note"] or "—",
+                item["payoff_note"] or "À accomplir", needs_attention,
+            ))
+        moments = self.db.q("SELECT * FROM story_moments WHERE project_id=? ORDER BY position,id", (self.active_project,))
+        for item in moments:
+            link_count = sum(
+                int(self.db.one(f"SELECT COUNT(*) FROM {table} WHERE moment_id=?", (item["id"],))[0])
+                for table in (
+                    "story_moment_story_nodes", "story_moment_sequences", "story_moment_scenes",
+                    "story_moment_events", "story_moment_conflicts",
+                )
+            )
+            needs_attention = item["status"] not in {"Écartée", "Écrite"} and link_count == 0
+            rows.append((
+                "Moment fort", item["title"] or "Sans titre", item["status"],
+                item["placement_note"] or "Non placé", item["narrative_function"] or "—",
+                f"{link_count} connexion{'s' if link_count != 1 else ''}", needs_attention,
+            ))
+        self.promise_control_table.setRowCount(len(rows))
+        attention = 0
+        for row_index, values in enumerate(rows):
+            needs_attention = values[-1]
+            attention += int(needs_attention)
+            for column, value in enumerate(values[:-1]):
+                cell = QTableWidgetItem(value)
+                if needs_attention and column in {2, 5}:
+                    cell.setForeground(QBrush(QColor(self.palette.accent)))
+                self.promise_control_table.setItem(row_index, column, cell)
+            self.promise_control_table.setRowHeight(row_index, 72)
+        self.promise_diagnostic.setText(f"{attention} À SUIVRE")
+
+    # ---------- Project image library ----------
+
+    def show_images(self) -> None:
+        page = self._begin_page("Images", "images")
+        self._page_header(
+            page,
+            "Références visuelles",
+            "Bibliothèque d’images",
+            "Conserve des lieux, atmosphères, objets ou personnages de référence pour chaque projet.",
+        )
+        library = make_card()
+        library_box = QVBoxLayout(library)
+        library_box.setContentsMargins(16, 14, 16, 14)
+        head = QHBoxLayout()
+        head.addWidget(make_label("IMAGES DU PROJET", "Caption"))
+        head.addStretch()
+        self.image_count = make_label("0", "AccentPill")
+        head.addWidget(self.image_count)
+        head.addWidget(make_button("+ Ajouter une image", "primary", self._add_library_image))
+        library_box.addLayout(head)
+        filters = QHBoxLayout()
+        self.image_search = QLineEdit()
+        self.image_search.setPlaceholderText("Rechercher par titre, catégorie ou note…")
+        self.image_search.setClearButtonEnabled(True)
+        filters.addWidget(self.image_search, 1)
+        self.image_category_filter = QComboBox()
+        self.image_category_filter.addItem("Toutes les catégories", "")
+        for category in ("Lieu / décor", "Atmosphère", "Personnage", "Objet", "Couleur / texture", "Autre"):
+            self.image_category_filter.addItem(category, category)
+        filters.addWidget(self.image_category_filter)
+        self.image_tag_filter = QComboBox()
+        self.image_tag_filter.addItem("Tous les tags", 0)
+        if self.active_project:
+            for tag in self.db.q(
+                "SELECT id,name FROM tags WHERE project_id=? ORDER BY name COLLATE NOCASE",
+                (self.active_project,),
+            ):
+                self.image_tag_filter.addItem(f"#{tag['name']}", int(tag["id"]))
+        filters.addWidget(self.image_tag_filter)
+        library_box.addLayout(filters)
+        self.image_library_list = QListWidget()
+        self.image_library_list.setObjectName("ImageLibrary")
+        self.image_library_list.setViewMode(QListView.ViewMode.IconMode)
+        self.image_library_list.setIconSize(QSize(170, 105))
+        self.image_library_list.setGridSize(QSize(200, 155))
+        self.image_library_list.setResizeMode(QListView.ResizeMode.Adjust)
+        self.image_library_list.setMovement(QListView.Movement.Static)
+        self.image_library_list.setWordWrap(True)
+        library_box.addWidget(self.image_library_list, 1)
+        actions = QHBoxLayout()
+        actions.addWidget(make_button("Ouvrir", "secondary", self._open_library_image))
+        actions.addWidget(make_button("Supprimer", "danger", self._delete_library_image))
+        actions.addStretch()
+        actions.addWidget(make_label("Les images sont enregistrées dans la base locale du projet.", "Muted"))
+        library_box.addLayout(actions)
+        page.addWidget(library, 1)
+        self.image_search.textChanged.connect(self._refresh_library_images)
+        self.image_category_filter.currentIndexChanged.connect(self._refresh_library_images)
+        self.image_tag_filter.currentIndexChanged.connect(self._refresh_library_images)
+        self._refresh_library_images()
+
+    def _refresh_library_images(self) -> None:
+        self.image_library_list.clear()
+        if not self.active_project:
+            self.image_count.setText("0")
+            return
+        rows = self.db.q(
+            "SELECT id,title,category,notes,file_name,image_data FROM image_library WHERE project_id=? ORDER BY id DESC",
+            (self.active_project,),
+        )
+        total = len(rows)
+        query = self.image_search.text().strip().casefold() if hasattr(self, "image_search") else ""
+        category = self.image_category_filter.currentData() if hasattr(self, "image_category_filter") else ""
+        selected_tag = int(self.image_tag_filter.currentData() or 0)
+        tagged_ids = {
+            int(link["entity_id"])
+            for link in self.db.q(
+                """SELECT entity_id FROM entity_tags
+                WHERE tag_id=? AND target_type='image'""",
+                (selected_tag,),
+            )
+        } if selected_tag else set()
+        rows = [
+            row for row in rows
+            if (not category or row["category"] == category)
+            and (not selected_tag or int(row["id"]) in tagged_ids)
+            and (
+                not query
+                or query in f"{row['title']} {row['category']} {row['notes']} {row['file_name']}".casefold()
+            )
+        ]
+        for row in rows:
+            pixmap = QPixmap()
+            pixmap.loadFromData(bytes(row["image_data"]))
+            item = QListWidgetItem(QIcon(pixmap), row["title"] or "Image sans titre")
+            item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+            item.setToolTip(row["category"])
+            self.image_library_list.addItem(item)
+        self.image_count.setText(str(len(rows)) if len(rows) == total else f"{len(rows)} / {total}")
+
+    def _add_library_image(self) -> None:
+        if not self.active_project:
+            QMessageBox.information(self, "Aucun projet", "Choisis d’abord un projet.")
+            return
+        selected, _filter = QFileDialog.getOpenFileName(
+            self,
+            "Ajouter une image",
+            "",
+            "Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif)",
+        )
+        if not selected:
+            return
+        path = Path(selected)
+        try:
+            data = path.read_bytes()
+        except OSError as exc:
+            QMessageBox.warning(self, "Image inaccessible", str(exc))
+            return
+        if len(data) > IDEA_ATTACHMENT_LIMIT:
+            QMessageBox.warning(self, "Image trop volumineuse", "La limite est de 25 Mo par image.")
+            return
+        pixmap = QPixmap()
+        if not pixmap.loadFromData(data):
+            QMessageBox.warning(self, "Format non reconnu", "Ce fichier ne peut pas être affiché comme une image.")
+            return
+        title, accepted = QInputDialog.getText(self, "Titre de l’image", "Nom de la référence", text=path.stem)
+        if not accepted:
+            return
+        categories = ["Lieu / décor", "Atmosphère", "Personnage", "Objet", "Couleur / texture", "Autre"]
+        category, accepted = QInputDialog.getItem(self, "Catégorie", "Type de référence", categories, editable=False)
+        if not accepted:
+            return
+        tags, accepted = QInputDialog.getText(
+            self,
+            "Tags de l’image",
+            "Tags séparés par des virgules (facultatif)",
+        )
+        if not accepted:
+            return
+        image_id = self.db.run(
+            """INSERT INTO image_library(
+            project_id,title,category,notes,file_name,mime_type,image_data,created_at,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?)""",
+            (
+                self.active_project,
+                title.strip() or path.stem,
+                category,
+                "",
+                path.name,
+                mimetypes.guess_type(path.name)[0] or "image/png",
+                data,
+                NOW(),
+                NOW(),
+            ),
+        ).lastrowid
+        self._save_entity_tag_text("image", int(image_id), tags)
+        self._refresh_library_images()
+
+    def _selected_library_image(self):
+        selected = self.image_library_list.selectedItems()
+        if not selected:
+            return None
+        return self.db.one(
+            "SELECT * FROM image_library WHERE id=?",
+            (int(selected[0].data(Qt.ItemDataRole.UserRole)),),
+        )
+
+    def _open_library_image(self) -> None:
+        row = self._selected_library_image()
+        if not row:
+            return
+        temp_path = Path(tempfile.gettempdir()) / f"storyforge_image_{row['id']}_{Path(row['file_name']).name}"
+        temp_path.write_bytes(bytes(row["image_data"]))
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(temp_path)))
+
+    def _delete_library_image(self) -> None:
+        row = self._selected_library_image()
+        if not row:
+            return
+        if QMessageBox.question(self, "Supprimer l’image", "Retirer cette image de la bibliothèque ?") != QMessageBox.StandardButton.Yes:
+            return
+        self._delete_entity_tag_links("image", int(row["id"]))
+        self.db.run("DELETE FROM image_library WHERE id=?", (row["id"],))
+        self._refresh_library_images()
+
+    # ---------- Coordinated story views ----------
+
+    def show_story_overview(self) -> None:
+        page = self._begin_page("Vue d’ensemble", "overview", compact=True)
+        if not self.active_project:
+            page.addWidget(make_label("Crée ou sélectionne d’abord un projet.", "Muted"))
+            page.addStretch()
+            return
+        project = self.db.one("SELECT * FROM projects WHERE id=?", (self.active_project,))
+
+        heading = QHBoxLayout()
+        title_box = QVBoxLayout()
+        title_box.setSpacing(3)
+        title_box.addWidget(make_label("VUE COORDONNÉE DU RÉCIT", "Kicker"))
+        title_box.addWidget(
+            make_label(project["title"] if project else "Vue d’ensemble", "PageTitle")
+        )
+        title_box.addWidget(
+            make_label(
+                "Une seule histoire, plusieurs représentations. Chaque entrée ouvre sa source sans créer de copie.",
+                "Muted",
+                True,
+            )
+        )
+        heading.addLayout(title_box, 1)
+        heading.addWidget(
+            make_button("Exporter l’histoire terminée", "primary", self._export_final_story)
+        )
+        page.addLayout(heading)
+        page.addSpacing(10)
+
+        metrics = make_card()
+        metrics_box = QHBoxLayout(metrics)
+        metrics_box.setContentsMargins(16, 10, 16, 10)
+        metrics_box.setSpacing(20)
+        metric_specs = (
+            (
+                "DOCUMENTS",
+                "SELECT COUNT(*) FROM project_docs WHERE project_id=? AND TRIM(content)<>''",
+            ),
+            ("SÉQUENCES", "SELECT COUNT(*) FROM sequence_blocks WHERE project_id=?"),
+            ("SCÈNES", "SELECT COUNT(*) FROM scene_rows WHERE project_id=?"),
+            ("ÉVÉNEMENTS", "SELECT COUNT(*) FROM timeline_events WHERE project_id=?"),
+            ("PERSONNAGES", "SELECT COUNT(*) FROM characters WHERE project_id=?"),
+        )
+        for label, sql in metric_specs:
+            value = int(self.db.one(sql, (self.active_project,))[0])
+            metric = QVBoxLayout()
+            metric.setSpacing(1)
+            metric.addWidget(make_label(str(value), "SectionTitle"))
+            metric.addWidget(make_label(label, "Caption"))
+            metrics_box.addLayout(metric)
+        metrics_box.addStretch()
+        status = PROJECT_STATUS_LABELS.get(
+            project["project_status"] if project else "ongoing", "En cours"
+        )
+        metrics_box.addWidget(make_label(status.upper(), "AccentPill"))
+        page.addWidget(metrics)
+        page.addSpacing(8)
+
+        filters = make_card()
+        filters_box = QHBoxLayout(filters)
+        filters_box.setContentsMargins(12, 9, 12, 9)
+        filters_box.setSpacing(7)
+        self.overview_search = QLineEdit()
+        self.overview_search.setPlaceholderText("Filtrer toutes les vues…")
+        self.overview_search.setClearButtonEnabled(True)
+        filters_box.addWidget(self.overview_search, 1)
+        self.overview_character_filter = QComboBox()
+        self.overview_character_filter.addItem("Tous les personnages", 0)
+        for row in self.db.q(
+            "SELECT id,name FROM characters WHERE project_id=? ORDER BY name COLLATE NOCASE,id",
+            (self.active_project,),
+        ):
+            self.overview_character_filter.addItem(
+                row["name"] or "Personnage sans nom", int(row["id"])
+            )
+        filters_box.addWidget(self.overview_character_filter)
+        self.overview_location_filter = QComboBox()
+        self.overview_location_filter.addItem("Tous les lieux", 0)
+        for row in self.db.q(
+            "SELECT id,name FROM locations WHERE project_id=? ORDER BY position,name,id",
+            (self.active_project,),
+        ):
+            self.overview_location_filter.addItem(
+                row["name"] or "Lieu sans nom", int(row["id"])
+            )
+        filters_box.addWidget(self.overview_location_filter)
+        self.overview_status_filter = QComboBox()
+        self.overview_status_filter.addItem("Tous les statuts", "")
+        for value, label in SCENE_STATUSES:
+            self.overview_status_filter.addItem(label, value)
+        filters_box.addWidget(self.overview_status_filter)
+        self.overview_tag_filter = QComboBox()
+        self.overview_tag_filter.addItem("Tous les tags", 0)
+        for row in self.db.q(
+            "SELECT id,name FROM tags WHERE project_id=? ORDER BY name COLLATE NOCASE",
+            (self.active_project,),
+        ):
+            self.overview_tag_filter.addItem(f"#{row['name']}", int(row["id"]))
+        filters_box.addWidget(self.overview_tag_filter)
+        page.addWidget(filters)
+        page.addSpacing(8)
+
+        self.overview_tabs = QTabWidget()
+        self.overview_tabs.setObjectName("StoryOverviewTabs")
+        self.overview_documents = self._overview_tree(
+            ["Document", "État", "Contenu", "Dernière modification"]
+        )
+        self.overview_plan = self._overview_tree(
+            ["Plan", "Fonction / lieu", "Statut", "Durée"]
+        )
+        self.overview_cards = QListWidget()
+        self.overview_cards.setObjectName("OverviewSceneCards")
+        self.overview_cards.setViewMode(QListView.ViewMode.IconMode)
+        self.overview_cards.setResizeMode(QListView.ResizeMode.Adjust)
+        self.overview_cards.setMovement(QListView.Movement.Static)
+        self.overview_cards.setWordWrap(True)
+        self.overview_cards.setGridSize(QSize(225, 128))
+        self.overview_timeline = self._overview_tree(
+            ["Repère", "Événement", "Timeline", "Catégorie", "Personnages"]
+        )
+        self.overview_relations = self._overview_tree(
+            ["Personnage A", "Relation", "Personnage B", "Tension / évolution"]
+        )
+        self.overview_script = self._build_overview_script_tab()
+        for widget, label in (
+            (self.overview_documents, "Documents"),
+            (self.overview_plan, "Plan"),
+            (self.overview_cards, "Cartes"),
+            (self.overview_timeline, "Chronologie"),
+            (self.overview_relations, "Relations"),
+            (self.overview_script, "Script"),
+        ):
+            self.overview_tabs.addTab(widget, label)
+        saved_tab = int(
+            self.db.setting(f"overview_tab_{self.active_project}", "0") or 0
+        )
+        self.overview_tabs.setCurrentIndex(
+            min(max(saved_tab, 0), self.overview_tabs.count() - 1)
+        )
+        page.addWidget(self.overview_tabs, 1)
+
+        actions = QHBoxLayout()
+        self.overview_selection_note = make_label(
+            "Double-clique sur un élément pour ouvrir son outil d’origine.", "Muted"
+        )
+        actions.addWidget(self.overview_selection_note, 1)
+        actions.addWidget(
+            make_button("Ouvrir la sélection", "secondary", self._open_overview_selection)
+        )
+        self.overview_open_tool = make_button(
+            "Ouvrir la vue complète →", "primary", self._open_overview_tool
+        )
+        actions.addWidget(self.overview_open_tool)
+        page.addLayout(actions)
+
+        for widget in (
+            self.overview_documents,
+            self.overview_plan,
+            self.overview_timeline,
+            self.overview_relations,
+        ):
+            widget.itemDoubleClicked.connect(self._open_overview_item)
+            widget.itemSelectionChanged.connect(self._overview_selection_changed)
+        self.overview_cards.itemDoubleClicked.connect(self._open_overview_item)
+        self.overview_cards.itemSelectionChanged.connect(self._overview_selection_changed)
+        self.overview_tabs.currentChanged.connect(self._overview_tab_changed)
+        for control in (
+            self.overview_search,
+            self.overview_character_filter,
+            self.overview_location_filter,
+            self.overview_status_filter,
+            self.overview_tag_filter,
+        ):
+            if isinstance(control, QLineEdit):
+                control.textChanged.connect(self._refresh_story_overview)
+            else:
+                control.currentIndexChanged.connect(self._refresh_story_overview)
+        self._refresh_story_overview()
+        self._overview_tab_changed(self.overview_tabs.currentIndex())
+
+    @staticmethod
+    def _overview_tree(headers: list[str]) -> QTreeWidget:
+        tree = QTreeWidget()
+        tree.setObjectName("StoryOverviewTree")
+        tree.setHeaderLabels(headers)
+        tree.setAlternatingRowColors(True)
+        tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        for column in range(1, len(headers)):
+            tree.header().setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
+        tree.setColumnWidth(0, 280)
+        return tree
+
+    def _build_overview_script_tab(self) -> QWidget:
+        panel = QWidget()
+        panel.setObjectName("PanelCanvas")
+        box = QVBoxLayout(panel)
+        box.setContentsMargins(22, 22, 22, 22)
+        box.setSpacing(8)
+        box.addWidget(make_label("SCÉNARIO", "Caption"))
+        self.overview_script_title = make_label("Scénario du projet", "SectionTitle")
+        box.addWidget(self.overview_script_title)
+        self.overview_script_summary = make_label("", "Muted", True)
+        box.addWidget(self.overview_script_summary)
+        self.overview_script_excerpt = make_editor(240)
+        self.overview_script_excerpt.setReadOnly(True)
+        box.addWidget(self.overview_script_excerpt, 1)
+        script_actions = QHBoxLayout()
+        script_actions.addWidget(
+            make_button("Ouvrir l’Éditeur de scripts", "primary", self.show_script_editor)
+        )
+        script_actions.addStretch()
+        box.addLayout(script_actions)
+        return panel
+
+    def _overview_scene_rows(self) -> list[dict]:
+        clauses = ["scene.project_id=?"]
+        parameters: list[object] = [self.active_project]
+        character_id = int(self.overview_character_filter.currentData() or 0)
+        location_id = int(self.overview_location_filter.currentData() or 0)
+        status = self.overview_status_filter.currentData() or ""
+        tag_id = int(self.overview_tag_filter.currentData() or 0)
+        if character_id:
+            clauses.append(
+                "EXISTS(SELECT 1 FROM scene_characters c WHERE c.scene_id=scene.id AND c.character_id=?)"
+            )
+            parameters.append(character_id)
+        if location_id:
+            clauses.append(
+                "EXISTS(SELECT 1 FROM location_scenes l WHERE l.scene_id=scene.id AND l.location_id=?)"
+            )
+            parameters.append(location_id)
+        if status:
+            clauses.append("scene.status=?")
+            parameters.append(status)
+        if tag_id:
+            clauses.append(
+                "EXISTS(SELECT 1 FROM entity_tags t WHERE t.target_type='scene' "
+                "AND t.entity_id=scene.id AND t.tag_id=?)"
+            )
+            parameters.append(tag_id)
+        rows = self.db.q(
+            f"""SELECT scene.*,location.name location_name,
+            GROUP_CONCAT(DISTINCT character.name) character_names
+            FROM scene_rows scene
+            LEFT JOIN location_scenes location_link ON location_link.scene_id=scene.id
+            LEFT JOIN locations location ON location.id=location_link.location_id
+            LEFT JOIN scene_characters character_link ON character_link.scene_id=scene.id
+            LEFT JOIN characters character ON character.id=character_link.character_id
+            WHERE {' AND '.join(clauses)} GROUP BY scene.id
+            ORDER BY scene.position,scene.id""",
+            parameters,
+        )
+        query = self.overview_search.text().strip().casefold()
+        return [
+            dict(row)
+            for row in rows
+            if not query
+            or query
+            in f"{row['title']} {row['objective']} {row['location_name']} {row['character_names']}".casefold()
+        ]
+
+    @staticmethod
+    def _set_overview_item_data(item, result: dict) -> None:
+        item.setData(0, Qt.ItemDataRole.UserRole, result) if isinstance(
+            item, QTreeWidgetItem
+        ) else item.setData(Qt.ItemDataRole.UserRole, result)
+
+    def _refresh_story_overview(self, _value=None) -> None:
+        if not hasattr(self, "overview_tabs"):
+            return
+        query = self.overview_search.text().strip().casefold()
+        tag_id = int(self.overview_tag_filter.currentData() or 0)
+        tagged_pairs = {
+            (row["target_type"], int(row["entity_id"]))
+            for row in self.db.q(
+                "SELECT target_type,entity_id FROM entity_tags WHERE tag_id=?", (tag_id,)
+            )
+        } if tag_id else set()
+
+        self.overview_documents.clear()
+        status_by_type = {
+            row["doc_type"]: row["status"]
+            for row in self.db.q(
+                "SELECT doc_type,status FROM development_status WHERE project_id=?",
+                (self.active_project,),
+            )
+        }
+        for row in self.db.q(
+            "SELECT * FROM project_docs WHERE project_id=? ORDER BY id",
+            (self.active_project,),
+        ):
+            if query and query not in f"{row['title']} {row['content']}".casefold():
+                continue
+            if tag_id and ("document", int(row["id"])) not in tagged_pairs:
+                continue
+            words = len(row["content"].split())
+            item = QTreeWidgetItem(
+                [
+                    row["title"],
+                    status_by_type.get(row["doc_type"], "draft").replace("_", " ").title(),
+                    f"{words} mot{'s' if words != 1 else ''}",
+                    row["updated_at"],
+                ]
+            )
+            self._set_overview_item_data(
+                item,
+                {
+                    "target": "document",
+                    "entity_id": int(row["id"]),
+                    "doc_type": row["doc_type"],
+                    "title": row["title"],
+                    "context": "Document",
+                },
+            )
+            self.overview_documents.addTopLevelItem(item)
+
+        scenes = self._overview_scene_rows()
+        self.overview_plan.clear()
+        sequence_items: dict[int, QTreeWidgetItem] = {}
+        for sequence in self.db.q(
+            "SELECT * FROM sequence_blocks WHERE project_id=? ORDER BY position,id",
+            (self.active_project,),
+        ):
+            if query and not any(
+                query in str(sequence[key] or "").casefold()
+                for key in ("title", "purpose", "events", "consequence")
+            ) and not any(
+                int(scene["source_sequence_id"] or 0) == int(sequence["id"])
+                for scene in scenes
+            ):
+                continue
+            if tag_id and ("sequence", int(sequence["id"])) not in tagged_pairs and not any(
+                int(scene["source_sequence_id"] or 0) == int(sequence["id"])
+                for scene in scenes
+            ):
+                continue
+            item = QTreeWidgetItem(
+                [
+                    f"Séquence {int(sequence['position']) + 1:02d} · {sequence['title'] or 'Sans titre'}",
+                    sequence["purpose"],
+                    "Séquence",
+                    "",
+                ]
+            )
+            self._set_overview_item_data(
+                item,
+                {
+                    "target": "sequence",
+                    "entity_id": int(sequence["id"]),
+                    "title": sequence["title"],
+                    "context": sequence["purpose"],
+                },
+            )
+            self.overview_plan.addTopLevelItem(item)
+            sequence_items[int(sequence["id"])] = item
+        unassigned = None
+        for scene in scenes:
+            sequence_id = int(scene["source_sequence_id"] or 0)
+            parent = sequence_items.get(sequence_id)
+            if parent is None:
+                if unassigned is None:
+                    unassigned = QTreeWidgetItem(["Scènes non rattachées", "", "", ""])
+                    self.overview_plan.addTopLevelItem(unassigned)
+                parent = unassigned
+            item = QTreeWidgetItem(
+                [
+                    f"Scène {int(scene['position']) + 1:02d} · {scene['title'] or 'Sans titre'}",
+                    scene["location_name"] or scene["objective"],
+                    SCENE_STATUS_LABELS.get(scene["status"], "Idée"),
+                    f"{float(scene['duration'] or 0):g} min" if scene["duration"] else "",
+                ]
+            )
+            self._set_overview_item_data(
+                item,
+                {
+                    "target": "scene",
+                    "entity_id": int(scene["id"]),
+                    "title": scene["title"],
+                    "context": scene["objective"],
+                },
+            )
+            parent.addChild(item)
+        self.overview_plan.expandAll()
+
+        self.overview_cards.clear()
+        for scene in scenes:
+            status = SCENE_STATUS_LABELS.get(scene["status"], "Idée")
+            context = " · ".join(
+                value
+                for value in (
+                    scene["location_name"],
+                    scene["character_names"],
+                    status,
+                )
+                if value
+            )
+            item = QListWidgetItem(
+                f"{int(scene['position']) + 1:02d}  {scene['title'] or 'Scène sans titre'}\n\n"
+                f"{context}\n{scene['objective'] or 'Objectif à préciser'}"
+            )
+            item.setSizeHint(QSize(215, 118))
+            self._set_overview_item_data(
+                item,
+                {
+                    "target": "scene",
+                    "entity_id": int(scene["id"]),
+                    "title": scene["title"],
+                    "context": context,
+                },
+            )
+            self.overview_cards.addItem(item)
+
+        self._refresh_overview_timeline(query, tag_id, tagged_pairs)
+        self._refresh_overview_relations(query)
+        script = self.db.one(
+            "SELECT title,content FROM project_docs WHERE project_id=? AND doc_type='script'",
+            (self.active_project,),
+        )
+        script_text = script["content"] if script else ""
+        elements = parse_screenplay(script_text)
+        scene_count = sum(1 for element, _value in elements if element == "Scene Heading")
+        self.overview_script_title.setText(script["title"] if script else "Scénario")
+        self.overview_script_summary.setText(
+            f"{scene_count} scène{'s' if scene_count != 1 else ''} écrite{'s' if scene_count != 1 else ''} · "
+            f"{len(script_text.split())} mots · le texte affiché ici reste en lecture seule."
+        )
+        self.overview_script_excerpt.setPlainText(script_text)
+
+    def _refresh_overview_timeline(
+        self, query: str, tag_id: int, tagged_pairs: set[tuple[str, int]]
+    ) -> None:
+        self.overview_timeline.clear()
+        character_id = int(self.overview_character_filter.currentData() or 0)
+        location_id = int(self.overview_location_filter.currentData() or 0)
+        rows = self.db.q(
+            """SELECT event.*,track.name track_name,
+            GROUP_CONCAT(DISTINCT character.name) character_names
+            FROM timeline_events event
+            LEFT JOIN timeline_tracks track ON track.id=event.track_id
+            LEFT JOIN timeline_event_characters link ON link.event_id=event.id
+            LEFT JOIN characters character ON character.id=link.character_id
+            WHERE event.project_id=? GROUP BY event.id ORDER BY event.time_hours,event.id""",
+            (self.active_project,),
+        )
+        linked_events = {
+            int(row["event_id"])
+            for row in self.db.q(
+                "SELECT event_id FROM location_events WHERE location_id=?", (location_id,)
+            )
+        } if location_id else set()
+        for row in rows:
+            event_id = int(row["id"])
+            if character_id and not self.db.one(
+                """SELECT 1 FROM timeline_event_characters
+                WHERE event_id=? AND character_id=?""",
+                (event_id, character_id),
+            ):
+                continue
+            if location_id and event_id not in linked_events:
+                continue
+            if tag_id and ("event", event_id) not in tagged_pairs:
+                continue
+            if query and query not in (
+                f"{row['title']} {row['description']} {row['category']} "
+                f"{row['place']} {row['character_names']}"
+            ).casefold():
+                continue
+            item = QTreeWidgetItem(
+                [
+                    row["display_label"] or f"{float(row['time_hours']):g} h",
+                    row["title"],
+                    row["track_name"] or "Timeline",
+                    row["category"],
+                    row["character_names"] or "",
+                ]
+            )
+            self._set_overview_item_data(
+                item,
+                {
+                    "target": "event",
+                    "entity_id": event_id,
+                    "title": row["title"],
+                    "context": row["category"],
+                },
+            )
+            self.overview_timeline.addTopLevelItem(item)
+
+    def _refresh_overview_relations(self, query: str) -> None:
+        self.overview_relations.clear()
+        character_id = int(self.overview_character_filter.currentData() or 0)
+        for row in self.db.q(
+            """SELECT relation.*,a.name name_a,b.name name_b
+            FROM character_relationships relation
+            JOIN characters a ON a.id=relation.character_a_id
+            JOIN characters b ON b.id=relation.character_b_id
+            WHERE relation.project_id=? ORDER BY a.name,b.name,relation.id""",
+            (self.active_project,),
+        ):
+            if character_id and character_id not in {
+                int(row["character_a_id"]), int(row["character_b_id"])
+            }:
+                continue
+            if query and query not in (
+                f"{row['name_a']} {row['name_b']} {row['relationship_type']} "
+                f"{row['description']} {row['tension']} {row['evolution']}"
+            ).casefold():
+                continue
+            detail = " · ".join(value for value in (row["tension"], row["evolution"]) if value)
+            item = QTreeWidgetItem(
+                [row["name_a"], row["relationship_type"], row["name_b"], detail]
+            )
+            self._set_overview_item_data(
+                item,
+                {
+                    "target": "relationship",
+                    "entity_id": int(row["id"]),
+                    "navigation_id": int(row["character_a_id"]),
+                    "title": f"{row['name_a']} → {row['name_b']}",
+                    "context": row["relationship_type"],
+                },
+            )
+            self.overview_relations.addTopLevelItem(item)
+
+    def _overview_current_item(self):
+        current = self.overview_tabs.currentWidget()
+        if isinstance(current, QTreeWidget):
+            return current.currentItem()
+        if isinstance(current, QListWidget):
+            return current.currentItem()
+        return None
+
+    def _overview_selection_changed(self) -> None:
+        item = self._overview_current_item()
+        if item is None:
+            self.overview_selection_note.setText(
+                "Double-clique sur un élément pour ouvrir son outil d’origine."
+            )
+            return
+        result = item.data(0, Qt.ItemDataRole.UserRole) if isinstance(
+            item, QTreeWidgetItem
+        ) else item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(result, dict):
+            self.overview_selection_note.setText(
+                f"{SEARCH_TARGETS.get(result['target'], 'Relation')} · {result['title']}"
+            )
+
+    def _open_overview_selection(self) -> None:
+        item = self._overview_current_item()
+        if item is not None:
+            self._open_overview_item(item, 0)
+
+    def _open_overview_item(self, item, _column: int = 0) -> None:
+        result = item.data(0, Qt.ItemDataRole.UserRole) if isinstance(
+            item, QTreeWidgetItem
+        ) else item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(result, dict):
+            # The shared router expects a tree item. Card view uses list
+            # items, so forward the same source record through a tiny proxy.
+            if isinstance(item, QTreeWidgetItem):
+                source_item = item
+            else:
+                source_item = QTreeWidgetItem()
+                source_item.setData(0, Qt.ItemDataRole.UserRole, result)
+            self._open_global_search_result(source_item, 0)
+
+    def _overview_tab_changed(self, index: int) -> None:
+        if not hasattr(self, "overview_open_tool"):
+            return
+        self.db.set_setting(f"overview_tab_{self.active_project}", index)
+        labels = (
+            "Ouvrir Construction →",
+            "Ouvrir le Plan global →",
+            "Ouvrir les Scènes →",
+            "Ouvrir la Chronologie →",
+            "Ouvrir les Relations →",
+            "Ouvrir l’Éditeur de scripts →",
+        )
+        self.overview_open_tool.setText(labels[index])
+        self._overview_selection_changed()
+
+    def _open_overview_tool(self) -> None:
+        index = self.overview_tabs.currentIndex()
+        if index == 0:
+            self.show_development()
+        elif index == 1:
+            self.db.set_setting(f"last_development_doc_{self.active_project}", "outline")
+            self.db.set_setting(f"outline_mode_{self.active_project}", "global")
+            self.show_development()
+        elif index == 2:
+            self.db.set_setting(f"last_development_doc_{self.active_project}", "scenes")
+            self.show_development()
+        elif index == 3:
+            self.show_timeline()
+        elif index == 4:
+            self.show_characters()
+            if self.character_id:
+                self._edit_character_relationships()
+        else:
+            self.show_script_editor()
+
+    # ---------- Projects ----------
+
+    def _project_setup_dialog(self, project=None, include_start_mode: bool = True) -> dict | None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Nouveau projet" if project is None else "Modifier le projet")
+        dialog.resize(620, 560 if include_start_mode else 500)
+        box = QVBoxLayout(dialog)
+        box.setContentsMargins(26, 24, 26, 24)
+        box.setSpacing(8)
+        box.addWidget(make_label("NOUVEAU PROJET" if project is None else "INFORMATIONS DU PROJET", "Caption"))
+        box.addWidget(make_label("Donne un cadre léger à ton histoire", "SectionTitle", True))
+        box.addWidget(
+            make_label(
+                "Ces choix servent de repères. Ils restent modifiables et ne valident aucune étape d’écriture.",
+                "Muted",
+                True,
+            )
+        )
+        box.addSpacing(5)
+        box.addWidget(make_label("TITRE PROVISOIRE", "Caption"))
+        title = QLineEdit(project["title"] if project else "Nouveau projet")
+        title.selectAll()
+        box.addWidget(title)
+
+        choices = QHBoxLayout()
+        support_box = QVBoxLayout()
+        support_box.addWidget(make_label("SUPPORT", "Caption"))
+        support = QComboBox()
+        support.addItem("Film / scénario", "film")
+        support.setToolTip("StoryForge accompagne actuellement l’écriture pour l’écran.")
+        support_box.addWidget(support)
+        choices.addLayout(support_box, 1)
+        format_box = QVBoxLayout()
+        format_box.addWidget(make_label("FORMAT", "Caption"))
+        story_format = QComboBox()
+        for key, label, _duration, _description in PROJECT_FORMATS:
+            story_format.addItem(label, key)
+        current_format = project["story_format"] if project else "short"
+        story_format.setCurrentIndex(max(0, story_format.findData(current_format)))
+        format_box.addWidget(story_format)
+        choices.addLayout(format_box, 1)
+        duration_box = QVBoxLayout()
+        duration_box.addWidget(make_label("DURÉE CIBLE", "Caption"))
+        duration = QSpinBox()
+        duration.setRange(0, 600)
+        duration.setSuffix(" min")
+        duration.setSpecialValueText("Libre")
+        default_duration = next(
+            value for key, _label, value, _description in PROJECT_FORMATS if key == current_format
+        )
+        duration.setValue(int(project["target_duration"] or 0) if project else default_duration)
+        duration_box.addWidget(duration)
+        choices.addLayout(duration_box, 1)
+        box.addLayout(choices)
+
+        format_note = make_label("", "Muted", True)
+        box.addWidget(format_note)
+
+        def update_format_note(_index: int, update_duration: bool = True) -> None:
+            selected = story_format.currentData()
+            for key, _label, suggested_duration, description in PROJECT_FORMATS:
+                if key != selected:
+                    continue
+                format_note.setText(description)
+                if update_duration:
+                    duration.setValue(suggested_duration)
+                break
+
+        update_format_note(story_format.currentIndex(), update_duration=False)
+        story_format.currentIndexChanged.connect(update_format_note)
+
+        start_mode = QComboBox()
+        if include_start_mode:
+            box.addSpacing(5)
+            box.addWidget(make_label("POINT DE DÉPART", "Caption"))
+            start_mode.addItem("Être guidé de l’idée à la graine", "guided")
+            start_mode.addItem("Commencer librement dans Construction", "free")
+            if project:
+                start_mode.setCurrentIndex(max(0, start_mode.findData(project["start_mode"])))
+            box.addWidget(start_mode)
+            start_note = make_label("", "Muted", True)
+            box.addWidget(start_note)
+
+            def update_start_note() -> None:
+                start_note.setText(
+                    "StoryForge posera une question à la fois avant de créer le projet."
+                    if start_mode.currentData() == "guided"
+                    else "Le projet sera créé immédiatement, avec tous les outils disponibles."
+                )
+
+            start_mode.currentIndexChanged.connect(update_start_note)
+            update_start_note()
+
+        actions = QHBoxLayout()
+        actions.addStretch()
+        actions.addWidget(make_button("Annuler", "secondary", dialog.reject))
+        actions.addWidget(
+            make_button("Continuer" if include_start_mode else "Enregistrer", "primary", dialog.accept)
+        )
+        box.addStretch()
+        box.addLayout(actions)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return None
+        return {
+            "title": title.text().strip() or "Projet sans titre",
+            "project_type": support.currentData(),
+            "story_format": story_format.currentData(),
+            "target_duration": int(duration.value()),
+            "start_mode": start_mode.currentData() if include_start_mode else project["start_mode"],
+        }
+
+    def _create_empty_project(self, values: dict) -> int:
+        project_id = self.db.run(
+            """INSERT INTO projects(
+            created_at,title,stage,next_decision,project_type,story_format,target_duration,
+            start_mode,project_status,archived,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                NOW(), values["title"], "Idée", "Commencer par la prémisse dans Construction.",
+                values["project_type"], values["story_format"], values["target_duration"],
+                values["start_mode"], "ongoing", 0, NOW(),
+            ),
+        ).lastrowid
+        self.active_project = project_id
+        self.project_id = project_id
+        self.db.set_setting("active_project", project_id)
+        self.db.set_setting(f"last_development_doc_{project_id}", DEVELOPMENT_DOCUMENTS[0][0])
+        self._update_project_chips()
+        return project_id
+
+    def show_projects(self) -> None:
+        page = self._begin_page("Projets", "projects")
+        self._page_header(
+            page,
+            "De la graine à l’écriture",
+            "Tes projets",
+            "Retrouve toutes tes histoires ici. La Construction de chaque projet possède désormais son propre espace.",
+        )
+        projects = make_card()
+        projects_box = QVBoxLayout(projects)
+        projects_box.setContentsMargins(18, 16, 18, 16)
+        projects_box.setSpacing(10)
+        head = QHBoxLayout()
+        head.addWidget(make_label("TOUS LES PROJETS", "Caption"))
+        head.addStretch()
+        self.project_count = make_label("0", "AccentPill")
+        head.addWidget(self.project_count)
+        head.addWidget(make_button("Importer", "secondary", self._import_project))
+        head.addWidget(make_button("＋ Nouveau projet", "primary", self._new_project))
+        projects_box.addLayout(head)
+
+        filters = QHBoxLayout()
+        filters.setSpacing(8)
+        self.project_search = QLineEdit()
+        self.project_search.setPlaceholderText("Rechercher un projet…")
+        self.project_search.setClearButtonEnabled(True)
+        filters.addWidget(self.project_search, 1)
+        self.project_status_filter = QComboBox()
+        self.project_status_filter.addItem("Tous les projets actifs", "active")
+        self.project_status_filter.addItem("En cours", "ongoing")
+        self.project_status_filter.addItem("En pause", "paused")
+        self.project_status_filter.addItem("Terminés", "completed")
+        self.project_status_filter.addItem("Archives", "archived")
+        filters.addWidget(self.project_status_filter)
+        self.project_sort = QComboBox()
+        self.project_sort.addItem("Modifiés récemment", "updated")
+        self.project_sort.addItem("Créés récemment", "created")
+        self.project_sort.addItem("Titre A–Z", "title")
+        filters.addWidget(self.project_sort)
+        projects_box.addLayout(filters)
+        self.project_tree = QTreeWidget()
+        self.project_tree.setHeaderLabels(
+            ["Projet", "Progression", "Prochaine étape", "Statut", "Dernière modification"]
+        )
+        self.project_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for column in range(1, 5):
+            self.project_tree.header().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        self.project_tree.itemSelectionChanged.connect(self._load_project)
+        self.project_tree.itemDoubleClicked.connect(
+            lambda _item, _column: self._open_project_construction("premise")
+        )
+        self.project_search.textChanged.connect(self._refresh_projects)
+        self.project_status_filter.currentIndexChanged.connect(self._refresh_projects)
+        self.project_sort.currentIndexChanged.connect(self._refresh_projects)
+        projects_box.addWidget(self.project_tree, 1)
+        projects_box.addWidget(make_separator())
+        actions = QHBoxLayout()
+        self.project_selection_copy = make_label("Sélectionne un projet pour le gérer.", "Muted", True)
+        actions.addWidget(self.project_selection_copy, 1)
+        self.project_manage_buttons = []
+        for button in (
+            make_button("Activer", "secondary", self._activate_project),
+            make_button("Dupliquer", "secondary", self._duplicate_project),
+        ):
+            button.setEnabled(False)
+            self.project_manage_buttons.append(button)
+            actions.addWidget(button)
+        self.project_archive_button = make_button("Archiver", "secondary", self._toggle_project_archive)
+        self.project_archive_button.setEnabled(False)
+        self.project_manage_buttons.append(self.project_archive_button)
+        actions.addWidget(self.project_archive_button)
+        more_button = make_button("Plus…", "secondary")
+        self.project_more_menu = QMenu(more_button)
+        self.project_edit_action = self.project_more_menu.addAction("Modifier les informations")
+        self.project_edit_action.triggered.connect(self._save_project)
+        self.project_details_action = self.project_more_menu.addAction("Repères narratifs")
+        self.project_details_action.triggered.connect(self._edit_project_details)
+        self.project_export_action = self.project_more_menu.addAction("Exporter le projet")
+        self.project_export_action.triggered.connect(self._export_project)
+        self.project_final_export_action = self.project_more_menu.addAction(
+            "Exporter l’histoire terminée…"
+        )
+        self.project_final_export_action.triggered.connect(self._export_final_story)
+        self.project_more_menu.addSeparator()
+        self.project_resume_action = self.project_more_menu.addAction("Marquer en cours")
+        self.project_resume_action.triggered.connect(lambda: self._set_project_status("ongoing"))
+        self.project_pause_action = self.project_more_menu.addAction("Marquer en pause")
+        self.project_pause_action.triggered.connect(lambda: self._set_project_status("paused"))
+        self.project_complete_action = self.project_more_menu.addAction("Marquer terminé")
+        self.project_complete_action.triggered.connect(lambda: self._set_project_status("completed"))
+        self.project_more_menu.addSeparator()
+        self.project_delete_action = self.project_more_menu.addAction("Supprimer définitivement…")
+        self.project_delete_action.triggered.connect(self._delete_project)
+        self.project_menu_actions = [
+            self.project_edit_action,
+            self.project_details_action,
+            self.project_export_action,
+            self.project_final_export_action,
+            self.project_resume_action,
+            self.project_pause_action,
+            self.project_complete_action,
+            self.project_delete_action,
+        ]
+        for action in self.project_menu_actions:
+            action.setEnabled(False)
+        more_button.setMenu(self.project_more_menu)
+        actions.addWidget(more_button)
+        actions.addStretch()
+        self.project_open_button = make_button("Ouvrir Construction →", "primary", self._open_project_construction)
+        self.project_open_button.setEnabled(False)
+        actions.addWidget(self.project_open_button)
+        projects_box.addLayout(actions)
+        page.addWidget(projects, 1)
+        self.project_id: int | None = None
+        self._refresh_projects()
+
+    def _open_project_workshop(self) -> None:
+        if self.project_id:
+            self._activate_project()
+            self.show_workshop()
+
+    def _refresh_projects(self) -> None:
+        selected_id = self.project_id or self.active_project
+        self.project_tree.clear()
+        selected_item = None
+        first_item = None
+        rows = list(self.db.q("SELECT * FROM projects"))
+        status_filter = self.project_status_filter.currentData()
+        if status_filter == "archived":
+            rows = [row for row in rows if int(row["archived"] or 0)]
+        else:
+            rows = [row for row in rows if not int(row["archived"] or 0)]
+            if status_filter != "active":
+                rows = [row for row in rows if row["project_status"] == status_filter]
+        query = self.project_search.text().strip().casefold()
+        if query:
+            rows = [row for row in rows if query in row["title"].casefold()]
+        sort_mode = self.project_sort.currentData()
+        if sort_mode == "title":
+            rows.sort(key=lambda row: row["title"].casefold())
+        elif sort_mode == "created":
+            rows.sort(key=lambda row: (row["created_at"], row["id"]), reverse=True)
+        else:
+            rows.sort(key=lambda row: (row["updated_at"], row["id"]), reverse=True)
+        for row in rows:
+            completed_count = len(self._completed_development_documents(row["id"]))
+            completed = self._completed_development_documents(row["id"])
+            next_key = next((key for key, _title in DEVELOPMENT_DOCUMENTS if key not in completed), None)
+            next_title = dict(DEVELOPMENT_DOCUMENTS).get(next_key, "Construction complète")
+            format_label = PROJECT_FORMAT_LABELS.get(row["story_format"], "Durée libre")
+            duration_label = f" · cible {row['target_duration']} min" if int(row["target_duration"] or 0) else ""
+            project_copy = f"{row['title']}\nFilm · {format_label}{duration_label}"
+            status = PROJECT_STATUS_LABELS.get(row["project_status"], "En cours")
+            if row["id"] == self.active_project and not int(row["archived"] or 0):
+                status += " · actif"
+            modified = self._format_project_modified(row["updated_at"] or row["created_at"])
+            item = QTreeWidgetItem(
+                [project_copy, f"{completed_count}/10", next_title, status, modified]
+            )
+            item.setData(0, Qt.ItemDataRole.UserRole, row["id"])
+            item.setData(0, Qt.ItemDataRole.UserRole + 1, bool(row["archived"]))
+            self.project_tree.addTopLevelItem(item)
+            first_item = first_item or item
+            if row["id"] == selected_id:
+                selected_item = item
+        total = self.db.one("SELECT COUNT(*) FROM projects")[0]
+        self.project_count.setText(f"{len(rows)}/{total}" if len(rows) != total else str(total))
+        target = selected_item or first_item
+        if target is not None:
+            self.project_tree.setCurrentItem(target)
+        else:
+            self._clear_project_dashboard()
+
+    def _format_project_modified(self, value: str) -> str:
+        try:
+            modified = datetime.fromisoformat(value)
+        except (TypeError, ValueError):
+            return "Date inconnue"
+        today = datetime.now().date()  # noqa: DTZ005 - local desktop date
+        if modified.date() == today:
+            return f"Aujourd’hui · {modified:%H:%M}"
+        if (today - modified.date()).days == 1:
+            return f"Hier · {modified:%H:%M}"
+        return f"{modified:%d/%m/%Y}"
+
+    def _new_project(self) -> None:
+        values = self._project_setup_dialog()
+        if not values:
+            return
+        if values["start_mode"] == "guided":
+            self.db.set_setting("pending_guided_project", json.dumps(values, ensure_ascii=False))
+            run_id = self._start_guide(
+                "seed",
+                title=values["title"],
+                assistance_level=self.db.setting("guide_assistance_level", "discovery"),
+            )
+            if run_id:
+                self.db.set_setting("pending_guided_project_run", str(run_id))
+            self.save_state.setText("Projet préparé · termine ce parcours pour le créer")
+            return
+        self.db.set_setting("pending_guided_project", "")
+        self.db.set_setting("pending_guided_project_run", "")
+        self._create_empty_project(values)
+        self._refresh_projects()
+
+    def _load_project(self) -> None:
+        selected = self.project_tree.selectedItems()
+        if not selected:
+            return
+        self.project_id = int(selected[0].data(0, Qt.ItemDataRole.UserRole))
+        row = self.db.one("SELECT * FROM projects WHERE id=?", (self.project_id,))
+        if not row:
+            return
+        completed = self._completed_development_documents(self.project_id)
+        next_key = next((key for key, _title in DEVELOPMENT_DOCUMENTS if key not in completed), None)
+        next_title = dict(DEVELOPMENT_DOCUMENTS).get(next_key, "Construction complète")
+        active_note = " · actif" if self.project_id == self.active_project else ""
+        format_label = PROJECT_FORMAT_LABELS.get(row["story_format"], "Durée libre")
+        target = f" · cible {row['target_duration']} min" if int(row["target_duration"] or 0) else ""
+        self.project_selection_copy.setText(
+            f"{row['title']}{active_note} · {format_label}{target} · {len(completed)}/10 étapes · prochaine : {next_title}"
+        )
+        for button in self.project_manage_buttons:
+            button.setEnabled(True)
+        for action in self.project_menu_actions:
+            action.setEnabled(True)
+        archived = bool(row["archived"])
+        self.project_archive_button.setText("Restaurer" if archived else "Archiver")
+        self.project_delete_action.setEnabled(archived)
+        self.project_open_button.setEnabled(not archived)
+        self.project_manage_buttons[0].setEnabled(not archived)
+
+    def _save_project(self) -> None:
+        if not self.project_id:
+            return
+        current = self.db.one("SELECT * FROM projects WHERE id=?", (self.project_id,))
+        if not current:
+            return
+        values = self._project_setup_dialog(current, include_start_mode=False)
+        if not values:
+            return
+        self.db.run(
+            """UPDATE projects SET title=?,project_type=?,story_format=?,target_duration=?,updated_at=?
+            WHERE id=?""",
+            (
+                values["title"], values["project_type"], values["story_format"],
+                values["target_duration"], NOW(), self.project_id,
+            ),
+        )
+        if self.project_id == self.active_project:
+            self._update_project_chips()
+        self._refresh_projects()
+
+    def _clear_project_dashboard(self) -> None:
+        self.project_id = None
+        self.project_selection_copy.setText("Crée un premier projet pour commencer.")
+        for button in self.project_manage_buttons:
+            button.setEnabled(False)
+        for action in self.project_menu_actions:
+            action.setEnabled(False)
+        self.project_open_button.setEnabled(False)
+
+    def _duplicate_project(self) -> None:
+        if not self.project_id:
+            return
+        source = self.db.one("SELECT title FROM projects WHERE id=?", (self.project_id,))
+        if not source:
+            return
+        title, accepted = QInputDialog.getText(
+            self,
+            "Dupliquer le projet",
+            "Titre de la copie",
+            text=f"{source['title']} — copie",
+        )
+        if not accepted:
+            return
+        with tempfile.NamedTemporaryFile(suffix=".storyforge.json", delete=False) as handle:
+            temporary_path = Path(handle.name)
+        try:
+            self.db.export_project(self.project_id, temporary_path)
+            duplicate_id = self.db.import_project(temporary_path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+        self.db.run(
+            """UPDATE projects SET title=?,created_at=?,updated_at=?,project_status='ongoing',archived=0
+            WHERE id=?""",
+            (title.strip() or f"{source['title']} — copie", NOW(), NOW(), duplicate_id),
+        )
+        self.project_id = duplicate_id
+        self.active_project = duplicate_id
+        self.db.set_setting("active_project", duplicate_id)
+        self._update_project_chips()
+        self._refresh_projects()
+        self.save_state.setText("Projet dupliqué avec toutes ses données")
+
+    def _toggle_project_archive(self) -> None:
+        if not self.project_id:
+            return
+        row = self.db.one("SELECT archived FROM projects WHERE id=?", (self.project_id,))
+        if not row:
+            return
+        restoring = bool(row["archived"])
+        self.db.run(
+            "UPDATE projects SET archived=?,project_status=?,updated_at=? WHERE id=?",
+            (0 if restoring else 1, "ongoing" if restoring else "archived", NOW(), self.project_id),
+        )
+        if not restoring and self.project_id == self.active_project:
+            self._choose_active_project(excluding=self.project_id)
+        self.project_id = None
+        self._refresh_projects()
+        self._update_project_chips()
+        self.save_state.setText("Projet restauré" if restoring else "Projet archivé")
+
+    def _choose_active_project(self, excluding: int | None = None) -> None:
+        row = self.db.one(
+            "SELECT id FROM projects WHERE archived=0 AND id<>? ORDER BY updated_at DESC,id DESC LIMIT 1",
+            (excluding or -1,),
+        )
+        self.active_project = int(row["id"]) if row else 0
+        self.db.set_setting("active_project", self.active_project)
+
+    def _set_project_status(self, status: str) -> None:
+        if not self.project_id or status not in {"ongoing", "paused", "completed"}:
+            return
+        row = self.db.one("SELECT archived FROM projects WHERE id=?", (self.project_id,))
+        if not row or row["archived"]:
+            return
+        self.db.run(
+            "UPDATE projects SET project_status=?,updated_at=? WHERE id=?",
+            (status, NOW(), self.project_id),
+        )
+        self._refresh_projects()
+        self.save_state.setText(f"Statut : {PROJECT_STATUS_LABELS[status]}")
+
+    def _delete_project(self) -> None:
+        if not self.project_id:
+            return
+        row = self.db.one("SELECT title,archived FROM projects WHERE id=?", (self.project_id,))
+        if not row or not row["archived"]:
+            QMessageBox.information(
+                self,
+                "Archiver d’abord",
+                "Un projet doit être archivé avant de pouvoir être supprimé définitivement.",
+            )
+            return
+        if QMessageBox.question(
+            self,
+            "Supprimer définitivement",
+            f"Supprimer définitivement « {row['title']} » et toutes ses données ?\n\nCette action est irréversible.",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        deleted_id = self.project_id
+        self.db.run("DELETE FROM projects WHERE id=?", (deleted_id,))
+        if deleted_id == self.active_project:
+            self._choose_active_project(excluding=deleted_id)
+        self.project_id = None
+        self._update_project_chips()
+        self._refresh_projects()
+        self.save_state.setText("Projet supprimé définitivement")
+
+    def _open_project_construction(self, key: str | None = None) -> None:
+        if not self.project_id:
+            return
+        row = self.db.one("SELECT archived FROM projects WHERE id=?", (self.project_id,))
+        if not row or row["archived"]:
+            return
+        self._activate_project()
+        target = key or "premise"
+        self.db.set_setting(f"last_development_doc_{self.project_id}", target)
+        self.show_development()
+
+    def _edit_project_details(self) -> None:
+        if not self.project_id:
+            return
+        project = self.db.one("SELECT * FROM projects WHERE id=?", (self.project_id,))
+        if not project:
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Repères du projet")
+        dialog.resize(700, 700)
+        box = QVBoxLayout(dialog)
+        box.setContentsMargins(24, 22, 24, 22)
+        box.setSpacing(8)
+        box.addWidget(make_label("REPÈRES DU PROJET", "Caption"))
+        box.addWidget(make_label("La graine copiée dans le projet reste modifiable.", "SectionTitle", True))
+        box.addWidget(
+            make_label(
+                "Ces repères alimentent les outils de Construction. Ils ne constituent pas une deuxième progression.",
+                "Muted",
+                True,
+            )
+        )
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        form = QWidget()
+        form.setObjectName("PanelCanvas")
+        form_box = QVBoxLayout(form)
+        form_box.setContentsMargins(2, 8, 8, 8)
+        form_box.setSpacing(8)
+        fields: dict[str, QLineEdit | QTextEdit] = {}
+        field_specs = [
+            ("PROTAGONISTE", "protagonist", False),
+            ("DÉSIR", "desire", False),
+            ("OBJECTIF CONCRET", "objective", False),
+            ("OPPOSITION", "opposition", False),
+            ("ENJEUX", "stakes", False),
+            ("CHANGEMENT POSSIBLE", "change_note", True),
+            ("FIN PROVISOIRE", "ending", True),
+            ("QUESTIONS OUVERTES", "open_questions", True),
+            ("PROBLÈME PRINCIPAL", "main_problem", True),
+            ("PROCHAINE ACTION PERSONNELLE", "next_decision", True),
+        ]
+        for caption, field_key, multiline in field_specs:
+            form_box.addWidget(make_label(caption, "Muted"))
+            field: QLineEdit | QTextEdit = make_editor(72) if multiline else QLineEdit()
+            set_field_value(field, project[field_key])
+            form_box.addWidget(field)
+            fields[field_key] = field
+        scroll.setWidget(form)
+        box.addWidget(scroll, 1)
+        actions = QHBoxLayout()
+        actions.addStretch()
+        actions.addWidget(make_button("Annuler", "secondary", dialog.reject))
+        save = make_button("Enregistrer", "primary")
+        actions.addWidget(save)
+        box.addLayout(actions)
+
+        def commit() -> None:
+            keys = list(fields)
+            values = [field_value(fields[field_key]) for field_key in keys]
+            self.db.run(
+                f"UPDATE projects SET {','.join(f'{field_key}=?' for field_key in keys)},updated_at=? WHERE id=?",
+                values + [NOW(), self.project_id],
+            )
+            dialog.accept()
+            self._load_project()
+
+        save.clicked.connect(commit)
+        dialog.exec()
+
+    def _activate_project(self) -> None:
+        if not self.project_id:
+            return
+        row = self.db.one("SELECT archived FROM projects WHERE id=?", (self.project_id,))
+        if not row or row["archived"]:
+            return
+        self.active_project = self.project_id
+        self.db.set_setting("active_project", str(self.active_project))
+        self._update_project_chips()
+        self._refresh_projects()
+
+    def _export_project(self) -> None:
+        if not self.project_id:
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Exporter le projet", "projet.storyforge.json", "StoryForge (*.storyforge.json);;JSON (*.json)")
+        if path:
+            self.db.export_project(self.project_id, Path(path))
+
+    @staticmethod
+    def _final_export_safe_name(value: str, fallback: str) -> str:
+        name = re.sub(r"[^\w.()-]+", "_", value.strip(), flags=re.UNICODE).strip("._")
+        return (name[:90] or fallback).replace("__", "_")
+
+    @staticmethod
+    def _final_export_markdown(
+        title: str,
+        rows: list[dict],
+        fields: tuple[tuple[str, str], ...],
+        empty_message: str = "Aucune donnée renseignée.",
+    ) -> str:
+        lines = [f"# {title}", ""]
+        if not rows:
+            return "\n".join(lines + [empty_message, ""])
+        for index, row in enumerate(rows, start=1):
+            heading = str(
+                row.get("name")
+                or row.get("title")
+                or row.get("term")
+                or row.get("label")
+                or f"Élément {index:02d}"
+            ).strip()
+            lines.extend([f"## {index:02d} · {heading}", ""])
+            for key, label in fields:
+                value = row.get(key, "")
+                if value is None or str(value).strip() == "":
+                    continue
+                lines.extend([f"### {label}", "", str(value).strip(), ""])
+        return "\n".join(lines).rstrip() + "\n"
+
+    def _export_final_story(self) -> None:
+        project_id = (
+            self.project_id
+            if self.current_view == "projects" and getattr(self, "project_id", None)
+            else self.active_project
+        )
+        if not project_id:
+            QMessageBox.information(
+                self,
+                "Aucun projet",
+                "Sélectionne un projet avant de créer son export final.",
+            )
+            return
+        project = self.db.one("SELECT * FROM projects WHERE id=?", (project_id,))
+        if not project:
+            return
+        if project["project_status"] != "completed" and QMessageBox.question(
+            self,
+            "Projet encore en cours",
+            "Ce projet n’est pas marqué comme terminé. Tu peux tout de même créer une archive complète de son état actuel.\n\nContinuer ?",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        default_name = self._final_export_safe_name(
+            project["title"], "histoire"
+        ) + "_StoryForge.zip"
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Exporter l’histoire complète",
+            default_name,
+            "Archive StoryForge (*.zip)",
+        )
+        if not path:
+            return
+        destination = Path(path)
+        if destination.suffix.lower() != ".zip":
+            destination = destination.with_suffix(".zip")
+        try:
+            manifest = self._build_final_story_export(int(project_id), destination)
+        except Exception as exc:  # noqa: BLE001 - report filesystem/export errors in the UI.
+            QMessageBox.critical(
+                self,
+                "Export impossible",
+                f"L’archive complète n’a pas pu être créée.\n\n{exc}",
+            )
+            return
+        self.save_state.setText("Histoire complète exportée")
+        QMessageBox.information(
+            self,
+            "Export terminé",
+            "L’histoire a été regroupée dans une seule archive.\n\n"
+            f"{destination}\n\n"
+            f"{manifest['files']} fichiers · {manifest['characters']} personnages · "
+            f"{manifest['events']} événements · {manifest['scenes']} scènes",
+        )
+
+    def _build_final_story_export(self, project_id: int, destination: Path) -> dict[str, int]:
+        """Build readable open files plus one lossless, reimportable backup."""
+        project_row = self.db.one("SELECT * FROM projects WHERE id=?", (project_id,))
+        if not project_row:
+            raise ValueError("Projet introuvable")
+        project = dict(project_row)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        docs = [
+            dict(row)
+            for row in self.db.q(
+                "SELECT * FROM project_docs WHERE project_id=? ORDER BY id", (project_id,)
+            )
+        ]
+        sequences = [
+            dict(row)
+            for row in self.db.q(
+                "SELECT * FROM sequence_blocks WHERE project_id=? ORDER BY position,id",
+                (project_id,),
+            )
+        ]
+        scenes = [
+            dict(row)
+            for row in self.db.q(
+                "SELECT * FROM scene_rows WHERE project_id=? ORDER BY position,id",
+                (project_id,),
+            )
+        ]
+        characters = [
+            dict(row)
+            for row in self.db.q(
+                "SELECT * FROM characters WHERE project_id=? ORDER BY name COLLATE NOCASE,id",
+                (project_id,),
+            )
+        ]
+        locations = [
+            dict(row)
+            for row in self.db.q(
+                "SELECT * FROM locations WHERE project_id=? ORDER BY position,name,id",
+                (project_id,),
+            )
+        ]
+        events = [
+            dict(row)
+            for row in self.db.q(
+                """SELECT event.*,track.name track_name
+                FROM timeline_events event LEFT JOIN timeline_tracks track ON track.id=event.track_id
+                WHERE event.project_id=? ORDER BY track.position,event.time_hours,event.id""",
+                (project_id,),
+            )
+        ]
+
+        with tempfile.TemporaryDirectory(prefix="storyforge_final_") as temp_dir:
+            root = Path(temp_dir)
+            for directory in (
+                "01_Scenario", "02_Construction", "03_Plan", "04_Chronologie",
+                "05_Personnages", "06_Univers", "07_Images", "08_Sauvegarde",
+            ):
+                (root / directory).mkdir(parents=True, exist_ok=True)
+            self._write_final_script_and_documents(root, project, docs, sequences, scenes)
+            self._write_final_timeline(root, project_id, events)
+            self._write_final_characters(root, project_id, characters)
+            self._write_final_universe(root, project_id, locations)
+            self._write_final_images(root, project_id)
+            self.db.export_project(
+                project_id, root / "08_Sauvegarde" / "projet.storyforge.json"
+            )
+            status = PROJECT_STATUS_LABELS.get(
+                project.get("project_status", "ongoing"), "En cours"
+            )
+            (root / "00_LIRE_MOI.md").write_text(
+                "\n".join(
+                    [
+                        f"# {project['title']}", "", "Export complet StoryForge", "",
+                        f"- Créé le : {datetime.now().astimezone().strftime('%d/%m/%Y à %H:%M')}",
+                        f"- Statut au moment de l’export : {status}",
+                        f"- Scènes : {len(scenes)}", f"- Séquences : {len(sequences)}",
+                        f"- Personnages : {len(characters)}", f"- Événements : {len(events)}",
+                        f"- Lieux : {len(locations)}", "", "## Contenu", "",
+                        "1. `01_Scenario` — scénario en PDF, FDX et Fountain.",
+                        "2. `02_Construction` — prémisse, logline, synopsis et autres documents.",
+                        "3. `03_Plan` — séquencier et liste de scènes.",
+                        "4. `04_Chronologie` — chronologie lisible et tableau CSV.",
+                        "5. `05_Personnages` — fiches, portraits et relations.",
+                        "6. `06_Univers` — lieux, monde, règles, lexique, thème et conflits.",
+                        "7. `07_Images` — bibliothèque d’images originale.",
+                        "8. `08_Sauvegarde` — sauvegarde complète réimportable dans StoryForge.", "",
+                        "Les fichiers lisibles restent exploitables sans StoryForge. La sauvegarde JSON conserve les données et les connexions internes.", "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                for file_path in sorted(path for path in root.rglob("*") if path.is_file()):
+                    archive.write(file_path, file_path.relative_to(root))
+            file_count = sum(1 for path in root.rglob("*") if path.is_file())
+        return {
+            "files": file_count,
+            "characters": len(characters),
+            "events": len(events),
+            "scenes": len(scenes),
+        }
+
+    def _write_final_script_and_documents(
+        self,
+        root: Path,
+        project: dict,
+        docs: list[dict],
+        sequences: list[dict],
+        scenes: list[dict],
+    ) -> None:
+        project_id = int(project["id"])
+        docs_by_type = {row["doc_type"]: row for row in docs}
+        script = docs_by_type.get("script", {}).get("content", "")
+        meta_row = self.db.one("SELECT * FROM script_meta WHERE project_id=?", (project_id,))
+        meta = dict(meta_row) if meta_row else {}
+        title = meta.get("title") or project["title"] or "Scénario"
+        scenario_dir = root / "01_Scenario"
+        export_fdx(
+            scenario_dir / "scenario.fdx", title, script, meta.get("author", ""),
+            meta.get("contact", ""), meta.get("draft_date", ""),
+        )
+        export_script_pdf(
+            scenario_dir / "scenario.pdf", title, script, meta.get("author", ""),
+            meta.get("contact", ""), meta.get("draft_date", ""),
+            based_on=meta.get("based_on", ""),
+            copyright_notice=meta.get("copyright_notice", ""),
+            include_title_page=bool(meta.get("include_title_page", 1)),
+        )
+        (scenario_dir / "scenario.fountain").write_text(script, encoding="utf-8")
+
+        document_order = {
+            key: index for index, (key, _label) in enumerate(DEVELOPMENT_DOCUMENTS, start=1)
+        }
+        for row in sorted(docs, key=lambda item: document_order.get(item["doc_type"], 99)):
+            if row["doc_type"] == "script":
+                continue
+            number = document_order.get(row["doc_type"], 99)
+            file_name = self._final_export_safe_name(
+                row["title"] or row["doc_type"], row["doc_type"]
+            )
+            (root / "02_Construction" / f"{number:02d}_{file_name}.md").write_text(
+                f"# {row['title']}\n\n{row['content'].strip()}\n", encoding="utf-8"
+            )
+        (root / "03_Plan" / "sequences.md").write_text(
+            self._final_export_markdown(
+                "Séquencier", sequences,
+                (("purpose", "Fonction"), ("events", "Événements"), ("consequence", "Conséquence")),
+            ),
+            encoding="utf-8",
+        )
+        (root / "03_Plan" / "scenes.md").write_text(
+            self._final_export_markdown(
+                "Liste des scènes", scenes,
+                (("duration", "Durée estimée (minutes)"), ("status", "Statut"),
+                 ("objective", "Objectif de scène"), ("opposition", "Opposition"),
+                 ("change_note", "Changement"), ("information_revealed", "Information révélée"),
+                 ("notes", "Notes")),
+            ),
+            encoding="utf-8",
+        )
+
+    def _write_final_timeline(self, root: Path, project_id: int, events: list[dict]) -> None:
+        character_names = {
+            int(row["event_id"]): row["names"] or ""
+            for row in self.db.q(
+                """SELECT link.event_id,GROUP_CONCAT(character.name, ', ') names
+                FROM timeline_event_characters link
+                JOIN characters character ON character.id=link.character_id
+                JOIN timeline_events event ON event.id=link.event_id
+                WHERE event.project_id=? GROUP BY link.event_id""",
+                (project_id,),
+            )
+        }
+        rows = []
+        for row in events:
+            exported = dict(row)
+            exported["characters"] = character_names.get(int(row["id"]), "")
+            rows.append(exported)
+        timeline_dir = root / "04_Chronologie"
+        (timeline_dir / "chronologie.md").write_text(
+            self._final_export_markdown(
+                "Chronologie complète", rows,
+                (("track_name", "Timeline"), ("display_label", "Repère affiché"),
+                 ("time_hours", "Position (heures internes)"), ("category", "Catégorie"),
+                 ("description", "Description"), ("place", "Lieu"),
+                 ("characters", "Personnages"), ("consequence", "Conséquence")),
+            ),
+            encoding="utf-8",
+        )
+        with (timeline_dir / "chronologie.csv").open(
+            "w", encoding="utf-8-sig", newline=""
+        ) as handle:
+            writer = csv.writer(handle)
+            writer.writerow(
+                ["Timeline", "Repère", "Position en heures", "Titre", "Catégorie", "Lieu", "Personnages", "Description", "Conséquence"]
+            )
+            for row in rows:
+                writer.writerow(
+                    [row.get("track_name", ""), row.get("display_label", ""), row.get("time_hours", 0),
+                     row.get("title", ""), row.get("category", ""), row.get("place", ""),
+                     row.get("characters", ""), row.get("description", ""), row.get("consequence", "")]
+                )
+
+    def _write_final_characters(
+        self, root: Path, project_id: int, characters: list[dict]
+    ) -> None:
+        directory = root / "05_Personnages"
+        fields = (
+            ("role", "Rôle"), ("gender", "Silhouette / genre"), ("age", "Âge"),
+            ("occupation", "Occupation"), ("story_function", "Fonction dans l’histoire"),
+            ("description", "Description"), ("appearance", "Apparence utile"),
+            ("personality", "Personnalité"), ("desire", "Désir"),
+            ("objective", "Objectif"), ("need", "Besoin"), ("fear", "Peur"),
+            ("weakness", "Faiblesse"), ("wound", "Blessure"), ("values_note", "Valeurs"),
+            ("beliefs", "Croyances"), ("contradictions", "Contradictions"),
+            ("secrets", "Secrets"), ("backstory", "Passé"),
+            ("start_situation", "Début"), ("arc", "Transformation"),
+            ("end_situation", "Fin"), ("speaking_style", "Voix"), ("notes", "Notes"),
+        )
+        (directory / "personnages.md").write_text(
+            self._final_export_markdown("Personnages", characters, fields), encoding="utf-8"
+        )
+        portraits_dir = directory / "portraits"
+        portraits_dir.mkdir(exist_ok=True)
+        for index, character in enumerate(characters, start=1):
+            portrait = character.get("portrait_data")
+            if not portrait:
+                continue
+            extension = (
+                mimetypes.guess_extension(character.get("portrait_mime") or "")
+                or Path(character.get("portrait_name") or "").suffix
+                or ".png"
+            )
+            name = self._final_export_safe_name(
+                character.get("name", ""), f"personnage_{index:02d}"
+            )
+            (portraits_dir / f"{name}{extension}").write_bytes(bytes(portrait))
+        relationships = [
+            dict(row)
+            for row in self.db.q(
+                """SELECT relation.*,a.name character_a,b.name character_b,map.name map_name
+                FROM character_relationships relation
+                JOIN characters a ON a.id=relation.character_a_id
+                JOIN characters b ON b.id=relation.character_b_id
+                LEFT JOIN relationship_maps map ON map.id=relation.map_id
+                WHERE relation.project_id=? ORDER BY map.name,a.name,b.name""",
+                (project_id,),
+            )
+        ]
+        (directory / "relations.md").write_text(
+            self._final_export_markdown(
+                "Relations", relationships,
+                (("map_name", "Carte"), ("character_a", "Personnage source"),
+                 ("relationship_type", "Relation"), ("character_b", "Personnage cible"),
+                 ("description", "Description"), ("tension", "Tension"),
+                 ("secret", "Secret"), ("evolution", "Évolution")),
+            ),
+            encoding="utf-8",
+        )
+        arcs = [
+            dict(row)
+            for row in self.db.q(
+                """SELECT arc.*,character.name
+                FROM character_arcs arc JOIN characters character ON character.id=arc.character_id
+                WHERE arc.project_id=? ORDER BY character.name""",
+                (project_id,),
+            )
+        ]
+        (directory / "arcs.md").write_text(
+            self._final_export_markdown(
+                "Arcs et transformations", arcs,
+                (("arc_type", "Type d’arc"), ("initial_belief", "Point de départ"),
+                 ("main_trial", "Épreuve principale"), ("pressures", "Pressions"),
+                 ("breaking_point", "Point de rupture"), ("decisive_choice", "Choix décisif"),
+                 ("cost", "Prix"), ("visible_proof", "Preuve visible"), ("notes", "Notes")),
+            ),
+            encoding="utf-8",
+        )
+
+    def _write_final_universe(
+        self, root: Path, project_id: int, locations: list[dict]
+    ) -> None:
+        directory = root / "06_Univers"
+        (directory / "lieux.md").write_text(
+            self._final_export_markdown(
+                "Lieux", locations,
+                (("category", "Catégorie"), ("region", "Région / ensemble"),
+                 ("epoch", "Époque"), ("tags", "Tags"),
+                 ("description", "Description"), ("narrative_function", "Fonction narrative"),
+                 ("atmosphere", "Atmosphère"), ("constraints_note", "Contraintes et possibilités"),
+                 ("evolution", "Évolution"), ("notes", "Notes")),
+            ),
+            encoding="utf-8",
+        )
+        exports = (
+            (
+                "monde.md", "Cadre de l’univers", "world_profiles",
+                (("epoch", "Époque"), ("places", "Espaces"), ("society", "Société"),
+                 ("culture", "Culture"), ("worldview", "Vision du monde"),
+                 ("originality", "Signature")), "",
+            ),
+            (
+                "regles.md", "Règles de l’univers", "world_rules",
+                (("category", "Catégorie"), ("rule_text", "Règle"), ("scope", "Portée"),
+                 ("limitation", "Limite"), ("cost", "Coût"), ("exceptions", "Exceptions"),
+                 ("consequence", "Conséquence narrative"), ("status", "Statut")),
+                "ORDER BY category,title,id",
+            ),
+            (
+                "lexique.md", "Lexique de l’univers", "world_terms",
+                (("category", "Catégorie"), ("definition", "Définition"),
+                 ("usage", "Exemple d’utilisation")), "ORDER BY category,term,id",
+            ),
+            (
+                "theme.md", "Thème", "theme_profiles",
+                (("theme_word", "Thème"), ("central_question", "Question centrale"),
+                 ("personal_interest", "Intérêt personnel"), ("opening_view", "Point de départ"),
+                 ("decisions_note", "Décisions"), ("consequences_note", "Conséquences"),
+                 ("conflicts_note", "Conflits"), ("ending_response", "Réponse finale"),
+                 ("notes", "Notes")), "",
+            ),
+            (
+                "conflits.md", "Conflits", "conflicts",
+                (("importance", "Importance"), ("nature", "Nature"),
+                 ("side_a_label", "Force A"), ("side_a_goal", "Objectif A"),
+                 ("side_b_label", "Force B"), ("side_b_goal", "Objectif B"),
+                 ("incompatibility", "Incompatibilité"), ("stakes", "Enjeux"),
+                 ("escalation", "Aggravation"), ("difficult_choice", "Choix difficile"),
+                 ("decisive_confrontation", "Confrontation"), ("outcome", "Résultat"),
+                 ("cost", "Prix payé"), ("change_note", "Changement")), "ORDER BY position,id",
+            ),
+            (
+                "promesses.md", "Accroche et promesses", "story_promises",
+                (("promise_type", "Type"), ("description", "Promesse"),
+                 ("planted_note", "Introduction"), ("development_note", "Développement"),
+                 ("payoff_note", "Accomplissement"), ("status", "Statut")),
+                "ORDER BY position,id",
+            ),
+            (
+                "moments_forts.md", "Moments forts", "story_moments",
+                (("moment_type", "Type"), ("description", "Moment"),
+                 ("narrative_function", "Fonction narrative"),
+                 ("placement_note", "Placement"), ("status", "Statut")),
+                "ORDER BY position,id",
+            ),
+        )
+        for file_name, title, table, fields, order in exports:
+            rows = [
+                dict(row)
+                for row in self.db.q(
+                    f"SELECT * FROM {table} WHERE project_id=? {order}", (project_id,)
+                )
+            ]
+            (directory / file_name).write_text(
+                self._final_export_markdown(title, rows, fields), encoding="utf-8"
+            )
+
+    def _write_final_images(self, root: Path, project_id: int) -> None:
+        directory = root / "07_Images"
+        rows = [
+            dict(row)
+            for row in self.db.q(
+                "SELECT * FROM image_library WHERE project_id=? ORDER BY category,title,id",
+                (project_id,),
+            )
+        ]
+        index_lines = ["# Bibliothèque d’images", ""]
+        for index, image in enumerate(rows, start=1):
+            extension = (
+                mimetypes.guess_extension(image.get("mime_type") or "")
+                or Path(image.get("file_name") or "").suffix
+                or ".bin"
+            )
+            file_name = (
+                f"{index:03d}_"
+                f"{self._final_export_safe_name(image.get('title', ''), 'image')}{extension}"
+            )
+            (directory / file_name).write_bytes(bytes(image["image_data"]))
+            index_lines.extend(
+                [f"## {index:03d} · {image.get('title') or 'Image sans titre'}", "",
+                 f"- Fichier : `{file_name}`", f"- Catégorie : {image.get('category') or 'Autre'}",
+                 f"- Notes : {image.get('notes') or '—'}", ""]
+            )
+        (directory / "index.md").write_text("\n".join(index_lines), encoding="utf-8")
+
+    def _import_project(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Importer un projet", "", "StoryForge / JSON (*.storyforge.json *.json)")
+        if path:
+            try:
+                self.project_id = self.db.import_project(Path(path))
+                self.db.run(
+                    """UPDATE projects SET archived=0,
+                    project_status=CASE WHEN project_status='archived' THEN 'paused' ELSE project_status END,
+                    updated_at=? WHERE id=?""",
+                    (NOW(), self.project_id),
+                )
+                self.active_project = self.project_id
+                self.db.set_setting("active_project", self.active_project)
+                self._update_project_chips()
+                self._refresh_projects()
+            except Exception as exc:  # noqa: BLE001  # Invalid user files may fail at any parsing layer.
+                QMessageBox.critical(self, "Import impossible", f"Le fichier n’a pas pu être importé.\n\n{exc}")
+
+    # ---------- Writing workshop ----------
+
+    def show_script_editor(self) -> None:
+        page = self._begin_page("Éditeur de scripts", "script_editor")
+        self.script_page_layout = page
+        self.script_focus_mode = False
+        page_header = QWidget()
+        page_header_box = QVBoxLayout(page_header)
+        page_header_box.setContentsMargins(0, 0, 0, 0)
+        page_header_box.setSpacing(5)
+        page_header_box.addWidget(make_label("ÉCRIRE POUR L’ÉCRAN", "Kicker"))
+        page_header_box.addWidget(make_label("Éditeur de scripts", "PageTitle"))
+        page_header_box.addWidget(
+            make_label(
+                "Écris le premier jet tout en gardant les scènes et personnages du projet à portée de main.",
+                "Muted",
+                True,
+            )
+        )
+        self.script_page_header = page_header
+        page.addWidget(page_header)
+        page.addSpacing(16)
+        if not self.active_project:
+            empty = make_card()
+            empty_box = QVBoxLayout(empty)
+            empty_box.setContentsMargins(24, 24, 24, 24)
+            empty_box.addWidget(make_label("Aucun projet sélectionné", "SectionTitle"))
+            empty_box.addWidget(
+                make_label(
+                    "Crée un projet, puis reviens ici pour écrire son scénario.",
+                    "Muted",
+                    True,
+                )
+            )
+            page.addWidget(empty)
+            page.addStretch()
+            return
+
+        project = self.db.one("SELECT title FROM projects WHERE id=?", (self.active_project,))
+        document = self.db.ensure_doc(self.active_project, "script", "Scénario")
+        self._load_script_prepared_scenes()
+        body = QHBoxLayout()
+        body.setSpacing(14)
+
+        navigator = make_card()
+        navigator.setFixedWidth(218 if self.width() < 1500 else 238)
+        self.script_navigator_card = navigator
+        navigator_box = QVBoxLayout(navigator)
+        navigator_box.setContentsMargins(12, 14, 12, 14)
+        navigator_box.setSpacing(8)
+        navigator_box.addWidget(make_label("SCÈNES", "Caption"))
+        navigator_box.addWidget(
+            make_label(
+                "Les scènes écrites et celles encore à insérer restent dans le même ordre.",
+                "Muted",
+                True,
+            )
+        )
+        self.script_scene_list = QListWidget()
+        self.script_scene_list.setObjectName("ScriptScenes")
+        self.script_scene_list.itemActivated.connect(self._jump_to_script_scene)
+        self.script_scene_list.itemClicked.connect(self._jump_to_script_scene)
+        navigator_box.addWidget(self.script_scene_list, 1)
+        navigator_actions = QVBoxLayout()
+        navigator_actions.setSpacing(6)
+        navigator_actions.addWidget(
+            make_button("+ Nouvelle scène libre", "secondary", self._insert_script_scene)
+        )
+        self.script_insert_prepared_button = make_button(
+            "Insérer la scène préparée", "primary", self._insert_selected_prepared_scene
+        )
+        self.script_insert_prepared_button.setEnabled(False)
+        navigator_actions.addWidget(self.script_insert_prepared_button)
+        navigator_box.addLayout(navigator_actions)
+        body.addWidget(navigator)
+
+        editor_card = make_card()
+        editor_box = QVBoxLayout(editor_card)
+        editor_box.setContentsMargins(16, 14, 16, 14)
+        editor_box.setSpacing(8)
+        head = QHBoxLayout()
+        head.addWidget(make_label(project["title"] if project else "Scénario", "SectionTitle"))
+        head.addStretch()
+        self.script_metrics = make_label("", "Muted")
+        head.addWidget(self.script_metrics)
+        self.script_context_toggle = make_button(
+            "Contexte", "secondary", self._toggle_script_context
+        )
+        head.addWidget(self.script_context_toggle)
+        self.script_focus_button = make_button(
+            "Concentration", "tertiary", self._toggle_script_focus_mode
+        )
+        self.script_focus_button.setToolTip("Masquer les panneaux · Ctrl+Maj+F")
+        head.addWidget(self.script_focus_button)
+        editor_box.addLayout(head)
+
+        tools_panel = QWidget()
+        tools_box = QVBoxLayout(tools_panel)
+        tools_box.setContentsMargins(0, 0, 0, 0)
+        tools_box.setSpacing(6)
+        format_bar = QHBoxLayout()
+        format_bar.setSpacing(6)
+        compact_editor = self.width() < 1250
+        self.script_element_buttons: dict[str, QPushButton] = {}
+        self.script_element_button_group = QButtonGroup(self)
+        self.script_element_button_group.setExclusive(True)
+        for full_caption, compact_caption, kind in (
+            ("Scène", "Scène", "scene"),
+            ("Action", "Action", "action"),
+            ("Personnage", "Perso.", "character"),
+            ("Dialogue", "Dialogue", "dialogue"),
+            ("Parenthèse", "(…)", "parenthetical"),
+            ("Transition", "Trans.", "transition"),
+        ):
+            button = make_button(
+                compact_caption if compact_editor else full_caption,
+                "quiet",
+                lambda _checked=False, element=kind: self._set_script_element(element),
+            )
+            button.setProperty("scriptElement", True)
+            button.setCheckable(True)
+            self.script_element_button_group.addButton(button)
+            self.script_element_buttons[kind] = button
+            format_bar.addWidget(button)
+        format_bar.addStretch()
+        tools_box.addLayout(format_bar)
+
+        element_row = QHBoxLayout()
+        self.script_element_state = make_label(
+            "SCÈNE",
+            "AccentPill",
+        )
+        self.script_element_state.setToolTip("Tab : type suivant · Maj + Tab : type précédent")
+        element_row.addWidget(self.script_element_state)
+        element_row.addWidget(
+            make_label(
+                "Tab : type suivant · Ctrl+1 à Ctrl+6 : mise en forme",
+                "Muted",
+            )
+        )
+        element_row.addStretch()
+        title_meta = self._script_meta()
+        self.script_title_page_button = make_button(
+            "Page de garde ✓" if title_meta["include_title_page"] else "Page de garde",
+            "secondary",
+            self._edit_script_title_page,
+        )
+        self.script_title_page_button.setToolTip(
+            "Titre, auteur, version, contact et mentions du scénario"
+        )
+        element_row.addWidget(self.script_title_page_button)
+        element_row.addWidget(make_button("Importer FDX", "quiet", self._import_script_fdx))
+        tools_box.addLayout(element_row)
+        self.script_tools_panel = tools_panel
+        editor_box.addWidget(tools_panel)
+
+        self.script_text = ScreenplayEditor()
+        self.script_text.setAcceptRichText(False)
+        self.script_text.setProperty("editor", True)
+        self.script_text.setMinimumHeight(320)
+        self.script_text.setPlaceholderText(
+            "INT. LIEU - JOUR\n\nUne action visible et précise.\n\nPERSONNAGE\nUne première réplique."
+        )
+        self.script_text.setObjectName("ScriptEditor")
+        self.script_text.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.script_text.setPlainText(document["content"])
+        self.script_element_mode = "scene" if not document["content"].strip() else "action"
+        self.script_text.current_element = self.script_element_mode
+        self.script_text.tab_requested.connect(self._cycle_script_element)
+        self.script_text.return_pressed.connect(self._advance_script_element_after_return)
+        self.script_text.element_emptied.connect(self._reset_empty_script_element)
+        self.script_text.character_activated.connect(self._open_script_character_by_name)
+        self.script_text.cursorPositionChanged.connect(self._sync_script_element_from_cursor)
+        self.script_save_timer = QTimer(self)
+        self.script_save_timer.setSingleShot(True)
+        self.script_save_timer.setInterval(850)
+        self.script_save_timer.timeout.connect(lambda: self._save_script(silent=True))
+        self.script_text.textChanged.connect(self._script_text_changed)
+        self.script_text.layout_changed.connect(self._format_all_script_blocks)
+        self._install_script_shortcuts()
+        self._format_all_script_blocks()
+        editor_box.addWidget(self.script_text, 1)
+
+        footer = QWidget()
+        actions = QHBoxLayout(footer)
+        actions.setContentsMargins(0, 0, 0, 0)
+        actions.addWidget(make_button("Enregistrer", "primary", self._save_script))
+        actions.addWidget(make_button("Créer une version", "secondary", self._snapshot_script))
+        actions.addStretch()
+        actions.addWidget(make_button("Exporter FDX", "secondary", self._export_script_fdx))
+        actions.addWidget(make_button("Exporter PDF", "primary", self._export_script_pdf))
+        self.script_footer_panel = footer
+        editor_box.addWidget(footer)
+        body.addWidget(editor_card, 1)
+
+        self.script_context_card = self._build_script_context_panel()
+        body.addWidget(self.script_context_card)
+        page.addLayout(body, 1)
+        self._refresh_script_structure()
+        self._sync_script_element_from_cursor()
+        context_open = self.db.setting(
+            "script_context_open",
+            "1" if self.width() >= 1500 else "0",
+        ) == "1"
+        self._set_script_context_visible(context_open)
+        self.script_text.setFocus()
+
+    def _load_script_prepared_scenes(self) -> None:
+        rows = [
+            dict(row)
+            for row in self.db.q(
+                """SELECT scene.*,
+                COALESCE((
+                    SELECT location.name FROM location_scenes link
+                    JOIN locations location ON location.id=link.location_id
+                    WHERE link.scene_id=scene.id ORDER BY link.location_id LIMIT 1
+                ), '') location_name
+                FROM scene_rows scene WHERE scene.project_id=?
+                ORDER BY scene.position,scene.id""",
+                (self.active_project,),
+            )
+        ]
+        characters_by_scene: dict[int, list[dict]] = {}
+        for row in self.db.q(
+            """SELECT link.scene_id,character.id,character.name,character.role
+            FROM scene_characters link
+            JOIN characters character ON character.id=link.character_id
+            JOIN scene_rows scene ON scene.id=link.scene_id
+            WHERE scene.project_id=? ORDER BY character.name COLLATE NOCASE,character.id""",
+            (self.active_project,),
+        ):
+            characters_by_scene.setdefault(int(row["scene_id"]), []).append(dict(row))
+        for row in rows:
+            row["characters"] = characters_by_scene.get(int(row["id"]), [])
+        self.script_prepared_scenes = rows
+        self.script_prepared_by_id = {int(row["id"]): row for row in rows}
+
+    def _build_script_context_panel(self) -> QFrame:
+        card = make_card()
+        card.setFixedWidth(296 if self.width() < 1500 else 320)
+        card.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        box = QVBoxLayout(card)
+        box.setContentsMargins(14, 14, 14, 14)
+        box.setSpacing(8)
+
+        header = QHBoxLayout()
+        header.addWidget(make_label("CONTEXTE DE LA SCÈNE", "Caption"))
+        header.addStretch()
+        self.script_context_state = make_label("AUCUNE", "AccentPill")
+        self.script_context_state.setSizePolicy(
+            QSizePolicy.Policy.Maximum,
+            QSizePolicy.Policy.Fixed,
+        )
+        header.addWidget(self.script_context_state)
+        box.addLayout(header)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        canvas = QWidget()
+        canvas.setObjectName("PanelCanvas")
+        content = QVBoxLayout(canvas)
+        content.setContentsMargins(0, 4, 8, 4)
+        content.setSpacing(7)
+        self.script_context_number = make_label("Sélectionne une scène", "Muted", True)
+        self.script_context_title = make_label("Aucun contexte sélectionné", "CardTitle", True)
+        content.addWidget(self.script_context_number)
+        content.addWidget(self.script_context_title)
+        content.addWidget(make_separator())
+        content.addWidget(make_label("OBJECTIF", "Caption"))
+        self.script_context_objective = make_label(
+            "La scène préparée indiquera ici ce qu’elle doit accomplir.",
+            "Body",
+            True,
+        )
+        content.addWidget(self.script_context_objective)
+        content.addWidget(make_label("PERSONNAGES", "Caption"))
+        self.script_context_characters = QWidget()
+        self.script_context_characters_layout = QVBoxLayout(self.script_context_characters)
+        self.script_context_characters_layout.setContentsMargins(0, 0, 0, 0)
+        self.script_context_characters_layout.setSpacing(5)
+        content.addWidget(self.script_context_characters)
+        content.addWidget(make_label("CONTEXTE", "Caption"))
+        self.script_context_details = make_label(
+            "Lieu, entrée, opposition et sortie apparaîtront ici.",
+            "Muted",
+            True,
+        )
+        content.addWidget(self.script_context_details)
+        content.addWidget(make_label("SCÈNES VOISINES", "Caption"))
+        self.script_previous_scene_button = make_button(
+            "← Aucune scène précédente", "tertiary", lambda: self._select_script_relative_scene(-1)
+        )
+        self.script_next_scene_button = make_button(
+            "Aucune scène suivante →", "tertiary", lambda: self._select_script_relative_scene(1)
+        )
+        self.script_previous_scene_button.setEnabled(False)
+        self.script_next_scene_button.setEnabled(False)
+        content.addWidget(self.script_previous_scene_button)
+        content.addWidget(self.script_next_scene_button)
+        content.addStretch()
+        scroll.setWidget(canvas)
+        box.addWidget(scroll, 1)
+
+        self.script_context_insert_button = make_button(
+            "Insérer dans le scénario", "primary", self._insert_selected_prepared_scene
+        )
+        self.script_context_insert_button.setEnabled(False)
+        box.addWidget(self.script_context_insert_button)
+        self.script_context_open_button = make_button(
+            "Ouvrir dans Construction", "secondary", self._open_script_scene_in_construction
+        )
+        self.script_context_open_button.setEnabled(False)
+        box.addWidget(self.script_context_open_button)
+        self.script_context_scene_id = 0
+        return card
+
+    def _set_script_context_visible(self, visible: bool) -> None:
+        card = getattr(self, "script_context_card", None)
+        navigator = getattr(self, "script_navigator_card", None)
+        if not isinstance(card, QFrame) or not isinstance(navigator, QFrame):
+            return
+        if getattr(self, "script_focus_mode", False):
+            card.hide()
+            navigator.hide()
+            return
+        card.setVisible(visible)
+        navigator.setVisible(not (visible and self.width() < 1450))
+        self.script_context_toggle.setText("Masquer le contexte" if visible else "Contexte")
+        self.db.set_setting("script_context_open", "1" if visible else "0")
+
+    def _toggle_script_context(self) -> None:
+        card = getattr(self, "script_context_card", None)
+        if isinstance(card, QFrame):
+            self._set_script_context_visible(not card.isVisible())
+
+    def _toggle_script_focus_mode(self) -> None:
+        self._set_script_focus_mode(not bool(getattr(self, "script_focus_mode", False)))
+
+    def _set_script_focus_mode(self, enabled: bool) -> None:
+        self.script_focus_mode = bool(enabled)
+        if enabled:
+            self._script_context_before_focus = bool(
+                getattr(self, "script_context_card", None)
+                and self.script_context_card.isVisible()
+            )
+        if hasattr(self, "top_bar"):
+            self.top_bar.setVisible(not enabled)
+        if hasattr(self, "sidebar"):
+            self.sidebar.setVisible(not enabled)
+        for name in (
+            "script_page_header",
+            "script_tools_panel",
+            "script_footer_panel",
+            "script_context_toggle",
+        ):
+            widget = getattr(self, name, None)
+            if isinstance(widget, QWidget):
+                widget.setVisible(not enabled)
+        if hasattr(self, "script_navigator_card"):
+            self.script_navigator_card.setVisible(not enabled)
+        if hasattr(self, "script_context_card"):
+            if enabled:
+                self.script_context_card.hide()
+            else:
+                self._set_script_context_visible(
+                    bool(getattr(self, "_script_context_before_focus", False))
+                )
+        if hasattr(self, "script_focus_button"):
+            self.script_focus_button.setText(
+                "Quitter la concentration" if enabled else "Concentration"
+            )
+        if hasattr(self, "script_page_layout"):
+            margins = (4, 4, 4, 4) if enabled else (22, 18, 22, 22)
+            self.script_page_layout.setContentsMargins(*margins)
+        if isinstance(getattr(self, "script_text", None), QTextEdit):
+            self.script_text.setFocus()
+
+    def _script_scene_is_present(self, scene_id: int) -> bool:
+        scene_list = getattr(self, "script_scene_list", None)
+        if not isinstance(scene_list, QListWidget):
+            return False
+        for index in range(scene_list.count()):
+            item = scene_list.item(index)
+            position_data = item.data(Qt.ItemDataRole.UserRole)
+            if (
+                int(item.data(Qt.ItemDataRole.UserRole + 1) or 0) == scene_id
+                and position_data is not None
+                and int(position_data) >= 0
+            ):
+                return True
+        return False
+
+    def _script_scene_can_be_inserted(self, scene_id: int) -> bool:
+        if self._script_scene_is_present(scene_id):
+            return False
+        prepared = getattr(self, "script_prepared_scenes", [])
+        prepared_index = next(
+            (index for index, row in enumerate(prepared) if int(row["id"]) == scene_id),
+            -1,
+        )
+        written_count = 0
+        for index in range(self.script_scene_list.count()):
+            position_data = self.script_scene_list.item(index).data(
+                Qt.ItemDataRole.UserRole
+            )
+            if position_data is not None and int(position_data) >= 0:
+                written_count += 1
+        return prepared_index == written_count
+
+    def _show_script_scene_context(self, scene_id: int) -> None:
+        scene = getattr(self, "script_prepared_by_id", {}).get(int(scene_id or 0))
+        self.script_context_scene_id = int(scene_id or 0) if scene else 0
+        clear_layout(self.script_context_characters_layout)
+        if not scene:
+            self.script_context_state.setText("LIBRE")
+            self.script_context_number.setText("Scène non reliée à la préparation")
+            self.script_context_title.setText("Écriture libre")
+            self.script_context_objective.setText(
+                "Cette scène existe seulement dans le scénario pour le moment."
+            )
+            self.script_context_characters_layout.addWidget(
+                make_label("Aucun personnage préparé", "Muted", True)
+            )
+            self.script_context_details.setText(
+                "Tu peux continuer à écrire librement ou préparer cette scène dans Construction."
+            )
+            self.script_previous_scene_button.setEnabled(False)
+            self.script_next_scene_button.setEnabled(False)
+            self.script_context_insert_button.setEnabled(False)
+            self.script_context_open_button.setEnabled(False)
+            self.script_insert_prepared_button.setEnabled(False)
+            return
+
+        prepared = self.script_prepared_scenes
+        scene_index = next(
+            index for index, row in enumerate(prepared) if int(row["id"]) == int(scene["id"])
+        )
+        self.script_context_state.setText(
+            SCENE_STATUS_LABELS.get(scene.get("status", "idea"), "Idée").upper()
+        )
+        self.script_context_number.setText(
+            f"SCÈNE PRÉPARÉE {scene_index + 1:02d}/{len(prepared):02d}"
+        )
+        self.script_context_title.setText(scene.get("title") or "Scène sans titre")
+        self.script_context_objective.setText(
+            scene.get("objective") or scene.get("character_objective") or "Objectif à préciser"
+        )
+        characters = scene.get("characters", [])
+        if characters:
+            for character in characters:
+                caption = character.get("name") or "Personnage sans nom"
+                if character.get("role"):
+                    caption += f" · {character['role']}"
+                self.script_context_characters_layout.addWidget(
+                    make_button(
+                        caption,
+                        "tertiary",
+                        lambda _checked=False, character_id=int(character["id"]): self._open_script_character(character_id),
+                    )
+                )
+        else:
+            self.script_context_characters_layout.addWidget(
+                make_label("Aucun personnage relié", "Muted", True)
+            )
+        details = []
+        for label, key in (
+            ("Lieu", "location_name"),
+            ("Repère", "moment_label"),
+            ("Entrée", "entry_state"),
+            ("Opposition", "opposition"),
+            ("Conflit", "conflict_note"),
+            ("Sortie", "exit_state"),
+            ("Notes", "notes"),
+        ):
+            value = str(scene.get(key) or "").strip()
+            if value:
+                details.append(f"{label} · {value}")
+        self.script_context_details.setText(
+            "\n\n".join(details) if details else "Contexte encore à préciser dans Construction."
+        )
+
+        previous_scene = prepared[scene_index - 1] if scene_index > 0 else None
+        next_scene = prepared[scene_index + 1] if scene_index + 1 < len(prepared) else None
+        self.script_previous_scene_button.setText(
+            f"← {previous_scene['title'] or 'Scène précédente'}"
+            if previous_scene
+            else "← Aucune scène précédente"
+        )
+        self.script_next_scene_button.setText(
+            f"{next_scene['title'] or 'Scène suivante'} →"
+            if next_scene
+            else "Aucune scène suivante →"
+        )
+        self.script_previous_scene_button.setEnabled(bool(previous_scene))
+        self.script_next_scene_button.setEnabled(bool(next_scene))
+        can_insert = self._script_scene_can_be_inserted(int(scene["id"]))
+        present = self._script_scene_is_present(int(scene["id"]))
+        self.script_context_insert_button.setText(
+            "Déjà présente dans le scénario" if present else "Insérer dans le scénario"
+        )
+        self.script_context_insert_button.setEnabled(can_insert)
+        self.script_context_insert_button.setToolTip(
+            "" if can_insert or present else "Insère d’abord les scènes préparées précédentes."
+        )
+        self.script_insert_prepared_button.setEnabled(can_insert)
+        self.script_context_open_button.setEnabled(True)
+
+    def _select_script_relative_scene(self, delta: int) -> None:
+        scene_id = int(getattr(self, "script_context_scene_id", 0) or 0)
+        prepared = getattr(self, "script_prepared_scenes", [])
+        index = next(
+            (index for index, row in enumerate(prepared) if int(row["id"]) == scene_id),
+            -1,
+        )
+        target = index + delta
+        if 0 <= target < len(prepared):
+            self._select_script_prepared_scene(int(prepared[target]["id"]))
+
+    def _select_script_prepared_scene(self, scene_id: int) -> None:
+        for index in range(self.script_scene_list.count()):
+            item = self.script_scene_list.item(index)
+            if int(item.data(Qt.ItemDataRole.UserRole + 1) or 0) == scene_id:
+                self.script_scene_list.setCurrentItem(item)
+                self._jump_to_script_scene(item)
+                return
+        self._show_script_scene_context(scene_id)
+
+    def _open_script_character(self, character_id: int) -> None:
+        if not self.db.one(
+            "SELECT 1 FROM characters WHERE id=? AND project_id=?",
+            (character_id, self.active_project),
+        ):
+            return
+        self.db.set_setting(f"last_character_{self.active_project}", character_id)
+        self.show_characters()
+
+    def _open_script_character_by_name(self, name: str) -> None:
+        if self._infer_script_element_from_cursor() != "character":
+            return
+        candidate = name.lstrip("@").split(" (", 1)[0].strip()
+        row = self.db.one(
+            """SELECT id FROM characters WHERE project_id=?
+            AND UPPER(TRIM(name))=UPPER(TRIM(?)) LIMIT 1""",
+            (self.active_project, candidate),
+        )
+        if row:
+            self._open_script_character(int(row["id"]))
+
+    def _open_script_scene_in_construction(self) -> None:
+        scene_id = int(getattr(self, "script_context_scene_id", 0) or 0)
+        if not scene_id:
+            return
+        self._save_script(silent=True)
+        self.db.set_setting(f"last_development_doc_{self.active_project}", "scenes")
+        self.show_development()
+        QTimer.singleShot(0, lambda: self._select_scene_row_by_id(scene_id))
+
+    def _select_scene_row_by_id(self, scene_id: int) -> None:
+        table = getattr(self, "scene_table", None)
+        if not isinstance(table, QTableWidget):
+            return
+        for row_index in range(table.rowCount()):
+            number = table.item(row_index, 0)
+            if number and int(number.data(Qt.ItemDataRole.UserRole) or 0) == scene_id:
+                table.selectRow(row_index)
+                table.setCurrentCell(row_index, 1)
+                self._scene_selection_changed()
+                return
+
+    def _insert_selected_prepared_scene(self) -> None:
+        scene_id = int(getattr(self, "script_context_scene_id", 0) or 0)
+        scene = getattr(self, "script_prepared_by_id", {}).get(scene_id)
+        if not scene or not self._script_scene_can_be_inserted(scene_id):
+            return
+        location = str(scene.get("location_name") or "LIEU").strip().upper()
+        heading = f"INT. {location or 'LIEU'} - JOUR\n\n"
+        cursor = self.script_text.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        existing = self.script_text.toPlainText()
+        if existing and not existing.endswith("\n\n"):
+            heading = ("\n" if existing.endswith("\n") else "\n\n") + heading
+        cursor.insertText(heading)
+        cursor.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.MoveAnchor, 2)
+        self.script_text.setTextCursor(cursor)
+        self._refresh_script_structure()
+        self._select_script_prepared_scene(scene_id)
+        self._set_script_element_mode("action")
+        self.script_text.setFocus()
+
+    def _script_text_changed(self) -> None:
+        if hasattr(self, "script_save_timer"):
+            self.script_save_timer.start()
+        self._refresh_script_structure()
+
+    def _refresh_script_structure(self) -> None:
+        editor = getattr(self, "script_text", None)
+        scene_list = getattr(self, "script_scene_list", None)
+        if not isinstance(editor, QTextEdit) or not isinstance(scene_list, QListWidget):
+            return
+        text = editor.toPlainText()
+        selected_scene_id = int(getattr(self, "script_context_scene_id", 0) or 0)
+        prepared = getattr(self, "script_prepared_scenes", [])
+        headings: list[tuple[int, str]] = []
+        offset = 0
+        for line in text.splitlines(keepends=True):
+            stripped = line.strip()
+            if stripped.upper().startswith(("INT.", "EXT.", "INT./EXT.", "EXT./INT.", "I/E.")):
+                headings.append((offset, stripped.upper()))
+            offset += len(line)
+
+        scene_list.blockSignals(True)
+        scene_list.clear()
+        for index, (position, heading) in enumerate(headings):
+            prepared_scene = prepared[index] if index < len(prepared) else None
+            prepared_title = (
+                str(prepared_scene.get("title") or "Scène préparée")
+                if prepared_scene
+                else "Scène libre"
+            )
+            item = QListWidgetItem(f"{index + 1:02d}  {heading}\n{prepared_title}")
+            item.setData(Qt.ItemDataRole.UserRole, position)
+            item.setData(
+                Qt.ItemDataRole.UserRole + 1,
+                int(prepared_scene["id"]) if prepared_scene else 0,
+            )
+            item.setData(Qt.ItemDataRole.UserRole + 2, index)
+            item.setToolTip(
+                f"Scène écrite · {prepared_title}"
+                if prepared_scene
+                else "Scène écrite sans préparation reliée"
+            )
+            item.setSizeHint(QSize(0, 58))
+            scene_list.addItem(item)
+        for index in range(len(headings), len(prepared)):
+            prepared_scene = prepared[index]
+            title = str(prepared_scene.get("title") or "Scène sans titre")
+            item = QListWidgetItem(f"{index + 1:02d}  À INSÉRER\n{title}")
+            item.setData(Qt.ItemDataRole.UserRole, -1)
+            item.setData(Qt.ItemDataRole.UserRole + 1, int(prepared_scene["id"]))
+            item.setData(Qt.ItemDataRole.UserRole + 2, index)
+            item.setToolTip("Scène préparée, pas encore présente dans le scénario")
+            item.setSizeHint(QSize(0, 58))
+            scene_list.addItem(item)
+
+        selected_item = None
+        cursor_position = editor.textCursor().position()
+        for index in range(scene_list.count()):
+            item = scene_list.item(index)
+            if int(item.data(Qt.ItemDataRole.UserRole + 1) or 0) == selected_scene_id:
+                selected_item = item
+                break
+        if selected_item is None:
+            for index in range(len(headings)):
+                item = scene_list.item(index)
+                if int(item.data(Qt.ItemDataRole.UserRole) or 0) <= cursor_position:
+                    selected_item = item
+                else:
+                    break
+        if selected_item is None and scene_list.count():
+            selected_item = scene_list.item(0)
+        if selected_item is not None:
+            scene_list.setCurrentItem(selected_item)
+        scene_list.blockSignals(False)
+
+        if selected_item is not None:
+            self._show_script_scene_context(
+                int(selected_item.data(Qt.ItemDataRole.UserRole + 1) or 0)
+            )
+        else:
+            self._show_script_scene_context(0)
+        words = len(text.split())
+        elements = parse_screenplay(text)
+        page_estimate = max(1, math.ceil(len(elements) / 45)) if elements else 0
+        current_elements = parse_screenplay(text[:cursor_position])
+        current_page = max(1, math.ceil(len(current_elements) / 45)) if elements else 0
+        scene_number = len(headings)
+        self.script_metrics.setText(
+            f"{scene_number} scène{'s' if scene_number != 1 else ''} · {words} mots · page {current_page}/{page_estimate}"
+        )
+
+    def _jump_to_script_scene(self, item: QListWidgetItem) -> None:
+        scene_id = int(item.data(Qt.ItemDataRole.UserRole + 1) or 0)
+        self._show_script_scene_context(scene_id)
+        position_data = item.data(Qt.ItemDataRole.UserRole)
+        position = int(position_data) if position_data is not None else -1
+        if position < 0:
+            return
+        cursor = self.script_text.textCursor()
+        cursor.setPosition(min(position, len(self.script_text.toPlainText())))
+        self.script_text.setTextCursor(cursor)
+        self.script_text.ensureCursorVisible()
+        self.script_text.setFocus()
+
+    def _insert_script_scene(self) -> None:
+        self._insert_script_element("scene")
+
+    def _script_element_caption(self, element: str) -> str:
+        return {
+            "scene": "SCÈNE",
+            "action": "ACTION",
+            "character": "PERSONNAGE",
+            "dialogue": "DIALOGUE",
+            "parenthetical": "PARENTHÈSE",
+            "transition": "TRANSITION",
+        }.get(element, "ACTION")
+
+    def _set_script_element_mode(self, element: str) -> None:
+        self.script_element_mode = element
+        self.script_text.current_element = element
+        self.script_element_state.setText(self._script_element_caption(element))
+        for kind, button in getattr(self, "script_element_buttons", {}).items():
+            button.setChecked(kind == element)
+        self.script_text.setPlaceholderText(
+            {
+                "scene": "INT. LIEU - JOUR",
+                "action": "Décris une action visible et précise.",
+                "character": "PERSONNAGE",
+                "dialogue": "Écris la réplique.",
+                "parenthetical": "(indication brève)",
+                "transition": "COUPE À :",
+            }.get(element, "Commence à écrire…")
+        )
+
+    def _script_element_from_block(self, block) -> str:
+        state_element = {
+            1001: "scene",
+            1002: "action",
+            1003: "character",
+            1004: "dialogue",
+            1005: "parenthetical",
+            1006: "transition",
+        }.get(block.userState())
+        if state_element:
+            return state_element
+        line = block.text().strip()
+        if not line:
+            return getattr(self, "script_element_mode", "action")
+        upper = line.upper()
+        if upper.startswith(("INT.", "EXT.", "INT./EXT.", "EXT./INT.", "I/E.")):
+            return "scene"
+        if line.startswith("@"):
+            return "character"
+        if line.startswith("!"):
+            return "action"
+        if line.startswith("(") and line.endswith(")"):
+            return "parenthetical"
+        if upper.endswith((" TO:", " À :", " A :")) or upper in {
+            "CUT TO:",
+            "FADE IN:",
+            "FADE OUT.",
+            "FONDU :",
+        }:
+            return "transition"
+        previous = block.previous()
+        previous_text = previous.text().strip() if previous.isValid() else ""
+        previous_element = (
+            self._script_element_from_block(previous) if previous.isValid() else ""
+        )
+        if previous_element in {"character", "dialogue", "parenthetical"} and previous_text:
+            return "dialogue"
+        if line == upper and len(line) <= 42:
+            return "character"
+        return "action"
+
+    def _apply_script_block_format(self, element: str, cursor: QTextCursor | None = None) -> None:
+        editor = getattr(self, "script_text", None)
+        if not isinstance(editor, ScreenplayEditor):
+            return
+        active_cursor = QTextCursor(cursor or editor.textCursor())
+        active_cursor.block().setUserState(
+            {
+                "scene": 1001,
+                "action": 1002,
+                "character": 1003,
+                "dialogue": 1004,
+                "parenthetical": 1005,
+                "transition": 1006,
+            }.get(element, 1002)
+        )
+        # Les retraits suivent la largeur réelle de la page. Sur un grand
+        # écran, les dialogues et les noms restent centrés sans que tout le
+        # scénario soit tassé dans la moitié gauche de l’éditeur.
+        usable_width = max(520.0, float(editor.viewport().width() - 36))
+        left, right, top, bottom, alignment = {
+            "scene": (0.0, usable_width * 0.02, 12.0, 6.0, Qt.AlignmentFlag.AlignLeft),
+            "action": (0.0, usable_width * 0.05, 3.0, 6.0, Qt.AlignmentFlag.AlignLeft),
+            "character": (
+                usable_width * 0.41,
+                usable_width * 0.17,
+                12.0,
+                1.0,
+                Qt.AlignmentFlag.AlignLeft,
+            ),
+            "dialogue": (
+                usable_width * 0.21,
+                usable_width * 0.21,
+                0.0,
+                5.0,
+                Qt.AlignmentFlag.AlignLeft,
+            ),
+            "parenthetical": (
+                usable_width * 0.29,
+                usable_width * 0.29,
+                0.0,
+                1.0,
+                Qt.AlignmentFlag.AlignLeft,
+            ),
+            "transition": (
+                usable_width * 0.48,
+                usable_width * 0.02,
+                12.0,
+                8.0,
+                Qt.AlignmentFlag.AlignRight,
+            ),
+        }.get(
+            element,
+            (0.0, usable_width * 0.05, 3.0, 6.0, Qt.AlignmentFlag.AlignLeft),
+        )
+        block_format = QTextBlockFormat(active_cursor.blockFormat())
+        block_format.setLeftMargin(left)
+        block_format.setRightMargin(right)
+        block_format.setTopMargin(top)
+        block_format.setBottomMargin(bottom)
+        block_format.setTextIndent(0)
+        block_format.setAlignment(alignment)
+        active_cursor.setBlockFormat(block_format)
+
+    def _format_all_script_blocks(self) -> None:
+        editor = getattr(self, "script_text", None)
+        if not isinstance(editor, ScreenplayEditor):
+            return
+        editor.blockSignals(True)
+        block = editor.document().firstBlock()
+        while block.isValid():
+            cursor = QTextCursor(block)
+            self._apply_script_block_format(self._script_element_from_block(block), cursor)
+            block = block.next()
+        editor.blockSignals(False)
+
+    def _reset_empty_script_element(self, previous: str) -> None:
+        order = ["scene", "action", "character", "dialogue", "parenthetical", "transition"]
+        current_index = order.index(previous) if previous in order else 1
+        fallback = order[max(0, current_index - 1)]
+        self._set_script_element_mode(fallback)
+        self._apply_script_block_format(fallback)
+        self.script_text.ensureCursorVisible()
+
+    def _infer_script_element_from_cursor(self) -> str:
+        cursor = self.script_text.textCursor()
+        block = cursor.block()
+        state_element = {
+            1001: "scene",
+            1002: "action",
+            1003: "character",
+            1004: "dialogue",
+            1005: "parenthetical",
+            1006: "transition",
+        }.get(block.userState())
+        if state_element:
+            return state_element
+        line = block.text().strip()
+        if not line:
+            return getattr(self, "script_element_mode", "scene")
+        upper = line.upper()
+        if upper.startswith(("INT.", "EXT.", "INT./EXT.", "EXT./INT.", "I/E.")):
+            return "scene"
+        if line.startswith("@"):
+            return "character"
+        if line.startswith("!"):
+            return "action"
+        if line.startswith("(") and line.endswith(")"):
+            return "parenthetical"
+        if upper.endswith((" TO:", " À :", " A :")) or upper in {
+            "CUT TO:",
+            "FADE IN:",
+            "FADE OUT.",
+            "FONDU :",
+        }:
+            return "transition"
+        previous = block.previous().text().strip() if block.previous().isValid() else ""
+        if previous.startswith("@") or (previous and previous == previous.upper() and len(previous) <= 42):
+            return "dialogue"
+        if line == upper and len(line) <= 42:
+            return "character"
+        return "action"
+
+    def _sync_script_element_from_cursor(self) -> None:
+        if not isinstance(getattr(self, "script_text", None), ScreenplayEditor):
+            return
+        self._set_script_element_mode(self._infer_script_element_from_cursor())
+        text = self.script_text.toPlainText()
+        elements = parse_screenplay(text)
+        page_total = max(1, math.ceil(len(elements) / 45)) if elements else 0
+        current = parse_screenplay(text[: self.script_text.textCursor().position()])
+        page_current = max(1, math.ceil(len(current) / 45)) if elements else 0
+        scenes = sum(1 for element_type, _value in elements if element_type == "Scene Heading")
+        words = len(text.split())
+        self.script_metrics.setText(
+            f"{scenes} scène{'s' if scenes != 1 else ''} · {words} mots · page {page_current}/{page_total}"
+        )
+        self._sync_script_scene_from_cursor()
+
+    def _sync_script_scene_from_cursor(self) -> None:
+        scene_list = getattr(self, "script_scene_list", None)
+        editor = getattr(self, "script_text", None)
+        if not isinstance(scene_list, QListWidget) or not isinstance(editor, QTextEdit):
+            return
+        cursor_position = editor.textCursor().position()
+        selected_item = None
+        for index in range(scene_list.count()):
+            item = scene_list.item(index)
+            position_data = item.data(Qt.ItemDataRole.UserRole)
+            position = int(position_data) if position_data is not None else -1
+            if position < 0:
+                continue
+            if position <= cursor_position:
+                selected_item = item
+            else:
+                break
+        if selected_item is None:
+            return
+        scene_list.blockSignals(True)
+        scene_list.setCurrentItem(selected_item)
+        scene_list.blockSignals(False)
+        self._show_script_scene_context(
+            int(selected_item.data(Qt.ItemDataRole.UserRole + 1) or 0)
+        )
+
+    def _install_script_shortcuts(self) -> None:
+        self.script_shortcuts: list[QShortcut] = []
+        for sequence, element in (
+            ("Ctrl+1", "scene"),
+            ("Ctrl+2", "action"),
+            ("Ctrl+3", "character"),
+            ("Ctrl+4", "dialogue"),
+            ("Ctrl+5", "parenthetical"),
+            ("Ctrl+6", "transition"),
+        ):
+            shortcut = QShortcut(QKeySequence(sequence), self.script_text)
+            shortcut.activated.connect(lambda selected=element: self._set_script_element(selected))
+            self.script_shortcuts.append(shortcut)
+        save_shortcut = QShortcut(QKeySequence.StandardKey.Save, self.script_text)
+        save_shortcut.activated.connect(self._save_script)
+        self.script_shortcuts.append(save_shortcut)
+        focus_shortcut = QShortcut(QKeySequence("Ctrl+Shift+F"), self.script_text)
+        focus_shortcut.activated.connect(self._toggle_script_focus_mode)
+        self.script_shortcuts.append(focus_shortcut)
+
+    def _script_meta(self):
+        project = self.db.one("SELECT title FROM projects WHERE id=?", (self.active_project,))
+        default_title = project["title"] if project else "Scénario"
+        self.db.run(
+            """INSERT OR IGNORE INTO script_meta(
+            project_id,title,author,contact,draft_date,based_on,copyright_notice,
+            include_title_page,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?)""",
+            (self.active_project, default_title, "", "", "", "", "", 1, NOW()),
+        )
+        return self.db.one("SELECT * FROM script_meta WHERE project_id=?", (self.active_project,))
+
+    def _edit_script_title_page(self) -> None:
+        meta = self._script_meta()
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Page de garde")
+        dialog.resize(620, 650)
+        box = QVBoxLayout(dialog)
+        box.setContentsMargins(24, 22, 24, 22)
+        box.setSpacing(8)
+        box.addWidget(make_label("PAGE DE TITRE", "Caption"))
+        box.addWidget(make_label("Page de garde du scénario", "SectionTitle"))
+        box.addWidget(
+            make_label(
+                "Elle précède le scénario sans compter dans sa numérotation. Laisse vides les mentions inutiles.",
+                "Muted",
+                True,
+            )
+        )
+        include_title_page = QCheckBox("Inclure cette page dans le PDF")
+        include_title_page.setChecked(bool(meta["include_title_page"]))
+        box.addWidget(include_title_page)
+        box.addWidget(make_separator())
+        fields: dict[str, QLineEdit | QTextEdit] = {}
+        for label, key, multiline, placeholder in (
+            ("TITRE", "title", False, "Titre du scénario"),
+            ("AUTEUR / AUTRICE", "author", False, "Nom"),
+            ("ADAPTÉ DE / BASÉ SUR", "based_on", False, "Facultatif · œuvre, histoire vraie, texte original…"),
+            ("VERSION / DATE", "draft_date", False, "Ex. Version du 26 août 2026"),
+            ("CONTACT", "contact", True, "Coordonnées facultatives"),
+            ("DROITS / DÉPÔT", "copyright_notice", False, "Facultatif · copyright, SACD, WGA…"),
+        ):
+            box.addWidget(make_label(label, "Caption"))
+            field = make_editor(72, placeholder) if multiline else QLineEdit()
+            if isinstance(field, QLineEdit):
+                field.setPlaceholderText(placeholder)
+            set_field_value(field, meta[key])
+            fields[key] = field
+            box.addWidget(field)
+        actions = QHBoxLayout()
+        actions.addStretch()
+        actions.addWidget(make_button("Annuler", "secondary", dialog.reject))
+        actions.addWidget(make_button("Enregistrer la page", "primary", dialog.accept))
+        box.addLayout(actions)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        self.db.run(
+            """UPDATE script_meta SET title=?,author=?,contact=?,draft_date=?,based_on=?,
+            copyright_notice=?,include_title_page=?,updated_at=?
+            WHERE project_id=?""",
+            (
+                field_value(fields["title"]) or "Scénario",
+                field_value(fields["author"]),
+                field_value(fields["contact"]),
+                field_value(fields["draft_date"]),
+                field_value(fields["based_on"]),
+                field_value(fields["copyright_notice"]),
+                1 if include_title_page.isChecked() else 0,
+                NOW(),
+                self.active_project,
+            ),
+        )
+        if hasattr(self, "script_title_page_button"):
+            self.script_title_page_button.setText(
+                "Page de garde ✓" if include_title_page.isChecked() else "Page de garde"
+            )
+        self.save_state.setText("Page de garde enregistrée")
+
+    def _import_script_fdx(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Importer un scénario", "", "Final Draft XML (*.fdx)")
+        if not path:
+            return
+        try:
+            imported = import_fdx(Path(path))
+        except (OSError, ParseError) as error:
+            QMessageBox.warning(self, "Import impossible", f"Ce fichier FDX ne peut pas être lu.\n\n{error}")
+            return
+        if not imported:
+            QMessageBox.information(self, "Import FDX", "Aucun texte de scénario n’a été trouvé.")
+            return
+        current = self.script_text.toPlainText().strip()
+        if current and QMessageBox.question(
+            self,
+            "Remplacer le scénario",
+            "Le texte actuel sera conservé dans une version, puis remplacé par le FDX. Continuer ?",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        if current:
+            self.db.snapshot(self.active_project, "script", self.script_text.toPlainText(), "Avant import FDX")
+        self.script_text.setPlainText(imported)
+        self._save_script(silent=True)
+        self.script_text.moveCursor(QTextCursor.MoveOperation.Start)
+        self.save_state.setText("Scénario FDX importé")
+
+    def _cycle_script_element(self, reverse: bool = False) -> None:
+        order = ["scene", "action", "character", "dialogue", "parenthetical", "transition"]
+        current = getattr(self, "script_element_mode", self._infer_script_element_from_cursor())
+        offset = -1 if reverse else 1
+        target_index = max(0, min(len(order) - 1, order.index(current) + offset))
+        target = order[target_index]
+        self._set_script_element(target)
+
+    def _advance_script_element_after_return(self, previous: str) -> None:
+        if previous == "character":
+            self._update_continued_character_cue()
+        target = {
+            "scene": "action",
+            "action": "action",
+            "character": "dialogue",
+            "dialogue": "action",
+            "parenthetical": "dialogue",
+            "transition": "scene",
+        }.get(previous, "action")
+        self._set_script_element_mode(target)
+        self._apply_script_block_format(target)
+
+    def _update_continued_character_cue(self) -> None:
+        editor = getattr(self, "script_text", None)
+        if not isinstance(editor, ScreenplayEditor):
+            return
+        current_block = editor.textCursor().block()
+        character_block = current_block.previous()
+        if not character_block.isValid():
+            return
+
+        current_cue = character_block.text().strip().lstrip("@").strip().upper()
+        if not current_cue:
+            return
+        cue_without_continued = re.sub(
+            r"\s*\(CONT['’]?D\)\s*$",
+            "",
+            current_cue,
+            flags=re.IGNORECASE,
+        ).strip()
+
+        def identity(cue: str) -> str:
+            result = re.sub(
+                r"\s*\(CONT['’]?D\)\s*$",
+                "",
+                cue.strip().lstrip("@").strip().upper(),
+                flags=re.IGNORECASE,
+            ).strip()
+            while re.search(r"\s+\([^)]*\)\s*$", result):
+                result = re.sub(r"\s+\([^)]*\)\s*$", "", result).strip()
+            return result
+
+        previous_character = character_block.previous()
+        previous_cue = ""
+        while previous_character.isValid():
+            element = self._script_element_from_block(previous_character)
+            if element == "scene":
+                break
+            if element == "character" and previous_character.text().strip():
+                previous_cue = previous_character.text().strip()
+                break
+            previous_character = previous_character.previous()
+
+        continued = bool(previous_cue) and identity(previous_cue) == identity(current_cue)
+        desired = (
+            f"{cue_without_continued} (CONT'D)"
+            if continued
+            else cue_without_continued
+        )
+        if desired == current_cue:
+            return
+        cue_cursor = QTextCursor(character_block)
+        cue_cursor.movePosition(
+            QTextCursor.MoveOperation.EndOfBlock,
+            QTextCursor.MoveMode.KeepAnchor,
+        )
+        cue_cursor.insertText(desired)
+        next_block = editor.document().findBlockByNumber(character_block.blockNumber() + 1)
+        if next_block.isValid():
+            editor.setTextCursor(QTextCursor(next_block))
+
+    def _set_script_element(self, element: str) -> None:
+        cursor = self.script_text.textCursor()
+        cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
+        original = cursor.selectedText().replace("\u2029", "").strip()
+        value = original.lstrip("!@").strip()
+        if element == "scene":
+            value = value.upper()
+            if value and not value.startswith(("INT.", "EXT.", "INT./EXT.", "EXT./INT.", "I/E.")):
+                value = f"INT. {value}"
+        elif element == "character":
+            value = value.upper()
+        elif element == "parenthetical":
+            value = value.strip("()")
+            value = f"({value})" if value else ""
+        elif element == "transition":
+            value = value.upper()
+            if value and value not in {"COUPE À :", "CUT TO:", "FADE IN:", "FADE OUT.", "FONDU :"} and not value.endswith((" TO:", " À :", " A :")):
+                value = f"{value} À :"
+        cursor.insertText(value)
+        self.script_text.setTextCursor(cursor)
+        self._set_script_element_mode(element)
+        self._apply_script_block_format(element, cursor)
+        self.script_text.ensureCursorVisible()
+        self.script_text.setFocus()
+
+    def _insert_script_element(self, element: str) -> None:
+        templates = {
+            "scene": "INT. LIEU - JOUR\n\n",
+            "action": "Une action visible et précise.\n\n",
+            "character": "PERSONNAGE\n",
+            "dialogue": "Une réplique.\n\n",
+            "parenthetical": "(indication brève)\n",
+            "transition": "COUPE À :\n\n",
+        }
+        value = templates.get(element)
+        if not value:
+            return
+        cursor = self.script_text.textCursor()
+        before = self.script_text.toPlainText()[: cursor.position()]
+        if before and element in {"scene", "action", "character", "transition"}:
+            if before.endswith("\n\n"):
+                pass
+            elif before.endswith("\n"):
+                value = "\n" + value
+            else:
+                value = "\n\n" + value
+        elif before and not before.endswith("\n"):
+            value = "\n" + value
+        cursor.insertText(value)
+        inserted_end = cursor.position()
+        cursor.setPosition(max(0, inserted_end - len(value.lstrip("\n"))))
+        self.script_text.setTextCursor(cursor)
+        self._set_script_element_mode(element)
+        self.script_text.ensureCursorVisible()
+        self.script_text.setFocus()
+
+    def _save_script(self, _checked: bool = False, silent: bool = False) -> None:
+        editor = getattr(self, "script_text", None)
+        if not self.active_project or not isinstance(editor, QTextEdit):
+            return
+        if hasattr(self, "script_save_timer"):
+            self.script_save_timer.stop()
+        self.db.ensure_doc(self.active_project, "script", "Scénario")
+        self.db.save_doc(self.active_project, "script", editor.toPlainText())
+        self.db.run("UPDATE projects SET current_document='script' WHERE id=?", (self.active_project,))
+        if not silent:
+            self.save_state.setText("Scénario enregistré")
+            QTimer.singleShot(2400, lambda: self.save_state.setText(""))
+
+    def _snapshot_script(self) -> None:
+        self._save_script(silent=True)
+        self.db.snapshot(self.active_project, "script", self.script_text.toPlainText())
+        self.save_state.setText("Version du scénario créée")
+        QTimer.singleShot(2400, lambda: self.save_state.setText(""))
+
+    def _script_elements_for_export(self) -> list[tuple[str, str]]:
+        editor = getattr(self, "script_text", None)
+        if not isinstance(editor, ScreenplayEditor):
+            return parse_screenplay("")
+        type_names = {
+            "scene": "Scene Heading",
+            "action": "Action",
+            "character": "Character",
+            "dialogue": "Dialogue",
+            "parenthetical": "Parenthetical",
+            "transition": "Transition",
+        }
+        elements: list[tuple[str, str]] = []
+        block = editor.document().firstBlock()
+        while block.isValid():
+            value = block.text().strip()
+            if value:
+                element = self._script_element_from_block(block)
+                if element == "character":
+                    value = value.lstrip("@").strip().upper()
+                elif element == "action":
+                    value = value.lstrip("!").strip()
+                elif element in {"scene", "transition"}:
+                    value = value.upper()
+                elements.append((type_names.get(element, "Action"), value))
+            block = block.next()
+        return elements
+
+    def _export_script_fdx(self) -> None:
+        self._save_script(silent=True)
+        project = self.db.one("SELECT title FROM projects WHERE id=?", (self.active_project,))
+        suggested = f"{(project['title'] if project else 'scenario').strip() or 'scenario'}.fdx"
+        path, _ = QFileDialog.getSaveFileName(self, "Exporter le scénario", suggested, "Final Draft XML (*.fdx)")
+        if not path:
+            return
+        output_path = Path(path)
+        if output_path.suffix.lower() != ".fdx":
+            output_path = output_path.with_suffix(".fdx")
+        meta = self._script_meta()
+        export_fdx(
+            output_path, meta["title"] or (project["title"] if project else "Scénario"),
+            self.script_text.toPlainText(), meta["author"], meta["contact"], meta["draft_date"],
+            elements=self._script_elements_for_export(),
+        )
+        self.save_state.setText("Fichier FDX exporté")
+        QTimer.singleShot(2400, lambda: self.save_state.setText(""))
+
+    def _export_script_pdf(self) -> None:
+        self._save_script(silent=True)
+        project = self.db.one("SELECT title FROM projects WHERE id=?", (self.active_project,))
+        suggested = f"{(project['title'] if project else 'scenario').strip() or 'scenario'}.pdf"
+        path, _ = QFileDialog.getSaveFileName(self, "Exporter le scénario", suggested, "PDF (*.pdf)")
+        if not path:
+            return
+        output_path = Path(path)
+        if output_path.suffix.lower() != ".pdf":
+            output_path = output_path.with_suffix(".pdf")
+        meta = self._script_meta()
+        export_script_pdf(
+            output_path, meta["title"] or (project["title"] if project else "Scénario"),
+            self.script_text.toPlainText(), meta["author"], meta["contact"], meta["draft_date"],
+            based_on=meta["based_on"],
+            copyright_notice=meta["copyright_notice"],
+            include_title_page=bool(meta["include_title_page"]),
+            elements=self._script_elements_for_export(),
+        )
+        self.save_state.setText("Scénario PDF exporté")
+        QTimer.singleShot(2400, lambda: self.save_state.setText(""))
+
+    def show_workshop(self) -> None:
+        if not self._need_project():
+            return
+        page = self._begin_page("Atelier d’écriture", "workshop")
+        project = self.db.one("SELECT title FROM projects WHERE id=?", (self.active_project,))
+        self._page_header(page, "Projet actif", project["title"] if project else "Atelier", "Un document à la fois : écrire, enregistrer, diagnostiquer, réécrire.")
+        body = QHBoxLayout()
+        body.setSpacing(14)
+
+        nav = make_card()
+        nav.setFixedWidth(220)
+        nav_box = QVBoxLayout(nav)
+        nav_box.setContentsMargins(12, 14, 12, 14)
+        nav_box.addWidget(make_label("DOCUMENTS", "Caption"))
+        nav_box.addSpacing(5)
+        self.doc_type = self.db.setting(f"last_doc_{self.active_project}", "summary")
+        if self.doc_type not in dict(DOC_TYPES):
+            self.doc_type = "summary"
+        doc_group = QButtonGroup(self)
+        doc_group.setExclusive(True)
+        for key, title in DOC_TYPES:
+            button = QPushButton(title)
+            button.setProperty("segment", True)
+            button.setCheckable(True)
+            button.setChecked(key == self.doc_type)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(lambda _checked=False, k=key: self._switch_doc(k))
+            doc_group.addButton(button)
+            nav_box.addWidget(button)
+        nav_box.addStretch()
+        body.addWidget(nav)
+
+        editor_widget = QWidget()
+        editor_widget.setObjectName("PageHost")
+        editor_box = QVBoxLayout(editor_widget)
+        editor_box.setContentsMargins(0, 0, 0, 0)
+        editor_box.setSpacing(10)
+        title = dict(DOC_TYPES)[self.doc_type]
+        doc = self.db.ensure_doc(self.active_project, self.doc_type, title)
+
+        brief = make_card()
+        brief_box = QVBoxLayout(brief)
+        brief_box.setContentsMargins(20, 15, 20, 16)
+        brief_box.setSpacing(6)
+        editor_head = QHBoxLayout()
+        editor_head.addWidget(make_label(title, "SectionTitle"))
+        editor_head.addStretch()
+        editor_head.addWidget(make_label(f"Mis à jour {doc['updated_at'].replace('T', ' ')[:16]}", "Muted"))
+        brief_box.addLayout(editor_head)
+        brief_box.addWidget(make_label(DOC_META[self.doc_type], "Muted", True))
+        dtype = self._diagnostic_type()
+        total = len(DIAGNOSTICS[dtype])
+        checked = self.db.one(
+            "SELECT COUNT(*) FROM diagnostics WHERE project_id=? AND doc_type=? AND checked=1",
+            (self.active_project, dtype),
+        )[0]
+        diagnostic_state = make_label(f"Diagnostic local · {checked}/{total} repères clarifiés", "AccentPill")
+        diagnostic_state.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        brief_box.addWidget(diagnostic_state, 0, Qt.AlignmentFlag.AlignLeft)
+        editor_box.addWidget(brief)
+
+        document_head = QHBoxLayout()
+        document_head.addWidget(make_label("DOCUMENT", "Caption"))
+        document_head.addStretch()
+        document_head.addWidget(make_label("Zone longue · ascenseur toujours visible", "Muted"))
+        editor_box.addLayout(document_head)
+        self.doc_text = make_editor(160 if self.height() < 800 else 240, "Commence ici. Une version imparfaite te donnera quelque chose à diagnostiquer.")
+        self.doc_text.setObjectName("LearningAnswer")
+        self.doc_text.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.doc_text.setPlainText(doc["content"])
+        editor_box.addWidget(self.doc_text, 1)
+
+        action_bar = QWidget()
+        action_bar.setFixedHeight(52)
+        actions = QHBoxLayout(action_bar)
+        actions.setContentsMargins(0, 4, 0, 0)
+        actions.setSpacing(8)
+        actions.addWidget(make_button("Enregistrer", "primary", self._save_doc))
+        actions.addWidget(make_button("Version" if self.width() < 1250 else "Créer une version", "secondary", self._snapshot))
+        actions.addWidget(make_button("Diagnostic local" if self.width() >= 1250 else "Diagnostic", "secondary", self._diagnostic))
+        actions.addStretch()
+        actions.addWidget(make_button("PDF" if self.width() < 1250 else "Manuel PDF", "secondary", self._manual_pdf))
+        editor_box.addWidget(action_bar)
+        body.addWidget(editor_widget, 1)
+        page.addLayout(body, 1)
+
+    def _diagnostic_type(self) -> str:
+        if self.doc_type in DIAGNOSTICS:
+            return self.doc_type
+        return "outline" if self.doc_type in ("beats", "scenes") else "synopsis"
+
+    def _switch_doc(self, key: str) -> None:
+        if hasattr(self, "doc_text"):
+            self._save_doc(silent=True)
+        self.db.set_setting(f"last_doc_{self.active_project}", key)
+        self.show_workshop()
+
+    def _save_doc(self, _checked: bool = False, silent: bool = False) -> None:
+        self.db.save_doc(self.active_project, self.doc_type, self.doc_text.toPlainText())
+        if not silent:
+            QMessageBox.information(self, "Enregistré", "Document enregistré localement.")
+
+    def _snapshot(self) -> None:
+        content = self.doc_text.toPlainText()
+        self._save_doc(silent=True)
+        self.db.snapshot(self.active_project, self.doc_type, content)
+        QMessageBox.information(self, "Version créée", "Un instantané a été ajouté à l’historique de réécriture.")
+
+    def _diagnostic(self) -> None:
+        dtype = self._diagnostic_type()
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Diagnostic de travail")
+        dialog.resize(620, 520)
+        box = QVBoxLayout(dialog)
+        box.setContentsMargins(26, 24, 26, 24)
+        box.addWidget(make_label("Diagnostic de travail", "SectionTitle"))
+        box.addWidget(make_label("Coche ce qui est suffisamment clair aujourd’hui. Ce n’est pas une note.", "Muted", True))
+        box.addSpacing(10)
+        values: list[tuple[str, str, QCheckBox]] = []
+        for index, item in enumerate(DIAGNOSTICS[dtype]):
+            key = f"{dtype}:{index}"
+            row = self.db.one("SELECT checked FROM diagnostics WHERE project_id=? AND doc_type=? AND item_key=?", (self.active_project, dtype, key))
+            check = QCheckBox(item)
+            check.setChecked(bool(row[0]) if row else False)
+            values.append((key, item, check))
+            box.addWidget(check)
+        box.addStretch()
+        actions = QHBoxLayout()
+        actions.addStretch()
+        actions.addWidget(make_button("Annuler", "secondary", dialog.reject))
+        save_button = make_button("Enregistrer", "primary")
+        actions.addWidget(save_button)
+        box.addLayout(actions)
+
+        def save() -> None:
+            for key, item, check in values:
+                self.db.run(
+                    "INSERT INTO diagnostics(project_id,doc_type,item_key,checked,note,updated_at) VALUES(?,?,?,?,?,?) "
+                    "ON CONFLICT(project_id,doc_type,item_key) DO UPDATE SET checked=excluded.checked,updated_at=excluded.updated_at",
+                    (self.active_project, dtype, key, int(check.isChecked()), item, NOW()),
+                )
+            dialog.accept()
+
+        save_button.clicked.connect(save)
+        dialog.exec()
+
+    def _manual_pdf(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(self, "Créer le manuel", "Mon manuel d’écriture & storytelling.pdf", "PDF (*.pdf)")
+        if path:
+            export_manual_pdf(Path(path), "StoryForge — Manuel cumulatif", self._manual_sections())
+            QMessageBox.information(self, "PDF généré", f"Manuel créé :\n{path}")
+
+    def _manual_sections(self) -> list[tuple[str, str]]:
+        sections: list[tuple[str, str]] = [
+            ("VERSION", f"StoryForge {APP_VERSION}\nDate : {datetime.now().strftime('%d/%m/%Y')}"),  # noqa: DTZ005
+            ("CARTE DU PARCOURS", "IDÉES → NOYAU DRAMATIQUE → PERSONNAGES / CONFLIT → CARTE → SYNOPSIS → OUTLINE → SCÈNES → PREMIER JET → FEEDBACK → RÉÉCRITURES"),
+        ]
+        project = self.db.one("SELECT * FROM projects WHERE id=?", (self.active_project,)) if self.active_project else None
+        if project:
+            sections.append(
+                (
+                    "PROJET — État actuel",
+                    f"Projet : {project['title']}\nÉtape : {project['stage']}\nProtagoniste : {project['protagonist']}\nObjectif : {project['objective']}\nOpposition : {project['opposition']}\nEnjeux : {project['stakes']}\nFin provisoire : {project['ending']}\nProblème principal : {project['main_problem']}\nProchaine décision : {project['next_decision']}",
+                )
+            )
+            story_map_count = self.db.one(
+                "SELECT COUNT(*) FROM story_map_answers WHERE project_id=? AND TRIM(answer)<>''",
+                (self.active_project,),
+            )[0]
+            if story_map_count:
+                sections.append(("CARTE DE L’HISTOIRE — État actuel", self._story_map_compilation(include_current=False)))
+        progress = self.db.one("SELECT status FROM progress WHERE session_key=?", (LEARNING_SESSION.key,))
+        sections.append(
+            (
+                f"SESSION 01 — {LEARNING_SESSION.title}",
+                f"Statut : {progress['status'] if progress else 'à commencer'}\nObjectif : construire une première direction dramatique, une question claire à la fois.",
+            )
+        )
+        work_rows = {row["step_index"]: row for row in self.db.q("SELECT * FROM learning_work WHERE session_key=? ORDER BY step_index", (LEARNING_SESSION.key,))}
+        for index, step in enumerate(LEARNING_SESSION.steps):
+            work = work_rows.get(index)
+            if not work:
+                continue
+            body = [
+                f"Question : {step.question}",
+                f"Pourquoi elle compte : {step.why}",
+                f"Réponse : {work['draft'] or '—'}",
+            ]
+            sections.append((f"FICHE {index + 1} — {step.title}", "\n".join(body)))
+        mastery = self.db.q("SELECT label,status FROM concept_mastery ORDER BY updated_at")
+        if mastery:
+            acquired = ", ".join(row["label"] for row in mastery if row["status"] == "acquis") or "Aucune pour le moment"
+            review = ", ".join(row["label"] for row in mastery if row["status"] != "acquis") or "Aucune"
+            sections.append(("ACQUIS / À REVOIR", f"Acquis : {acquired}\nÀ revoir ou fragile : {review}"))
+        sections.append(("PROCHAINE ÉTAPE", "Reprendre la première notion encore fragile, ou transformer la graine terminée en projet court."))
+        return sections
+
+    # ---------- AI professor ----------
+
+    def _ai_context(self) -> str:
+        parts = ["L'élève utilise StoryForge, application locale d'apprentissage de l'écriture."]
+        project = self.db.one("SELECT * FROM projects WHERE id=?", (self.active_project,)) if self.active_project else None
+        if project:
+            parts.append("\nPROJET ACTIF")
+            fields = [
+                ("title", "Titre"), ("stage", "Étape"), ("protagonist", "Protagoniste"),
+                ("desire", "Désir"), ("objective", "Objectif"), ("opposition", "Opposition"),
+                ("stakes", "Enjeux"), ("change_note", "Changement possible"), ("ending", "Fin provisoire"),
+                ("main_problem", "Problème principal"), ("next_decision", "Prochaine décision"),
+            ]
+            for key, caption in fields:
+                value = (project[key] or "").strip()
+                if value:
+                    parts.append(f"{caption}: {value}")
+            questions = self.db.q("SELECT question_key,answer FROM project_questions WHERE project_id=? AND TRIM(answer)<>'' ORDER BY updated_at", (self.active_project,))
+            if questions:
+                labels = dict(UNIVERSAL_QUESTIONS)
+                parts.append("\nRÉPONSES AUX QUESTIONS DE DÉVELOPPEMENT")
+                for question in questions:
+                    parts.append(f"- {labels.get(question['question_key'], question['question_key'])}: {question['answer']}")
+            dtype = self.db.setting(f"last_doc_{self.active_project}", "summary")
+            doc = self.db.one("SELECT content,title FROM project_docs WHERE project_id=? AND doc_type=?", (self.active_project, dtype))
+            if doc and (doc["content"] or "").strip():
+                content = doc["content"].strip()
+                if len(content) > 18000:
+                    content = content[:18000] + "\n[… document tronqué par StoryForge …]"
+                parts.append(f"\nDOCUMENT DE TRAVAIL ACTUEL — {doc['title']}\n{content}")
+        progress = self.db.one("SELECT step_index,status FROM progress WHERE session_key=?", (LEARNING_SESSION.key,))
+        if progress:
+            idx = min(progress["step_index"], len(LEARNING_SESSION.steps) - 1)
+            step = LEARNING_SESSION.steps[idx]
+            parts.append(f"\nAPPRENTISSAGE ACTUEL: Session 01, étape {idx + 1}/{len(LEARNING_SESSION.steps)} — {step.title}")
+            work = self.db.one("SELECT * FROM learning_work WHERE session_key=? AND step_index=?", (LEARNING_SESSION.key, idx))
+            if work:
+                if work["draft"].strip():
+                    parts.append(f"Premier essai de l'élève: {work['draft']}")
+                if work["revision"].strip():
+                    parts.append(f"Réécriture de l'élève: {work['revision']}")
+                if work["takeaway"].strip():
+                    parts.append(f"Ce que l'élève retient: {work['takeaway']}")
+        return "\n".join(parts)
+
+    def _ai_history(self) -> list[dict]:
+        if self.active_project:
+            rows = self.db.q("SELECT role,content FROM ai_messages WHERE project_id=? ORDER BY id DESC LIMIT 12", (self.active_project,))
+        else:
+            rows = self.db.q("SELECT role,content FROM ai_messages WHERE project_id IS NULL ORDER BY id DESC LIMIT 12")
+        return [dict(row) for row in reversed(rows)]
+
+    def _ai_settings(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Réglages OpenAI")
+        dialog.resize(620, 370)
+        box = QVBoxLayout(dialog)
+        box.setContentsMargins(28, 26, 28, 24)
+        box.addWidget(make_label("Connexion OpenAI", "SectionTitle"))
+        box.addWidget(make_label("La clé n’est jamais enregistrée. Elle reste en mémoire jusqu’à la fermeture, ou vient de OPENAI_API_KEY.", "Muted", True))
+        box.addSpacing(14)
+        box.addWidget(make_label("Clé API", "Muted"))
+        key = QLineEdit(self.api_key)
+        key.setEchoMode(QLineEdit.EchoMode.Password)
+        key.setPlaceholderText("sk-…")
+        box.addWidget(key)
+        box.addWidget(make_label("Modèle", "Muted"))
+        model = QComboBox()
+        model.setEditable(True)
+        model.addItems(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4-mini"])
+        model.setCurrentText(self.ai_model)
+        box.addWidget(model)
+        box.addStretch()
+        actions = QHBoxLayout()
+        actions.addStretch()
+        actions.addWidget(make_button("Annuler", "secondary", dialog.reject))
+        save_button = make_button("Enregistrer", "primary")
+        actions.addWidget(save_button)
+        box.addLayout(actions)
+
+        def save() -> None:
+            self.api_key = key.text().strip()
+            self.ai_model = model.currentText().strip() or "gpt-5.6-sol"
+            self.db.set_setting("ai_model", self.ai_model)
+            dialog.accept()
+            if self.current_view == "ai":
+                self.show_ai()
+            elif self.current_view == "settings":
+                self.show_settings()
+
+        save_button.clicked.connect(save)
+        dialog.exec()
+
+    def show_ai(self) -> None:
+        page = self._begin_page("Professeur IA", "ai")
+        self._page_header(page, "Apprentissage guidé", "Ton professeur dans StoryForge", "Il lit le contexte utile et t’aide une difficulté à la fois. Ce n’est pas un bouton « écris mon film ».")
+        body = QHBoxLayout()
+        body.setSpacing(14)
+
+        side = make_card()
+        side.setFixedWidth(282)
+        side_box = QVBoxLayout(side)
+        side_box.setContentsMargins(14, 16, 14, 16)
+        side_box.addWidget(make_label("MODE", "Caption"))
+        mode_group = QButtonGroup(self)
+        mode_group.setExclusive(True)
+        modes = [
+            ("coach", "Continuer mon apprentissage"),
+            ("diagnostic", "Diagnostiquer mon travail"),
+            ("rewrite", "Préparer une réécriture"),
+            ("explore", "Explorer une idée"),
+        ]
+        self.ai_mode_buttons: dict[str, QPushButton] = {}
+        for key, caption in modes:
+            button = QPushButton(caption)
+            button.setProperty("segment", True)
+            button.setCheckable(True)
+            button.setChecked(key == self.ai_mode)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(lambda _checked=False, k=key: self._set_ai_mode(k))
+            mode_group.addButton(button)
+            side_box.addWidget(button)
+            self.ai_mode_buttons[key] = button
+        side_box.addSpacing(16)
+        side_box.addWidget(make_label("CONTEXTE ENVOYÉ", "Caption"))
+        context_copy = "Projet actif + réponses + document de travail + étape pédagogique" if self.active_project else "Étape pédagogique actuelle · aucun projet actif"
+        side_box.addWidget(make_label(context_copy, "Muted", True))
+        side_box.addSpacing(14)
+        side_box.addWidget(make_button("Réglages OpenAI", "secondary", self._ai_settings))
+        side_box.addWidget(make_button("Nouvelle conversation", "secondary", self._ai_clear_chat))
+        side_box.addStretch()
+        state = "Prêt" if self.api_key else "Clé API requise"
+        side_box.addWidget(make_label(f"●  {state}\n{self.ai_model}", "Muted", True))
+        body.addWidget(side)
+
+        main = make_card()
+        main_box = QVBoxLayout(main)
+        main_box.setContentsMargins(18, 17, 18, 17)
+        main_box.addWidget(make_label("Conversation pédagogique", "SectionTitle"))
+        main_box.addSpacing(8)
+        self.ai_scroll = QScrollArea()
+        self.ai_scroll.setWidgetResizable(True)
+        self.ai_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        messages = QWidget()
+        messages.setObjectName("ChatCanvas")
+        self.ai_messages_layout = QVBoxLayout(messages)
+        self.ai_messages_layout.setContentsMargins(2, 4, 8, 4)
+        self.ai_messages_layout.setSpacing(11)
+        self.ai_messages_layout.addStretch()
+        history = self._ai_history()
+        if history:
+            for message in history:
+                self._add_ai_bubble(message["role"], message["content"])
+        else:
+            self._add_ai_bubble("assistant", "Je connais l’étape pédagogique où tu te trouves. Écris ce qui te bloque ou utilise simplement : « Continue avec moi ».")
+        self.ai_scroll.setWidget(messages)
+        main_box.addWidget(self.ai_scroll, 1)
+        main_box.addSpacing(8)
+        composer = QHBoxLayout()
+        self.ai_input = SendEditor()
+        self.ai_input.setAcceptRichText(False)
+        self.ai_input.setPlaceholderText("Écris ce qui te bloque…   Ctrl + Entrée pour envoyer")
+        self.ai_input.setFixedHeight(92)
+        self.ai_input.send_requested.connect(self._ai_send)
+        composer.addWidget(self.ai_input, 1)
+        self.ai_send_button = make_button("Envoyer  →", "primary", self._ai_send)
+        composer.addWidget(self.ai_send_button, 0, Qt.AlignmentFlag.AlignBottom)
+        main_box.addLayout(composer)
+        self.ai_status = make_label("", "Muted")
+        if self._ai_worker and self._ai_worker.isRunning():
+            self.ai_send_button.setEnabled(False)
+            self.ai_status.setText("Une autre demande au professeur est en cours…")
+        main_box.addWidget(self.ai_status)
+        body.addWidget(main, 1)
+        page.addLayout(body, 1)
+        QTimer.singleShot(0, self._scroll_ai_to_bottom)
+
+    def _set_ai_mode(self, mode: str) -> None:
+        self.ai_mode = mode
+        self.db.set_setting("ai_mode", mode)
+
+    def _add_ai_bubble(self, role: str, content: str) -> None:
+        row = QHBoxLayout()
+        bubble = QFrame()
+        bubble.setProperty("message", "user" if role == "user" else "assistant")
+        bubble.setMaximumWidth(720)
+        bubble_box = QVBoxLayout(bubble)
+        bubble_box.setContentsMargins(14, 11, 14, 12)
+        bubble_box.setSpacing(5)
+        bubble_box.addWidget(make_label("TOI" if role == "user" else "PROFESSEUR", "Caption"))
+        bubble_box.addWidget(make_label((content or "").strip(), "Body", True))
+        if role == "user":
+            row.addStretch()
+            row.addWidget(bubble)
+        else:
+            row.addWidget(bubble)
+            row.addStretch()
+        self.ai_messages_layout.insertLayout(max(0, self.ai_messages_layout.count() - 1), row)
+
+    def _scroll_ai_to_bottom(self) -> None:
+        bar = self.ai_scroll.verticalScrollBar()
+        bar.setValue(bar.maximum())
+
+    def _ai_clear_chat(self) -> None:
+        if QMessageBox.question(self, "Nouvelle conversation", "Effacer l’historique IA de ce contexte ?") != QMessageBox.StandardButton.Yes:
+            return
+        if self.active_project:
+            self.db.run("DELETE FROM ai_messages WHERE project_id=?", (self.active_project,))
+        else:
+            self.db.run("DELETE FROM ai_messages WHERE project_id IS NULL")
+        self.show_ai()
+
+    def _ai_send(self) -> None:
+        text = self.ai_input.toPlainText().strip()
+        if not text or (self._ai_worker and self._ai_worker.isRunning()):
+            return
+        if not self.api_key:
+            QMessageBox.information(self, "Clé API nécessaire", "Ouvre « Réglages OpenAI » et saisis une clé API, ou définis OPENAI_API_KEY avant de lancer StoryForge.")
+            self._ai_settings()
+            return
+        mode = self.ai_mode
+        prefixes = {
+            "coach": "Continue la formation à partir de mon état actuel. Une seule difficulté à la fois.",
+            "diagnostic": "Diagnostique mon travail actuel. Identifie mon intention puis un problème principal avant toute solution.",
+            "rewrite": "Aide-moi à préparer une réécriture. Diagnostic avant correction, macro avant micro.",
+            "explore": "Aide-moi à explorer cette idée sans inventer le film à ma place et sans imposer de structure.",
+        }
+        prompt = prefixes.get(mode, "") + "\n\nMessage de l'élève : " + text
+        project_id = self.active_project if self.active_project else None
+        self.db.run(
+            "INSERT INTO ai_messages(created_at,project_id,role,mode,content,response_id) VALUES(?,?,?,?,?,?)",
+            (NOW(), project_id, "user", mode, text, ""),
+        )
+        self._add_ai_bubble("user", text)
+        self.ai_input.clear()
+        self.ai_send_button.setEnabled(False)
+        self.ai_status.setText("Le professeur lit ton contexte…")
+        self._scroll_ai_to_bottom()
+
+        history = self._ai_history()[:-1]
+        worker = AIWorker(self.api_key, self.ai_model, prompt, self._ai_context(), history)
+        self._ai_worker = worker
+        worker.succeeded.connect(lambda reply, response_id: self._ai_receive(reply, response_id, mode, project_id))
+        worker.failed.connect(self._ai_error)
+        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(lambda: setattr(self, "_ai_worker", None))
+        worker.start()
+
+    def _ai_receive(self, text: str, response_id: object, mode: str, project_id: int | None) -> None:
+        self.db.run(
+            "INSERT INTO ai_messages(created_at,project_id,role,mode,content,response_id) VALUES(?,?,?,?,?,?)",
+            (NOW(), project_id, "assistant", mode, text, str(response_id or "")),
+        )
+        if self.current_view == "ai":
+            self._add_ai_bubble("assistant", text)
+            self.ai_send_button.setEnabled(True)
+            self.ai_status.setText("")
+            QTimer.singleShot(0, self._scroll_ai_to_bottom)
+        else:
+            self.save_state.setText("Réponse du professeur reçue")
+            QTimer.singleShot(2600, lambda: self.save_state.setText(""))
+
+    def _ai_error(self, message: str) -> None:
+        if self.current_view == "ai":
+            self.ai_send_button.setEnabled(True)
+            self.ai_status.setText("")
+        QMessageBox.critical(self, "Erreur IA", message)
+
+    # ---------- Rewriting ----------
+
+    def show_rewrite(self) -> None:
+        if not self._need_project():
+            return
+        page = self._begin_page("Réécriture", "rewrite")
+        self._page_header(page, "Comparer avant de corriger", "Réécriture", "Diagnostic d’abord. Macro avant micro. Garde une trace de ce qui change.")
+        body = QHBoxLayout()
+        body.setSpacing(14)
+        left = make_card()
+        left.setFixedWidth(330)
+        left_box = QVBoxLayout(left)
+        left_box.setContentsMargins(14, 14, 14, 14)
+        left_box.addWidget(make_label("HISTORIQUE", "Caption"))
+        self.version_tree = QTreeWidget()
+        self.version_tree.setHeaderLabels(["Version", "Document"])
+        self.version_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.version_tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.version_tree.itemSelectionChanged.connect(self._load_version)
+        for row in self.db.q("SELECT * FROM doc_versions WHERE project_id=? ORDER BY id DESC", (self.active_project,)):
+            item = QTreeWidgetItem([row["label"], DOCUMENT_NAMES.get(row["doc_type"], row["doc_type"])])
+            item.setData(0, Qt.ItemDataRole.UserRole, row["id"])
+            self.version_tree.addTopLevelItem(item)
+        left_box.addWidget(self.version_tree)
+        body.addWidget(left)
+
+        right = make_card()
+        right_box = QVBoxLayout(right)
+        right_box.setContentsMargins(22, 19, 22, 20)
+        right_box.addWidget(make_label("Version sélectionnée", "SectionTitle"))
+        right_box.addWidget(make_label("Choisis un instantané pour relire ce qui existait avant la prochaine passe.", "Muted", True))
+        self.version_text = make_editor(350)
+        self.version_text.setReadOnly(True)
+        right_box.addWidget(self.version_text, 1)
+        body.addWidget(right, 1)
+        page.addLayout(body, 1)
+
+    def _load_version(self) -> None:
+        selected = self.version_tree.selectedItems()
+        if not selected:
+            return
+        version_id = int(selected[0].data(0, Qt.ItemDataRole.UserRole))
+        row = self.db.one("SELECT * FROM doc_versions WHERE id=?", (version_id,))
+        if row:
+            self.version_text.setPlainText(row["content"])
+
+    # ---------- Journey ----------
+
+    def show_path(self) -> None:
+        page = self._begin_page("Parcours", "path")
+        self._page_header(
+            page,
+            "Carte globale",
+            "Du premier exercice au long métrage",
+            "Choisis une phase pour comprendre son processus. On peut revenir en arrière dès qu’une faiblesse apparaît.",
+        )
+
+        phase_by_key = {phase["key"]: phase for phase in CURRICULUM}
+        selected_key = self.db.setting("path_phase", CURRICULUM[0]["key"])
+        if selected_key not in phase_by_key:
+            selected_key = CURRICULUM[0]["key"]
+        selected = phase_by_key[selected_key]
+
+        body = QHBoxLayout()
+        body.setSpacing(14)
+
+        navigation = make_card()
+        navigation.setFixedWidth(260 if self.width() < 1250 else 286)
+        navigation_box = QVBoxLayout(navigation)
+        navigation_box.setContentsMargins(12, 15, 12, 15)
+        navigation_box.setSpacing(6)
+        navigation_box.addWidget(make_label("LES 4 PHASES", "Caption"))
+        navigation_box.addWidget(
+            make_label(
+                "On termine plusieurs boucles courtes avant d’allonger les projets.",
+                "Muted",
+                True,
+            )
+        )
+        navigation_box.addSpacing(6)
+        group = QButtonGroup(self)
+        group.setExclusive(True)
+        for phase in CURRICULUM:
+            button = QPushButton(f"{phase['phase'].upper()}\n{phase['title']}")
+            button.setProperty("segment", True)
+            button.setCheckable(True)
+            button.setChecked(phase["key"] == selected_key)
+            button.setMinimumHeight(58)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(lambda _checked=False, key=phase["key"]: self._select_path_phase(key))
+            group.addButton(button)
+            navigation_box.addWidget(button)
+        navigation_box.addStretch()
+        navigation_box.addWidget(
+            make_label(
+                "Les modèles structurels restent des outils optionnels, jamais des conditions de validation.",
+                "Muted",
+                True,
+            )
+        )
+        body.addWidget(navigation)
+
+        detail = make_card()
+        detail_box = QVBoxLayout(detail)
+        detail_box.setContentsMargins(24, 18, 14, 14)
+        detail_box.setSpacing(9)
+        detail_head = QHBoxLayout()
+        title_copy = QVBoxLayout()
+        title_copy.setSpacing(5)
+        pill = make_label(selected["phase"].upper(), "AccentPill")
+        pill.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        title_copy.addWidget(pill, 0, Qt.AlignmentFlag.AlignLeft)
+        title_copy.addWidget(make_label(selected["title"], "SectionTitle"))
+        title_copy.addWidget(make_label(selected["intro"], "Muted", True))
+        detail_head.addLayout(title_copy, 1)
+        phase_number = next(index for index, phase in enumerate(CURRICULUM, start=1) if phase["key"] == selected_key)
+        detail_head.addWidget(make_label(f"PHASE {phase_number}/{len(CURRICULUM)}", "Caption"), 0, Qt.AlignmentFlag.AlignTop)
+        detail_box.addLayout(detail_head)
+        detail_box.addWidget(make_separator())
+
+        scroll = QScrollArea()
+        scroll.setObjectName("PanelScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        canvas = QWidget()
+        canvas.setObjectName("PanelCanvas")
+        canvas_box = QVBoxLayout(canvas)
+        canvas_box.setContentsMargins(0, 4, 12, 8)
+        canvas_box.setSpacing(8)
+
+        canvas_box.addWidget(make_label("LIVRABLE DE LA PHASE", "Caption"))
+        canvas_box.addWidget(make_label(selected["deliverable"], "Body", True))
+        canvas_box.addWidget(make_label("POUR PASSER À LA SUITE", "Caption"))
+        canvas_box.addWidget(make_label(selected["exit"], "Muted", True))
+        canvas_box.addSpacing(7)
+        canvas_box.addWidget(make_label("PROCESSUS ÉTAPE PAR ÉTAPE", "Caption"))
+
+        for index, (title, explanation, result) in enumerate(selected["steps"], start=1):
+            if index > 1:
+                canvas_box.addWidget(make_separator())
+            step_row = QHBoxLayout()
+            step_row.setSpacing(12)
+            number = make_label(f"{index:02d}", "AccentPill")
+            number.setFixedWidth(38)
+            number.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            number.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            step_row.addWidget(number, 0, Qt.AlignmentFlag.AlignTop)
+            step_copy = QVBoxLayout()
+            step_copy.setSpacing(4)
+            step_copy.addWidget(make_label(title, "CardTitle", True))
+            step_copy.addWidget(make_label(explanation, "Body", True))
+            step_copy.addWidget(make_label(f"Résultat · {result}", "Muted", True))
+            step_row.addLayout(step_copy, 1)
+            canvas_box.addLayout(step_row)
+        canvas_box.addStretch()
+        scroll.setWidget(canvas)
+        detail_box.addWidget(scroll, 1)
+
+        detail_box.addWidget(make_separator())
+        actions = QHBoxLayout()
+        if self.width() >= 1250:
+            actions.addWidget(make_label("Tu n’as pas besoin de tout utiliser en même temps.", "Muted"))
+        actions.addStretch()
+        route_labels = {
+            "learning": "Ouvrir les guides d’écriture",
+            "development": "Ouvrir Construction",
+            "ideas": "Ouvrir les idées",
+            "projects": "Ouvrir les projets",
+        }
+        actions.addWidget(
+            make_button(
+                route_labels[selected["route"]],
+                "primary",
+                lambda _checked=False, route=selected["route"]: self._open_path_phase(route),
+            )
+        )
+        detail_box.addLayout(actions)
+        body.addWidget(detail, 1)
+
+        page.addLayout(body, 1)
+
+    def _select_path_phase(self, key: str) -> None:
+        if key not in {phase["key"] for phase in CURRICULUM}:
+            return
+        self.db.set_setting("path_phase", key)
+        self.show_path()
+
+    def _open_path_phase(self, route: str) -> None:
+        destinations = {
+            "learning": self.show_guides,
+            "development": self.show_development,
+            "ideas": self.show_ideas,
+            "projects": self.show_projects,
+        }
+        if route in destinations:
+            destinations[route]()
+
+    # ---------- Custom fields applied to project records ----------
+
+    def _build_record_template_tab(self, target_type: str, entity_id: int = 0) -> QWidget:
+        tab = QWidget()
+        outer = QVBoxLayout(tab)
+        outer.setContentsMargins(0, 8, 0, 0)
+        header = QHBoxLayout()
+        header.addWidget(
+            make_label(
+                "Le modèle complète la fiche principale. Il ne remplace aucun champ StoryForge.",
+                "Muted",
+                True,
+            ),
+            1,
+        )
+        header.addWidget(
+            make_button(
+                "Gérer les modèles",
+                "secondary",
+                lambda _checked=False, target=target_type: self._open_form_templates_for_target(target),
+            )
+        )
+        outer.addLayout(header)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        canvas = QWidget()
+        canvas.setObjectName("PanelCanvas")
+        self.record_template_layout = QVBoxLayout(canvas)
+        self.record_template_layout.setContentsMargins(4, 8, 10, 8)
+        self.record_template_layout.setSpacing(8)
+        scroll.setWidget(canvas)
+        outer.addWidget(scroll, 1)
+        self.record_template_save_button = make_button(
+            "Enregistrer les champs du modèle",
+            "primary",
+            self._save_record_template_values,
+        )
+        outer.addWidget(self.record_template_save_button)
+        self._load_record_template_values(target_type, int(entity_id or 0))
+        return tab
+
+    def _open_form_templates_for_target(self, target_type: str) -> None:
+        self.db.set_setting("form_template_filter", target_type)
+        self.show_form_templates()
+
+    def _load_record_template_values(self, target_type: str, entity_id: int) -> None:
+        layout = getattr(self, "record_template_layout", None)
+        if layout is None:
+            return
+        clear_layout(layout)
+        self.record_template_target = target_type
+        self.record_template_entity_id = int(entity_id or 0)
+        self.record_template_widgets: dict[int, tuple[str, QWidget]] = {}
+        assignment = self.db.one(
+            """SELECT template.* FROM project_form_templates assignment
+            JOIN form_templates template ON template.id=assignment.template_id
+            WHERE assignment.project_id=? AND assignment.target_type=?""",
+            (self.active_project, target_type),
+        ) if self.active_project else None
+        if not assignment:
+            layout.addWidget(
+                make_label(
+                    f"Aucun modèle de fiche {FORM_TEMPLATE_TARGETS.get(target_type, target_type).lower()} n’est appliqué à ce projet.",
+                    "Muted",
+                    True,
+                )
+            )
+            layout.addStretch()
+            self.record_template_save_button.setEnabled(False)
+            return
+        layout.addWidget(make_label(assignment["name"], "CardTitle", True))
+        if assignment["description"]:
+            layout.addWidget(make_label(assignment["description"], "Muted", True))
+        if not entity_id:
+            layout.addWidget(
+                make_label(
+                    "Enregistre d’abord cette nouvelle fiche. Les champs complémentaires pourront ensuite recevoir leurs valeurs.",
+                    "Muted",
+                    True,
+                )
+            )
+        values = {
+            int(row["field_id"]): row["value_text"]
+            for row in self.db.q(
+                """SELECT field_id,value_text FROM form_field_values
+                WHERE project_id=? AND target_type=? AND entity_id=?""",
+                (self.active_project, target_type, entity_id),
+            )
+        }
+        for section in self.db.q(
+            """SELECT * FROM form_template_sections WHERE template_id=?
+            ORDER BY position,id""",
+            (assignment["id"],),
+        ):
+            layout.addWidget(make_label(section["title"].upper(), "Caption"))
+            for field in self.db.q(
+                """SELECT * FROM form_template_fields WHERE section_id=?
+                ORDER BY position,id""",
+                (section["id"],),
+            ):
+                field_id = int(field["id"])
+                current_value = values.get(field_id, field["default_value"] or "")
+                caption = field["label"] + (" *" if field["required"] else "")
+                layout.addWidget(make_label(caption.upper(), "Caption"))
+                widget = self._record_template_value_widget(field, current_value)
+                widget.setEnabled(bool(entity_id))
+                self.record_template_widgets[field_id] = (field["field_type"], widget)
+                layout.addWidget(widget)
+                if field["help_text"]:
+                    layout.addWidget(make_label(field["help_text"], "Muted", True))
+        if not self.record_template_widgets:
+            layout.addWidget(make_label("Ce modèle ne contient encore aucun champ.", "Muted"))
+        layout.addStretch()
+        self.record_template_save_button.setEnabled(bool(entity_id))
+
+    def _record_template_value_widget(self, field, value: str) -> QWidget:
+        field_type = field["field_type"]
+        if field_type == "text_long":
+            widget = make_editor(104, "Texte libre…")
+            widget.setPlainText(value or "")
+            return widget
+        if field_type == "checkbox":
+            widget = QCheckBox("Oui")
+            widget.setChecked(str(value).lower() in {"1", "true", "yes", "oui"})
+            return widget
+        if field_type == "number":
+            widget = QDoubleSpinBox()
+            widget.setRange(-999999999.0, 999999999.0)
+            widget.setDecimals(2)
+            try:
+                widget.setValue(float(value or 0))
+            except ValueError:
+                widget.setValue(0)
+            return widget
+        if field_type in {"list", "image", "link_character", "link_scene", "link_location"}:
+            widget = QComboBox()
+            widget.addItem("Aucune sélection", "")
+            if field_type == "list":
+                for option in self._form_field_options(field["options_json"]):
+                    widget.addItem(option, option)
+            else:
+                queries = {
+                    "image": (
+                        "SELECT id,title name FROM image_library WHERE project_id=? ORDER BY title,id",
+                        "Image sans titre",
+                    ),
+                    "link_character": (
+                        "SELECT id,name FROM characters WHERE project_id=? ORDER BY name,id",
+                        "Personnage sans nom",
+                    ),
+                    "link_scene": (
+                        "SELECT id,title name FROM scene_rows WHERE project_id=? ORDER BY position,id",
+                        "Scène sans titre",
+                    ),
+                    "link_location": (
+                        "SELECT id,name FROM locations WHERE project_id=? ORDER BY position,name,id",
+                        "Lieu sans nom",
+                    ),
+                }
+                query, fallback = queries[field_type]
+                for row in self.db.q(query, (self.active_project,)):
+                    widget.addItem(row["name"] or fallback, str(row["id"]))
+            index = widget.findData(str(value or ""))
+            if index < 0 and value and field_type == "list":
+                widget.addItem(value, value)
+                index = widget.count() - 1
+            widget.setCurrentIndex(max(0, index))
+            return widget
+        widget = QLineEdit()
+        widget.setText(value or "")
+        if field_type == "date":
+            widget.setPlaceholderText("AAAA-MM-JJ ou repère libre")
+        elif field_type == "tags":
+            widget.setPlaceholderText("Mots-clés séparés par des virgules")
+        return widget
+
+    def _record_template_widget_value(self, field_type: str, widget: QWidget) -> str:
+        if isinstance(widget, QTextEdit):
+            return widget.toPlainText().strip()
+        if isinstance(widget, QLineEdit):
+            return widget.text().strip()
+        if isinstance(widget, QCheckBox):
+            return "1" if widget.isChecked() else "0"
+        if isinstance(widget, QDoubleSpinBox):
+            return f"{widget.value():g}"
+        if isinstance(widget, QComboBox):
+            return str(widget.currentData() or "")
+        return ""
+
+    def _save_record_template_values(
+        self,
+        _checked: bool = False,
+        target_type: str | None = None,
+        entity_id: int | None = None,
+        silent: bool = False,
+    ) -> None:
+        target_type = target_type or getattr(self, "record_template_target", "")
+        entity_id = int(
+            entity_id
+            if entity_id is not None
+            else getattr(self, "record_template_entity_id", 0)
+        )
+        widgets = getattr(self, "record_template_widgets", {})
+        if not self.active_project or not target_type or not entity_id or not widgets:
+            return
+        with self.db.conn:
+            for field_id, (field_type, widget) in widgets.items():
+                self.db.conn.execute(
+                    """INSERT INTO form_field_values(
+                    project_id,target_type,entity_id,field_id,value_text,updated_at)
+                    VALUES(?,?,?,?,?,?) ON CONFLICT(project_id,target_type,entity_id,field_id)
+                    DO UPDATE SET value_text=excluded.value_text,updated_at=excluded.updated_at""",
+                    (
+                        self.active_project,
+                        target_type,
+                        entity_id,
+                        field_id,
+                        self._record_template_widget_value(field_type, widget),
+                        NOW(),
+                    ),
+                )
+        if not silent:
+            self.save_state.setText("Champs du modèle enregistrés")
+            QTimer.singleShot(2200, lambda: self.save_state.setText(""))
+
+    # ---------- Reusable form templates ----------
+
+    def show_form_templates(self) -> None:
+        page = self._begin_page("Modèles de fiches", "form_templates", compact=True)
+        self._page_header(
+            page,
+            "Outils du projet",
+            "Modèles de fiches",
+            "Crée des champs réutilisables pour tes personnages, lieux, scènes ou éléments d’univers, sans remplacer les informations essentielles de StoryForge.",
+        )
+
+        selected_id = int(self.db.setting("selected_form_template", "0") or 0)
+        target_filter = self.db.setting("form_template_filter", "")
+        templates = list(
+            self.db.q(
+                "SELECT * FROM form_templates ORDER BY target_type,name COLLATE NOCASE,id"
+            )
+        )
+        visible_templates = [
+            row for row in templates if not target_filter or row["target_type"] == target_filter
+        ]
+        selected = next((row for row in templates if int(row["id"]) == selected_id), None)
+        if selected not in visible_templates:
+            selected = visible_templates[0] if visible_templates else None
+        if selected:
+            selected_id = int(selected["id"])
+            self.db.set_setting("selected_form_template", selected_id)
+
+        body = QHBoxLayout()
+        body.setSpacing(12)
+
+        library = make_card()
+        library.setFixedWidth(270)
+        library_box = QVBoxLayout(library)
+        library_box.setContentsMargins(14, 14, 14, 14)
+        library_box.setSpacing(8)
+        library_box.addWidget(make_label("MODÈLES", "Caption"))
+        self.form_template_filter = QComboBox()
+        self.form_template_filter.addItem("Toutes les fiches", "")
+        for key, label in FORM_TEMPLATE_TARGETS.items():
+            self.form_template_filter.addItem(label, key)
+        self.form_template_filter.setCurrentIndex(
+            max(0, self.form_template_filter.findData(target_filter))
+        )
+        self.form_template_filter.currentIndexChanged.connect(
+            self._form_template_filter_changed
+        )
+        library_box.addWidget(self.form_template_filter)
+        self.form_template_list = QListWidget()
+        self.form_template_list.setObjectName("FormTemplateList")
+        selected_item = None
+        for row in visible_templates:
+            item = QListWidgetItem(
+                f"{row['name']}\n{FORM_TEMPLATE_TARGETS.get(row['target_type'], row['target_type'])}"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+            item.setSizeHint(QSize(0, 58))
+            self.form_template_list.addItem(item)
+            if int(row["id"]) == selected_id:
+                selected_item = item
+        if selected_item:
+            self.form_template_list.setCurrentItem(selected_item)
+        self.form_template_list.currentItemChanged.connect(
+            self._form_template_list_selected
+        )
+        library_box.addWidget(self.form_template_list, 1)
+        library_box.addWidget(
+            make_button("+ Nouveau modèle", "primary", self._new_form_template)
+        )
+        library_actions = QHBoxLayout()
+        duplicate_button = make_button(
+            "Dupliquer", "secondary", self._duplicate_form_template
+        )
+        delete_button = make_button(
+            "Supprimer", "danger", self._delete_form_template
+        )
+        duplicate_button.setEnabled(bool(selected))
+        delete_button.setEnabled(bool(selected))
+        library_actions.addWidget(duplicate_button)
+        library_actions.addWidget(delete_button)
+        library_box.addLayout(library_actions)
+        body.addWidget(library)
+
+        preview = make_card()
+        preview_box = QVBoxLayout(preview)
+        preview_box.setContentsMargins(18, 16, 18, 16)
+        preview_box.setSpacing(9)
+        preview_head = QHBoxLayout()
+        preview_copy = QVBoxLayout()
+        preview_copy.addWidget(make_label("APERÇU DE LA FICHE", "Caption"))
+        preview_title = selected["name"] if selected else "Aucun modèle sélectionné"
+        preview_copy.addWidget(make_label(preview_title, "SectionTitle", True))
+        if selected:
+            preview_copy.addWidget(
+                make_label(
+                    selected["description"]
+                    or "Ajoute des sections et des champs depuis le panneau de droite.",
+                    "Muted",
+                    True,
+                )
+            )
+        preview_head.addLayout(preview_copy, 1)
+        assignment = None
+        if selected and self.active_project:
+            assignment = self.db.one(
+                """SELECT 1 FROM project_form_templates
+                WHERE project_id=? AND target_type=? AND template_id=?""",
+                (self.active_project, selected["target_type"], selected_id),
+            )
+        if selected:
+            preview_head.addWidget(
+                make_label("ACTIF" if assignment else "NON APPLIQUÉ", "AccentPill")
+            )
+        preview_box.addLayout(preview_head)
+
+        preview_scroll = QScrollArea()
+        preview_scroll.setWidgetResizable(True)
+        preview_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        preview_canvas = QWidget()
+        preview_canvas.setObjectName("PanelCanvas")
+        preview_form = QVBoxLayout(preview_canvas)
+        preview_form.setContentsMargins(4, 8, 10, 8)
+        preview_form.setSpacing(8)
+        if selected:
+            sections = self.db.q(
+                """SELECT * FROM form_template_sections WHERE template_id=?
+                ORDER BY position,id""",
+                (selected_id,),
+            )
+            for section in sections:
+                preview_form.addWidget(make_label(section["title"].upper(), "Caption"))
+                fields = self.db.q(
+                    """SELECT * FROM form_template_fields WHERE section_id=?
+                    ORDER BY position,id""",
+                    (section["id"],),
+                )
+                if not fields:
+                    preview_form.addWidget(make_label("Section vide", "Muted"))
+                for field in fields:
+                    caption = field["label"] + (" *" if field["required"] else "")
+                    preview_form.addWidget(make_label(caption.upper(), "Caption"))
+                    preview_form.addWidget(self._form_template_preview_widget(field))
+                    if field["help_text"]:
+                        preview_form.addWidget(
+                            make_label(field["help_text"], "Muted", True)
+                        )
+        else:
+            preview_form.addWidget(
+                make_label(
+                    "Crée un premier modèle, puis organise-le en sections simples.",
+                    "Muted",
+                    True,
+                )
+            )
+        preview_form.addStretch()
+        preview_scroll.setWidget(preview_canvas)
+        preview_box.addWidget(preview_scroll, 1)
+        if selected:
+            assign_caption = (
+                "Retirer du projet" if assignment else "Utiliser dans le projet actif"
+            )
+            assign_style = "secondary" if assignment else "primary"
+            assign_button = make_button(
+                assign_caption,
+                assign_style,
+                self._toggle_form_template_assignment,
+            )
+            assign_button.setEnabled(bool(self.active_project))
+            preview_box.addWidget(assign_button)
+        body.addWidget(preview, 1)
+
+        settings = make_card()
+        settings.setFixedWidth(390)
+        settings_outer = QVBoxLayout(settings)
+        settings_outer.setContentsMargins(0, 0, 0, 0)
+        settings_scroll = QScrollArea()
+        settings_scroll.setWidgetResizable(True)
+        settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        settings_canvas = QWidget()
+        settings_canvas.setObjectName("PanelCanvas")
+        settings_box = QVBoxLayout(settings_canvas)
+        settings_box.setContentsMargins(14, 14, 14, 14)
+        settings_box.setSpacing(8)
+        settings_box.addWidget(make_label("RÉGLAGES", "Caption"))
+        self.form_template_name = QLineEdit()
+        self.form_template_name.setPlaceholderText("Nom du modèle")
+        self.form_template_name.setText(selected["name"] if selected else "")
+        self.form_template_name.setEnabled(bool(selected))
+        settings_box.addWidget(self.form_template_name)
+        self.form_template_target = QComboBox()
+        for key, label in FORM_TEMPLATE_TARGETS.items():
+            self.form_template_target.addItem(label, key)
+        if selected:
+            self.form_template_target.setCurrentIndex(
+                max(0, self.form_template_target.findData(selected["target_type"]))
+            )
+            assigned_anywhere = self.db.one(
+                "SELECT 1 FROM project_form_templates WHERE template_id=? LIMIT 1",
+                (selected_id,),
+            )
+            self.form_template_target.setEnabled(not bool(assigned_anywhere))
+            if assigned_anywhere:
+                self.form_template_target.setToolTip(
+                    "Retire ce modèle des projets avant de changer son type."
+                )
+        else:
+            self.form_template_target.setEnabled(False)
+        settings_box.addWidget(self.form_template_target)
+        self.form_template_description = QTextEdit()
+        self.form_template_description.setPlaceholderText("Utilité de cette fiche…")
+        self.form_template_description.setMaximumHeight(76)
+        self.form_template_description.setPlainText(
+            selected["description"] if selected else ""
+        )
+        self.form_template_description.setEnabled(bool(selected))
+        settings_box.addWidget(self.form_template_description)
+        save_model = make_button(
+            "Enregistrer le modèle", "primary", self._save_form_template
+        )
+        save_model.setEnabled(bool(selected))
+        settings_box.addWidget(save_model)
+        settings_box.addWidget(make_separator())
+        settings_box.addWidget(make_label("SECTIONS ET CHAMPS", "Caption"))
+        self.form_template_outline = QTreeWidget()
+        self.form_template_outline.setHeaderHidden(True)
+        self.form_template_outline.setIndentation(16)
+        self.form_template_outline.setMinimumHeight(190)
+        self.form_template_outline.setMaximumHeight(280)
+        selected_outline_item = None
+        saved_outline_id = self.db.setting("selected_form_template_item", "")
+        if selected:
+            for section in self.db.q(
+                """SELECT * FROM form_template_sections WHERE template_id=?
+                ORDER BY position,id""",
+                (selected_id,),
+            ):
+                section_item = QTreeWidgetItem([section["title"]])
+                section_item.setData(0, Qt.ItemDataRole.UserRole, "section")
+                section_item.setData(0, Qt.ItemDataRole.UserRole + 1, int(section["id"]))
+                self.form_template_outline.addTopLevelItem(section_item)
+                if saved_outline_id == f"section:{section['id']}":
+                    selected_outline_item = section_item
+                for field in self.db.q(
+                    """SELECT * FROM form_template_fields WHERE section_id=?
+                    ORDER BY position,id""",
+                    (section["id"],),
+                ):
+                    field_item = QTreeWidgetItem(
+                        [f"{field['label']} · {FORM_FIELD_TYPES.get(field['field_type'], field['field_type'])}"]
+                    )
+                    field_item.setData(0, Qt.ItemDataRole.UserRole, "field")
+                    field_item.setData(0, Qt.ItemDataRole.UserRole + 1, int(field["id"]))
+                    section_item.addChild(field_item)
+                    if saved_outline_id == f"field:{field['id']}":
+                        selected_outline_item = field_item
+            self.form_template_outline.expandAll()
+        self.form_template_outline.currentItemChanged.connect(
+            self._form_template_outline_selected
+        )
+        settings_box.addWidget(self.form_template_outline, 1)
+        outline_actions = QGridLayout()
+        add_section = make_button("+ Section", "secondary", self._add_form_template_section)
+        add_field = make_button("+ Champ", "secondary", self._add_form_template_field)
+        for button in (add_section, add_field):
+            button.setEnabled(bool(selected))
+        outline_actions.addWidget(add_section, 0, 0)
+        outline_actions.addWidget(add_field, 0, 1)
+        outline_actions.addWidget(
+            make_button("Monter ↑", "tertiary", lambda: self._move_form_template_item(-1)),
+            1,
+            0,
+        )
+        outline_actions.addWidget(
+            make_button("Descendre ↓", "tertiary", lambda: self._move_form_template_item(1)),
+            1,
+            1,
+        )
+        outline_actions.addWidget(
+            make_button("Supprimer l’élément", "danger", self._delete_form_template_item),
+            2,
+            0,
+            1,
+            2,
+        )
+        settings_box.addLayout(outline_actions)
+
+        self.form_item_label = QLineEdit()
+        self.form_item_label.setPlaceholderText("Titre de la section ou du champ")
+        self.form_field_type = QComboBox()
+        for key, label in FORM_FIELD_TYPES.items():
+            self.form_field_type.addItem(label, key)
+        self.form_field_options = QLineEdit()
+        self.form_field_options.setPlaceholderText("Choix séparés par des virgules")
+        self.form_field_help = QTextEdit()
+        self.form_field_help.setPlaceholderText("Aide courte affichée sous le champ")
+        self.form_field_help.setMaximumHeight(60)
+        self.form_field_default = QLineEdit()
+        self.form_field_default.setPlaceholderText("Valeur par défaut")
+        self.form_field_required = QCheckBox("Champ requis")
+        for widget in (
+            self.form_item_label,
+            self.form_field_type,
+            self.form_field_options,
+            self.form_field_help,
+            self.form_field_default,
+            self.form_field_required,
+        ):
+            widget.setEnabled(False)
+            settings_box.addWidget(widget)
+        save_item = make_button(
+            "Enregistrer l’élément", "secondary", self._save_form_template_item
+        )
+        save_item.setEnabled(bool(selected))
+        settings_box.addWidget(save_item)
+        settings_box.addStretch()
+        settings_scroll.setWidget(settings_canvas)
+        settings_outer.addWidget(settings_scroll)
+        body.addWidget(settings)
+        page.addLayout(body, 1)
+        if selected_outline_item:
+            self.form_template_outline.setCurrentItem(selected_outline_item)
+
+    def _form_template_preview_widget(self, field) -> QWidget:
+        field_type = field["field_type"]
+        if field_type == "text_long":
+            widget = QTextEdit()
+            widget.setMaximumHeight(82)
+            widget.setPlaceholderText(field["default_value"] or "Texte libre…")
+        elif field_type == "checkbox":
+            widget = QCheckBox(field["default_value"] or "Oui")
+        elif field_type in {"list", "image", "link_character", "link_scene", "link_location"}:
+            widget = QComboBox()
+            widget.addItem("Sélectionner…")
+            if field_type == "list":
+                for option in self._form_field_options(field["options_json"]):
+                    widget.addItem(option)
+        else:
+            widget = QLineEdit()
+            widget.setPlaceholderText(field["default_value"] or FORM_FIELD_TYPES.get(field_type, ""))
+        widget.setEnabled(False)
+        return widget
+
+    @staticmethod
+    def _form_field_options(value: str) -> list[str]:
+        try:
+            parsed = json.loads(value or "[]")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            parsed = []
+        return [str(item).strip() for item in parsed if str(item).strip()]
+
+    def _form_template_filter_changed(self) -> None:
+        self.db.set_setting("form_template_filter", self.form_template_filter.currentData() or "")
+        self.show_form_templates()
+
+    def _form_template_list_selected(self, current, _previous=None) -> None:
+        if not current:
+            return
+        template_id = int(current.data(Qt.ItemDataRole.UserRole))
+        if template_id == int(self.db.setting("selected_form_template", "0") or 0):
+            return
+        self.db.set_setting("selected_form_template", template_id)
+        self.db.set_setting("selected_form_template_item", "")
+        self.show_form_templates()
+
+    def _new_form_template(self) -> None:
+        name, accepted = QInputDialog.getText(
+            self, "Nouveau modèle", "Nom de la fiche", text="Nouvelle fiche"
+        )
+        if not accepted:
+            return
+        target = self.form_template_filter.currentData() or "character"
+        with self.db.conn:
+            template_id = self.db.conn.execute(
+                """INSERT INTO form_templates(name,target_type,description,created_at,updated_at)
+                VALUES(?,?,?,?,?)""",
+                (name.strip() or "Nouvelle fiche", target, "", NOW(), NOW()),
+            ).lastrowid
+            section_id = self.db.conn.execute(
+                """INSERT INTO form_template_sections(template_id,title,position)
+                VALUES(?,?,0)""",
+                (template_id, "Informations complémentaires"),
+            ).lastrowid
+            self.db.conn.execute(
+                """INSERT INTO form_template_fields(
+                template_id,section_id,label,field_type,options_json,help_text,
+                default_value,required,position) VALUES(?,?,?,?,?,?,?,?,0)""",
+                (template_id, section_id, "Nouveau champ", "text_short", "[]", "", "", 0),
+            )
+        self.db.set_setting("selected_form_template", template_id)
+        self.db.set_setting("form_template_filter", "")
+        self.show_form_templates()
+
+    def _duplicate_form_template(self) -> None:
+        template_id = int(self.db.setting("selected_form_template", "0") or 0)
+        source = self.db.one("SELECT * FROM form_templates WHERE id=?", (template_id,))
+        if not source:
+            return
+        with self.db.conn:
+            new_id = self.db.conn.execute(
+                """INSERT INTO form_templates(name,target_type,description,created_at,updated_at)
+                VALUES(?,?,?,?,?)""",
+                (f"{source['name']} — copie", source["target_type"], source["description"], NOW(), NOW()),
+            ).lastrowid
+            for section in self.db.q(
+                "SELECT * FROM form_template_sections WHERE template_id=? ORDER BY position,id",
+                (template_id,),
+            ):
+                new_section = self.db.conn.execute(
+                    "INSERT INTO form_template_sections(template_id,title,position) VALUES(?,?,?)",
+                    (new_id, section["title"], section["position"]),
+                ).lastrowid
+                for field in self.db.q(
+                    "SELECT * FROM form_template_fields WHERE section_id=? ORDER BY position,id",
+                    (section["id"],),
+                ):
+                    self.db.conn.execute(
+                        """INSERT INTO form_template_fields(
+                        template_id,section_id,label,field_type,options_json,help_text,
+                        default_value,required,position) VALUES(?,?,?,?,?,?,?,?,?)""",
+                        (
+                            new_id, new_section, field["label"], field["field_type"],
+                            field["options_json"], field["help_text"], field["default_value"],
+                            field["required"], field["position"],
+                        ),
+                    )
+        self.db.set_setting("selected_form_template", new_id)
+        self.db.set_setting("form_template_filter", "")
+        self.show_form_templates()
+
+    def _delete_form_template(self) -> None:
+        template_id = int(self.db.setting("selected_form_template", "0") or 0)
+        if not template_id:
+            return
+        if QMessageBox.question(
+            self,
+            "Supprimer le modèle",
+            "Supprimer ce modèle et ses valeurs enregistrées dans les projets ?",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        self.db.run("DELETE FROM form_templates WHERE id=?", (template_id,))
+        self.db.set_setting("selected_form_template", 0)
+        self.show_form_templates()
+
+    def _save_form_template(self) -> None:
+        template_id = int(self.db.setting("selected_form_template", "0") or 0)
+        if not template_id:
+            return
+        target = self.form_template_target.currentData() or "character"
+        assigned = self.db.one(
+            "SELECT 1 FROM project_form_templates WHERE template_id=? LIMIT 1", (template_id,)
+        )
+        old = self.db.one("SELECT target_type FROM form_templates WHERE id=?", (template_id,))
+        if assigned and old and target != old["target_type"]:
+            target = old["target_type"]
+        self.db.run(
+            """UPDATE form_templates SET name=?,target_type=?,description=?,updated_at=?
+            WHERE id=?""",
+            (
+                self.form_template_name.text().strip() or "Modèle sans nom",
+                target,
+                self.form_template_description.toPlainText().strip(),
+                NOW(),
+                template_id,
+            ),
+        )
+        self.save_state.setText("Modèle enregistré")
+        self.show_form_templates()
+
+    def _toggle_form_template_assignment(self) -> None:
+        template_id = int(self.db.setting("selected_form_template", "0") or 0)
+        template = self.db.one("SELECT target_type FROM form_templates WHERE id=?", (template_id,))
+        if not template or not self.active_project:
+            return
+        current = self.db.one(
+            """SELECT template_id FROM project_form_templates
+            WHERE project_id=? AND target_type=?""",
+            (self.active_project, template["target_type"]),
+        )
+        if current and int(current["template_id"]) == template_id:
+            self.db.run(
+                "DELETE FROM project_form_templates WHERE project_id=? AND target_type=?",
+                (self.active_project, template["target_type"]),
+            )
+        else:
+            self.db.run(
+                """INSERT INTO project_form_templates(project_id,target_type,template_id)
+                VALUES(?,?,?) ON CONFLICT(project_id,target_type)
+                DO UPDATE SET template_id=excluded.template_id""",
+                (self.active_project, template["target_type"], template_id),
+            )
+        self.show_form_templates()
+
+    def _form_template_outline_selected(self, current, _previous=None) -> None:
+        kind = current.data(0, Qt.ItemDataRole.UserRole) if current else ""
+        item_id = int(current.data(0, Qt.ItemDataRole.UserRole + 1) or 0) if current else 0
+        self.form_item_label.setEnabled(bool(item_id))
+        field_widgets = (
+            self.form_field_type,
+            self.form_field_options,
+            self.form_field_help,
+            self.form_field_default,
+            self.form_field_required,
+        )
+        for widget in field_widgets:
+            widget.setEnabled(kind == "field")
+        if not item_id:
+            return
+        self.db.set_setting("selected_form_template_item", f"{kind}:{item_id}")
+        if kind == "section":
+            row = self.db.one("SELECT * FROM form_template_sections WHERE id=?", (item_id,))
+            if row:
+                self.form_item_label.setText(row["title"])
+                self.form_field_options.clear()
+                self.form_field_help.clear()
+                self.form_field_default.clear()
+                self.form_field_required.setChecked(False)
+            return
+        row = self.db.one("SELECT * FROM form_template_fields WHERE id=?", (item_id,))
+        if not row:
+            return
+        self.form_item_label.setText(row["label"])
+        self.form_field_type.setCurrentIndex(
+            max(0, self.form_field_type.findData(row["field_type"]))
+        )
+        self.form_field_options.setText(", ".join(self._form_field_options(row["options_json"])))
+        self.form_field_help.setPlainText(row["help_text"])
+        self.form_field_default.setText(row["default_value"])
+        self.form_field_required.setChecked(bool(row["required"]))
+
+    def _add_form_template_section(self) -> None:
+        template_id = int(self.db.setting("selected_form_template", "0") or 0)
+        if not template_id:
+            return
+        position = int(
+            self.db.one(
+                "SELECT COUNT(*) n FROM form_template_sections WHERE template_id=?",
+                (template_id,),
+            )["n"]
+        )
+        result = self.db.run(
+            "INSERT INTO form_template_sections(template_id,title,position) VALUES(?,?,?)",
+            (template_id, "Nouvelle section", position),
+        )
+        self.db.set_setting("selected_form_template_item", f"section:{result.lastrowid}")
+        self.show_form_templates()
+
+    def _add_form_template_field(self) -> None:
+        template_id = int(self.db.setting("selected_form_template", "0") or 0)
+        if not template_id:
+            return
+        current = self.form_template_outline.currentItem()
+        kind = current.data(0, Qt.ItemDataRole.UserRole) if current else ""
+        if kind == "section":
+            section_id = int(current.data(0, Qt.ItemDataRole.UserRole + 1))
+        elif kind == "field":
+            row = self.db.one(
+                "SELECT section_id FROM form_template_fields WHERE id=?",
+                (int(current.data(0, Qt.ItemDataRole.UserRole + 1)),),
+            )
+            section_id = int(row["section_id"]) if row else 0
+        else:
+            row = self.db.one(
+                "SELECT id FROM form_template_sections WHERE template_id=? ORDER BY position,id LIMIT 1",
+                (template_id,),
+            )
+            section_id = int(row["id"]) if row else 0
+        if not section_id:
+            self._add_form_template_section()
+            return
+        position = int(
+            self.db.one(
+                "SELECT COUNT(*) n FROM form_template_fields WHERE section_id=?",
+                (section_id,),
+            )["n"]
+        )
+        result = self.db.run(
+            """INSERT INTO form_template_fields(
+            template_id,section_id,label,field_type,options_json,help_text,
+            default_value,required,position) VALUES(?,?,?,?,?,?,?,?,?)""",
+            (template_id, section_id, "Nouveau champ", "text_short", "[]", "", "", 0, position),
+        )
+        self.db.set_setting("selected_form_template_item", f"field:{result.lastrowid}")
+        self.show_form_templates()
+
+    def _move_form_template_item(self, delta: int) -> None:
+        current = self.form_template_outline.currentItem()
+        if not current or delta not in {-1, 1}:
+            return
+        kind = current.data(0, Qt.ItemDataRole.UserRole)
+        item_id = int(current.data(0, Qt.ItemDataRole.UserRole + 1))
+        if kind == "section":
+            template_id = int(self.db.setting("selected_form_template", "0") or 0)
+            rows = self.db.q(
+                "SELECT id FROM form_template_sections WHERE template_id=? ORDER BY position,id",
+                (template_id,),
+            )
+            table = "form_template_sections"
+        else:
+            field = self.db.one("SELECT section_id FROM form_template_fields WHERE id=?", (item_id,))
+            if not field:
+                return
+            rows = self.db.q(
+                "SELECT id FROM form_template_fields WHERE section_id=? ORDER BY position,id",
+                (field["section_id"],),
+            )
+            table = "form_template_fields"
+        ids = [int(row["id"]) for row in rows]
+        if item_id not in ids:
+            return
+        source = ids.index(item_id)
+        target = source + delta
+        if not 0 <= target < len(ids):
+            return
+        ids[source], ids[target] = ids[target], ids[source]
+        with self.db.conn:
+            for position, candidate_id in enumerate(ids):
+                self.db.conn.execute(
+                    f"UPDATE {table} SET position=? WHERE id=?", (position, candidate_id)
+                )
+        self.show_form_templates()
+
+    def _delete_form_template_item(self) -> None:
+        current = self.form_template_outline.currentItem()
+        if not current:
+            return
+        kind = current.data(0, Qt.ItemDataRole.UserRole)
+        item_id = int(current.data(0, Qt.ItemDataRole.UserRole + 1))
+        caption = "section et tous ses champs" if kind == "section" else "champ"
+        if QMessageBox.question(
+            self, "Supprimer l’élément", f"Supprimer ce {caption} ?"
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        table = "form_template_sections" if kind == "section" else "form_template_fields"
+        self.db.run(f"DELETE FROM {table} WHERE id=?", (item_id,))
+        self.db.set_setting("selected_form_template_item", "")
+        self.show_form_templates()
+
+    def _save_form_template_item(self) -> None:
+        current = self.form_template_outline.currentItem()
+        if not current:
+            return
+        kind = current.data(0, Qt.ItemDataRole.UserRole)
+        item_id = int(current.data(0, Qt.ItemDataRole.UserRole + 1))
+        label = self.form_item_label.text().strip()
+        if kind == "section":
+            self.db.run(
+                "UPDATE form_template_sections SET title=? WHERE id=?",
+                (label or "Section", item_id),
+            )
+        else:
+            options = [
+                value.strip() for value in self.form_field_options.text().split(",")
+                if value.strip()
+            ]
+            self.db.run(
+                """UPDATE form_template_fields SET label=?,field_type=?,options_json=?,
+                help_text=?,default_value=?,required=? WHERE id=?""",
+                (
+                    label or "Champ",
+                    self.form_field_type.currentData() or "text_short",
+                    json.dumps(options, ensure_ascii=False),
+                    self.form_field_help.toPlainText().strip(),
+                    self.form_field_default.text().strip(),
+                    1 if self.form_field_required.isChecked() else 0,
+                    item_id,
+                ),
+            )
+        template_id = int(self.db.setting("selected_form_template", "0") or 0)
+        self.db.run("UPDATE form_templates SET updated_at=? WHERE id=?", (NOW(), template_id))
+        self.show_form_templates()
+
+    # ---------- Narrative template library ----------
+
+    def show_templates(self) -> None:
+        page = self._begin_page("Templates", "templates")
+        self._page_header(
+            page,
+            "Ressources",
+            "Banque de templates",
+            "Des cartes de travail facultatives pour débloquer ou diagnostiquer une histoire — jamais des règles à remplir.",
+        )
+        mode_bar = make_card()
+        mode_box = QHBoxLayout(mode_bar)
+        mode_box.setContentsMargins(16, 10, 16, 10)
+        mode_box.addWidget(make_label("MODE D’AFFICHAGE", "Caption"))
+        mode_box.addStretch()
+        self.template_view_selector = QComboBox()
+        self.template_view_selector.addItem("Vue traditionnelle", "traditional")
+        self.template_view_selector.addItem("Vue visuelle", "visual")
+        template_view_mode = self.db.setting("template_view_mode", "traditional")
+        self.template_view_selector.setCurrentIndex(
+            max(0, self.template_view_selector.findData(template_view_mode))
+        )
+        self.template_view_selector.currentIndexChanged.connect(self._template_view_changed)
+        mode_box.addWidget(self.template_view_selector)
+        page.addWidget(mode_bar)
+        page.addSpacing(12)
+        selected_key = self.db.setting("selected_template", TEMPLATE_LIBRARY[0]["key"])
+        selected = next((template for template in TEMPLATE_LIBRARY if template["key"] == selected_key), TEMPLATE_LIBRARY[0])
+
+        body = QHBoxLayout()
+        body.setSpacing(14)
+
+        navigation = make_card()
+        navigation.setFixedWidth(236 if self.width() < 1250 else 282)
+        navigation_box = QVBoxLayout(navigation)
+        navigation_box.setContentsMargins(12, 14, 12, 14)
+        navigation_box.setSpacing(7)
+        navigation_box.addWidget(make_label("CHOISIR UN OUTIL", "Caption"))
+        navigation_box.addWidget(
+            make_label("Les structures classiques et beat sheets restent optionnelles.", "Muted", True)
+        )
+        self.template_tree = QTreeWidget()
+        self.template_tree.setHeaderHidden(True)
+        self.template_tree.setIndentation(12)
+        self.template_tree.setRootIsDecorated(True)
+        groups: dict[str, QTreeWidgetItem] = {}
+        selected_item = None
+        for template in TEMPLATE_LIBRARY:
+            group = template["group"]
+            if group not in groups:
+                group_item = QTreeWidgetItem([group.upper()])
+                group_item.setFlags(group_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+                self.template_tree.addTopLevelItem(group_item)
+                groups[group] = group_item
+            item = QTreeWidgetItem([template["title"]])
+            item.setData(0, Qt.ItemDataRole.UserRole, template["key"])
+            item.setToolTip(0, template["title"])
+            groups[group].addChild(item)
+            if template["key"] == selected["key"]:
+                selected_item = item
+        self.template_tree.expandAll()
+        if selected_item:
+            self.template_tree.setCurrentItem(selected_item)
+        self.template_tree.itemClicked.connect(self._template_tree_clicked)
+        navigation_box.addWidget(self.template_tree, 1)
+        body.addWidget(navigation)
+
+        detail = make_card()
+        detail_box = QVBoxLayout(detail)
+        detail_box.setContentsMargins(22, 18, 22, 18)
+        detail_box.setSpacing(8)
+        detail_head = QHBoxLayout()
+        detail_head.addWidget(make_label(selected["group"].upper(), "Caption"))
+        detail_head.addStretch()
+        step_count = len(selected["steps"])
+        detail_head.addWidget(make_label(f"{step_count} REPÈRES", "AccentPill"))
+        detail_box.addLayout(detail_head)
+        detail_box.addWidget(make_label(selected["title"], "SectionTitle", True))
+        detail_box.addWidget(make_label(selected["summary"], "Body", True))
+        detail_box.addSpacing(2)
+        detail_box.addWidget(make_label(f"UTILE QUAND · {selected['use_when']}", "Muted", True))
+        detail_box.addWidget(make_label(f"ATTENTION · {selected['caution']}", "Muted", True))
+        detail_box.addSpacing(4)
+        detail_box.addWidget(make_separator())
+
+        if template_view_mode == "visual":
+            detail_box.addWidget(
+                make_label(
+                    "Schéma officiel StoryForge · lecture seule. Les visuels sont fournis par l’application.",
+                    "Muted",
+                    True,
+                )
+            )
+            detail_box.addWidget(self._build_template_visual_view(selected), 1)
+        else:
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            canvas = QWidget()
+            canvas.setObjectName("PageHost")
+            canvas_box = QVBoxLayout(canvas)
+            canvas_box.setContentsMargins(2, 8, 8, 8)
+            canvas_box.setSpacing(10)
+            for index, (title, purpose, events, consequence) in enumerate(selected["steps"], start=1):
+                step_row = QHBoxLayout()
+                step_row.setSpacing(12)
+                number = make_label(f"{index:02d}", "Kicker")
+                number.setFixedWidth(30)
+                number.setAlignment(Qt.AlignmentFlag.AlignTop)
+                step_row.addWidget(number)
+                step_copy = QVBoxLayout()
+                step_copy.setSpacing(3)
+                step_copy.addWidget(make_label(title, "CardTitle", True))
+                step_copy.addWidget(make_label(purpose, "Body", True))
+                step_copy.addWidget(make_label(f"Événements · {events}", "Muted", True))
+                step_copy.addWidget(make_label(f"Conséquence · {consequence}", "Muted", True))
+                step_row.addLayout(step_copy, 1)
+                canvas_box.addLayout(step_row)
+                if index < step_count:
+                    canvas_box.addWidget(make_separator())
+            canvas_box.addStretch()
+            scroll.setWidget(canvas)
+            detail_box.addWidget(scroll, 1)
+
+        actions = QHBoxLayout()
+        if self.active_project:
+            actions.addWidget(make_label(f"Projet actif · {self._active_project_label()}", "Muted", True))
+        else:
+            actions.addWidget(make_label("Choisis un projet avant d’utiliser un template.", "Muted", True))
+        actions.addStretch()
+        apply_button = make_button(
+            "Ajouter au séquencier",
+            "primary",
+            lambda _checked=False, key=selected["key"]: self._apply_template_to_sequence(key),
+        )
+        apply_button.setEnabled(bool(self.active_project))
+        actions.addWidget(apply_button)
+        detail_box.addLayout(actions)
+        body.addWidget(detail, 1)
+        page.addLayout(body, 1)
+
+    def _template_view_changed(self) -> None:
+        self.db.set_setting("template_view_mode", self.template_view_selector.currentData())
+        self.show_templates()
+
+    def _build_template_visual_view(self, template: dict) -> QGraphicsView:
+        scene = QGraphicsScene(self)
+        view = QGraphicsView(scene)
+        view.setObjectName("TemplateVisualCanvas")
+        view.setRenderHint(QPainter.RenderHint.Antialiasing)
+        view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        node_width = 300.0
+        node_height = 118.0
+        gap_x = 80.0
+        gap_y = 54.0
+        columns = 2
+        positions: list[QPointF] = []
+        for index, (title, purpose, _events, consequence) in enumerate(template["steps"]):
+            row = index // columns
+            column = index % columns
+            if row % 2:
+                column = columns - 1 - column
+            x = 30.0 + column * (node_width + gap_x)
+            y = 30.0 + row * (node_height + gap_y)
+            positions.append(QPointF(x, y))
+            rect = scene.addRect(
+                x, y, node_width, node_height,
+                QPen(QColor(self.palette.accent), 1.5),
+                QBrush(QColor(self.palette.surface_raised)),
+            )
+            rect.setToolTip(f"{purpose}\n\nConséquence : {consequence}")
+            number = scene.addText(f"{index + 1:02d}")
+            number.setDefaultTextColor(QColor(self.palette.accent))
+            number.setPos(x + 12, y + 8)
+            title_item = scene.addText(title)
+            title_item.setDefaultTextColor(QColor(self.palette.text))
+            title_font = title_item.font()
+            title_font.setBold(True)
+            title_font.setPointSize(10)
+            title_item.setFont(title_font)
+            title_item.setTextWidth(node_width - 58)
+            title_item.setPos(x + 48, y + 7)
+            purpose_item = scene.addText(purpose)
+            purpose_item.setDefaultTextColor(QColor(self.palette.muted))
+            purpose_item.setTextWidth(node_width - 26)
+            purpose_item.setPos(x + 12, y + 43)
+        for source, target in pairwise(positions):
+            source_center = QPointF(source.x() + node_width / 2, source.y() + node_height / 2)
+            target_center = QPointF(target.x() + node_width / 2, target.y() + node_height / 2)
+            line = scene.addLine(
+                source_center.x(), source_center.y(), target_center.x(), target_center.y(),
+                QPen(QColor(self.palette.border_strong), 2.0),
+            )
+            line.setZValue(-1)
+        rows = math.ceil(len(template["steps"]) / columns)
+        scene.setSceneRect(0, 0, 2 * node_width + gap_x + 60, rows * (node_height + gap_y) + 30)
+        return view
+
+    def _template_tree_clicked(self, item: QTreeWidgetItem) -> None:
+        key = item.data(0, Qt.ItemDataRole.UserRole)
+        if not key:
+            return
+        self.db.set_setting("selected_template", key)
+        self.show_templates()
+
+    def _apply_template_to_sequence(self, template_key: str) -> None:
+        if not self.active_project:
+            QMessageBox.information(self, "Aucun projet actif", "Choisis d’abord un projet.")
+            return
+        template = next((item for item in TEMPLATE_LIBRARY if item["key"] == template_key), None)
+        if not template:
+            return
+        position = self.db.one(
+            "SELECT COUNT(*) FROM sequence_blocks WHERE project_id=?",
+            (self.active_project,),
+        )[0]
+        for title, purpose, events, consequence in template["steps"]:
+            self.db.create_sequence_block(
+                self.active_project,
+                position,
+                title,
+                purpose,
+                events,
+                consequence,
+            )
+            position += 1
+        self._save_sequence_document_copy()
+        self.db.set_setting(f"last_development_doc_{self.active_project}", "outline")
+        self.save_state.setText(f"Template « {template['title']} » ajouté")
+        self.show_development()
+
+    # ---------- Glossary ----------
+
+    def show_glossary(self) -> None:
+        page = self._begin_page("Glossaire", "glossary")
+        self._page_header(
+            page,
+            "Ressources",
+            "Glossaire d’écriture",
+            "Des définitions courtes pour retrouver un terme sans transformer les outils en cours théorique.",
+        )
+        card = make_card()
+        box = QVBoxLayout(card)
+        box.setContentsMargins(18, 16, 18, 16)
+        box.setSpacing(10)
+        filters = QHBoxLayout()
+        self.glossary_search = QLineEdit()
+        self.glossary_search.setPlaceholderText("Rechercher un terme ou une définition…")
+        self.glossary_search.setClearButtonEnabled(True)
+        filters.addWidget(self.glossary_search, 1)
+        self.glossary_category = QComboBox()
+        self.glossary_category.addItem("Toutes les catégories", "")
+        for category in dict.fromkeys(row[0] for row in GLOSSARY_TERMS):
+            self.glossary_category.addItem(category, category)
+        filters.addWidget(self.glossary_category)
+        self.glossary_count = make_label("", "AccentPill")
+        filters.addWidget(self.glossary_count)
+        box.addLayout(filters)
+        self.glossary_table = QTableWidget(0, 2)
+        self.glossary_table.setObjectName("GlossaryTable")
+        self.glossary_table.setHorizontalHeaderLabels(["Terme", "Définition"])
+        self.glossary_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.glossary_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.glossary_table.verticalHeader().setVisible(False)
+        self.glossary_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.glossary_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.glossary_table.setWordWrap(True)
+        box.addWidget(self.glossary_table, 1)
+        page.addWidget(card, 1)
+        self.glossary_search.textChanged.connect(self._filter_glossary)
+        self.glossary_category.currentIndexChanged.connect(self._filter_glossary)
+        self._filter_glossary()
+
+    def _filter_glossary(self) -> None:
+        query = self.glossary_search.text().strip().casefold()
+        category = self.glossary_category.currentData() or ""
+        rows = [
+            row for row in GLOSSARY_TERMS
+            if (not category or row[0] == category)
+            and (not query or query in f"{row[0]} {row[1]} {row[2]}".casefold())
+        ]
+        self.glossary_table.setRowCount(0)
+        for row_index, (group, term, definition) in enumerate(rows):
+            self.glossary_table.insertRow(row_index)
+            term_item = QTableWidgetItem(term)
+            term_item.setToolTip(group)
+            term_item.setData(Qt.ItemDataRole.UserRole, group)
+            definition_item = QTableWidgetItem(definition)
+            self.glossary_table.setItem(row_index, 0, term_item)
+            self.glossary_table.setItem(row_index, 1, definition_item)
+            self.glossary_table.setRowHeight(row_index, 54)
+        self.glossary_count.setText(f"{len(rows)} TERMES")
+
+    # ---------- Settings ----------
+
+    def show_settings(self) -> None:
+        page = self._begin_page("Paramètres", "settings", scroll=True)
+        self._page_header(page, "StoryForge pour Linux", "Un espace de travail à ton rythme", "Règle seulement ce qui change réellement ton confort et la sécurité de tes données locales.")
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(14)
+        grid.setVerticalSpacing(14)
+        compact = self.width() < 1320
+
+        appearance = make_card()
+        appearance_box = QVBoxLayout(appearance)
+        appearance_box.setContentsMargins(22, 19, 22, 21)
+        appearance_box.setSpacing(7)
+        appearance_box.addWidget(make_label("APPARENCE", "Caption"))
+        appearance_box.addWidget(make_label("Lisibilité", "SectionTitle"))
+        appearance_box.addWidget(make_label("Le mode système suit l’apparence choisie dans ton environnement Linux.", "Muted", True))
+        appearance_box.addWidget(make_label("Thème", "Muted"))
+        self.settings_theme = QComboBox()
+        self.settings_theme.addItem("Suivre le système", "system")
+        self.settings_theme.addItem("Clair", "light")
+        self.settings_theme.addItem("Sombre", "dark")
+        theme_index = self.settings_theme.findData(self.mode)
+        self.settings_theme.setCurrentIndex(max(0, theme_index))
+        appearance_box.addWidget(self.settings_theme)
+        appearance_box.addWidget(make_label("Taille du texte d’écriture", "Muted"))
+        self.settings_editor_size = QComboBox()
+        for caption, value in (("Compacte · 14 px", 14), ("Confortable · 15 px", 15), ("Grande · 17 px", 17), ("Très grande · 19 px", 19)):
+            self.settings_editor_size.addItem(caption, value)
+        size_index = self.settings_editor_size.findData(self.editor_font_size)
+        self.settings_editor_size.setCurrentIndex(max(0, size_index))
+        appearance_box.addWidget(self.settings_editor_size)
+        appearance_box.addWidget(make_label("Langue", "Muted"))
+        self.settings_language = QComboBox()
+        self.settings_language.addItem("Français", "fr")
+        self.settings_language.addItem("English", "en")
+        language_index = self.settings_language.findData(
+            self.db.setting("interface_language", "fr")
+        )
+        self.settings_language.setCurrentIndex(max(0, language_index))
+        appearance_box.addWidget(self.settings_language)
+        grid.addWidget(appearance, 0, 0)
+
+        behavior = make_card()
+        behavior_box = QVBoxLayout(behavior)
+        behavior_box.setContentsMargins(22, 19, 22, 21)
+        behavior_box.setSpacing(7)
+        behavior_box.addWidget(make_label("COMPORTEMENT", "Caption"))
+        behavior_box.addWidget(make_label("Concentration et sécurité", "SectionTitle"))
+        behavior_box.addWidget(
+            make_label(
+                "L’enregistrement automatique concerne les Guides d’écriture, Construction et l’Éditeur de scripts.",
+                "Muted",
+                True,
+            )
+        )
+        behavior_box.addWidget(make_label("Enregistrement automatique", "Muted"))
+        self.settings_autosave = QComboBox()
+        for caption, value in (("Désactivé", 0), ("Toutes les 30 secondes", 30), ("Toutes les minutes", 60), ("Toutes les 2 minutes", 120)):
+            self.settings_autosave.addItem(caption, value)
+        auto_index = self.settings_autosave.findData(self.autosave_seconds)
+        self.settings_autosave.setCurrentIndex(max(0, auto_index))
+        behavior_box.addWidget(self.settings_autosave)
+        behavior_box.addWidget(make_label("Au démarrage", "Muted"))
+        self.settings_startup = QComboBox()
+        self.settings_startup.addItem("Ouvrir Aujourd’hui", "home")
+        self.settings_startup.addItem("Reprendre le dernier espace", "last")
+        start_index = self.settings_startup.findData(self.db.setting("startup_view", "home"))
+        self.settings_startup.setCurrentIndex(max(0, start_index))
+        behavior_box.addWidget(self.settings_startup)
+        self.settings_confirm_delete = QCheckBox("Demander confirmation avant une suppression")
+        self.settings_confirm_delete.setChecked(self.db.setting("confirm_delete", "1") != "0")
+        behavior_box.addWidget(self.settings_confirm_delete)
+        grid.addWidget(behavior, 1 if compact else 0, 0 if compact else 1)
+
+        data_card = make_card()
+        data_box = QVBoxLayout(data_card)
+        data_box.setContentsMargins(22, 19, 22, 21)
+        data_box.setSpacing(7)
+        data_box.addWidget(make_label("DONNÉES LOCALES", "Caption"))
+        data_box.addWidget(make_label("Sauvegardes", "SectionTitle"))
+        data_box.addWidget(make_label(f"Base active\n{self.db.path}", "Muted", True))
+        data_box.addWidget(make_label("Une sauvegarde SQLite complète protège les idées, projets, versions, exercices et ta progression.", "Muted", True))
+        data_actions = QHBoxLayout()
+        data_actions.addWidget(make_button("Sauvegarder maintenant", "primary", self._backup_now))
+        data_actions.addWidget(make_button("Choisir un emplacement", "secondary", self._export_backup))
+        data_box.addLayout(data_actions)
+        data_box.addWidget(make_button("Ouvrir le dossier StoryForge", "quiet", self._open_data_folder), 0, Qt.AlignmentFlag.AlignLeft)
+        self.backup_status = make_label("", "Muted", True)
+        data_box.addWidget(self.backup_status)
+        grid.addWidget(data_card, 2 if compact else 1, 0, 1, 1 if compact else 2)
+
+        grid.setColumnStretch(0, 1)
+        if not compact:
+            grid.setColumnStretch(1, 1)
+        page.addLayout(grid)
+        page.addSpacing(14)
+
+        footer = make_card()
+        footer_box = QHBoxLayout(footer)
+        footer_box.setContentsMargins(22, 16, 22, 16)
+        version_copy = QVBoxLayout()
+        version_copy.addWidget(make_label(f"StoryForge {APP_VERSION} · Linux", "CardTitle"))
+        version_copy.addWidget(make_label("Application locale · données ouvertes · aucune synchronisation automatique", "Muted"))
+        footer_box.addLayout(version_copy, 1)
+        footer_box.addWidget(make_button("Enregistrer les paramètres", "primary", self._save_settings))
+        page.addWidget(footer)
+        page.addStretch()
+
+    def _save_settings(self) -> None:
+        self.mode = self.settings_theme.currentData()
+        self.editor_font_size = int(self.settings_editor_size.currentData())
+        self.autosave_seconds = int(self.settings_autosave.currentData())
+        self.db.set_setting("theme", self.mode)
+        self.db.set_setting("editor_font_size", self.editor_font_size)
+        self.db.set_setting("interface_language", self.settings_language.currentData())
+        self.db.set_setting("autosave_seconds", self.autosave_seconds)
+        self.db.set_setting("startup_view", self.settings_startup.currentData())
+        self.db.set_setting("confirm_delete", "1" if self.settings_confirm_delete.isChecked() else "0")
+        self.palette = self._resolved_palette()
+        self._apply_appearance()
+        self._configure_autosave()
+        self.save_state.setText("Paramètres enregistrés")
+        QTimer.singleShot(2400, lambda: self.save_state.setText(""))
+
+    def _backup_now(self) -> None:
+        stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")  # noqa: DTZ005 - local filename
+        path = BASE_DIR / "backups" / f"storyforge_{stamp}.db"
+        try:
+            self.db.backup_to(path)
+            self.backup_status.setText(f"Sauvegarde créée : {path.name}")
+        except OSError as exc:
+            QMessageBox.critical(self, "Sauvegarde impossible", str(exc))
+
+    def _export_backup(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(self, "Sauvegarder la base", "storyforge_backup.db", "Base StoryForge (*.db)")
+        if path:
+            try:
+                self.db.backup_to(Path(path))
+                self.backup_status.setText(f"Sauvegarde créée : {path}")
+            except OSError as exc:
+                QMessageBox.critical(self, "Sauvegarde impossible", str(exc))
+
+    def _open_data_folder(self) -> None:
+        try:
+            subprocess.Popen(["xdg-open", str(BASE_DIR)], start_new_session=True)
+        except OSError as exc:
+            QMessageBox.critical(self, "Dossier inaccessible", str(exc))
+
+    def closeEvent(self, event) -> None:
+        if self._ai_worker and self._ai_worker.isRunning():
+            QMessageBox.information(self, "Le professeur travaille", "Une réponse IA est encore en cours. Attends sa fin avant de fermer StoryForge afin de ne pas perdre le retour.")
+            event.ignore()
+            return
+        self._autosave_current_view()
+        self.autosave_timer.stop()
+        self.story_map_pan_timer.stop()
+        script_timer = getattr(self, "script_save_timer", None)
+        if isinstance(script_timer, QTimer):
+            script_timer.stop()
+        self.db.conn.close()
+        event.accept()
+
+
+def main() -> int:
+    app = QApplication(sys.argv)
+    app.setApplicationName(APP_NAME)
+    app.setApplicationDisplayName(APP_NAME)
+    app.setOrganizationName("StoryForge")
+    app.setStyle("Fusion")
+    system_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
+    system_font.setPointSize(10)
+    app.setFont(system_font)
+    window = StoryForgeWindow()
+    window.show()
+    return app.exec()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

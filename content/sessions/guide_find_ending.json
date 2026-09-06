@@ -1,0 +1,67 @@
+{
+  "key": "find_ending",
+  "cycle": "Guide ciblé",
+  "title": "Trouver une fin provisoire",
+  "subtitle": "Chercher une destination causale sans figer trop tôt toute l’histoire.",
+  "description": "À utiliser quand le début existe mais que les actions ne semblent conduire nulle part.",
+  "deliverable": "Une fin provisoire reliée au choix du protagoniste et au changement produit.",
+  "requires_project": true,
+  "apply_label": "Proposer comme fin du projet",
+  "steps": [
+    {
+      "key": "promise",
+      "title": "Promesse du début",
+      "concept_key": "fin",
+      "concept_label": "Direction",
+      "question": "Quelle question importante le début de ton histoire promet-il de résoudre ?",
+      "why": "La fin paraît juste lorsqu’elle répond à une attente réellement créée par le début.",
+      "example": "La gardienne parviendra-t-elle à révéler la fraude sans sacrifier un innocent ?",
+      "placeholder": "La question que le début pose…",
+      "tips": ["Une question dramatique", "Elle concerne l’objectif ou une valeur importante"]
+    },
+    {
+      "key": "decisive_choice",
+      "title": "Décision finale",
+      "concept_key": "choix",
+      "concept_label": "Choix",
+      "question": "Quelle décision du protagoniste peut réellement trancher cette question ?",
+      "why": "Une fin causale découle d’un acte, d’un refus ou d’un choix assumé, pas seulement d’un événement qui tombe du ciel.",
+      "example": "Elle publie les preuves sous son propre nom, sachant qu’elle sera arrêtée avant l’ouverture.",
+      "placeholder": "Pour décider de l’issue, le protagoniste…",
+      "tips": ["Un acte observable", "Un coût réel", "Le choix appartient au protagoniste"]
+    },
+    {
+      "key": "result",
+      "title": "Résultat concret",
+      "concept_key": "consequence",
+      "concept_label": "Résultat",
+      "question": "Que produit concrètement cette décision ?",
+      "why": "Le résultat montre si l’objectif est atteint, perdu ou transformé et ferme la chaîne de conséquences.",
+      "example": "L’exposition est annulée, le collègue est libéré, mais elle perd définitivement son emploi.",
+      "placeholder": "À cause de cette décision…",
+      "tips": ["Réponds à la question du début", "N’efface pas le coût du choix"]
+    },
+    {
+      "key": "final_change",
+      "title": "Après le résultat",
+      "concept_key": "changement",
+      "concept_label": "Changement",
+      "question": "Qu’est-ce qui n’est plus pareil après ce résultat ?",
+      "why": "Le changement final donne du sens à l’issue : personne, relation, situation ou vision du problème.",
+      "example": "Elle n’a pas retrouvé sa place au musée, mais elle n’a plus besoin de son approbation pour défendre la vérité.",
+      "placeholder": "Après cela, ce qui a changé…",
+      "tips": ["Compare avant et après", "Le changement n’a pas besoin d’être positif"]
+    },
+    {
+      "key": "provisional_ending",
+      "title": "Fin provisoire",
+      "concept_key": "fin",
+      "concept_label": "Synthèse",
+      "question": "Comment raconter cette fin en quelques phrases causales ?",
+      "why": "Relie la décision, son résultat et le changement. Cette version sert de direction et pourra encore évoluer.",
+      "example": "La gardienne publie les preuves et fait annuler l’exposition, sauvant son collègue au prix de son emploi. En quittant le musée, elle comprend qu’elle a enfin choisi la vérité plutôt que la reconnaissance de l’institution.",
+      "placeholder": "Ma fin provisoire…",
+      "tips": ["Décision → résultat → changement", "Deux à cinq phrases suffisent"]
+    }
+  ]
+}

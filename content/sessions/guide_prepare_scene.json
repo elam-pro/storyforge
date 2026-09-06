@@ -1,0 +1,67 @@
+{
+  "key": "prepare_scene",
+  "cycle": "Guide ciblé",
+  "title": "Préparer une scène",
+  "subtitle": "Donner à une scène une direction, une opposition et un changement avant de l’écrire.",
+  "description": "À utiliser lorsqu’une scène semble plate, décorative ou difficile à commencer.",
+  "deliverable": "Une nouvelle scène ajoutée à la liste du projet avec son objectif, son opposition et son changement.",
+  "requires_project": true,
+  "apply_label": "Ajouter cette scène à la liste",
+  "steps": [
+    {
+      "key": "scene_situation",
+      "title": "Situation d’entrée",
+      "concept_key": "scene",
+      "concept_label": "Départ",
+      "question": "Où commence la scène, qui est présent et quelle situation est déjà en cours ?",
+      "why": "Une entrée précise évite les longues explications et place immédiatement les personnages dans une situation active.",
+      "example": "Nuit. Dans la réserve du musée, la gardienne replace le faux tableau quand son collègue entre plus tôt que prévu.",
+      "placeholder": "Au début de la scène…",
+      "tips": ["Un lieu et un moment utiles", "Une situation déjà en mouvement"]
+    },
+    {
+      "key": "scene_objective",
+      "title": "Objectif de scène",
+      "concept_key": "objectif_scene",
+      "concept_label": "Objectif",
+      "question": "Que veut obtenir le personnage principal avant la fin de cette scène ?",
+      "why": "L’objectif local donne une direction aux gestes et aux paroles, même s’il diffère de l’objectif global de l’histoire.",
+      "example": "Faire sortir son collègue sans qu’il remarque le tableau déplacé.",
+      "placeholder": "Dans cette scène, la personne veut…",
+      "tips": ["Un résultat possible dans la scène", "Le personnage peut échouer ou changer de stratégie"]
+    },
+    {
+      "key": "scene_opposition",
+      "title": "Opposition de scène",
+      "concept_key": "opposition_scene",
+      "concept_label": "Opposition",
+      "question": "Qu’est-ce qui résiste ici, maintenant ?",
+      "why": "L’opposition transforme une intention en scène. Elle peut être une autre personne, une urgence, une information ou une contradiction interne visible.",
+      "example": "Le collègue veut lui confier qu’il a lui aussi découvert la fraude et refuse de partir.",
+      "placeholder": "Ce qui l’empêche d’obtenir cela…",
+      "tips": ["Une résistance active", "Elle agit pendant la scène"]
+    },
+    {
+      "key": "scene_change",
+      "title": "Sortie différente",
+      "concept_key": "changement_scene",
+      "concept_label": "Changement",
+      "question": "Qu’est-ce qui est différent lorsque la scène se termine ?",
+      "why": "Une scène utile modifie une information, une relation, une décision, un danger ou la direction de l’action.",
+      "example": "Le collègue devient un allié, mais l’alarme révèle qu’ils n’ont plus le temps de cacher leurs traces.",
+      "placeholder": "À la fin de la scène…",
+      "tips": ["Compare l’entrée et la sortie", "Le changement doit influencer la suite"]
+    },
+    {
+      "key": "scene_title",
+      "title": "Fiche de scène",
+      "concept_key": "scene",
+      "concept_label": "Synthèse",
+      "question": "Quel titre court permet de retrouver cette scène ?",
+      "why": "Le titre n’apparaît pas dans le scénario : il sert à identifier la scène dans la liste et le séquencier.",
+      "example": "Le collègue surprend la gardienne",
+      "placeholder": "Titre court de la scène…",
+      "tips": ["Une action ou une bascule", "Quelques mots suffisent"]
+    }
+  ]
+}

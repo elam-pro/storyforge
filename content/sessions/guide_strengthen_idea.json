@@ -1,0 +1,67 @@
+{
+  "key": "strengthen_idea",
+  "cycle": "Guide ciblé",
+  "title": "Renforcer une idée",
+  "subtitle": "Faire émerger ce qui rend une idée précise, personnelle et porteuse d’histoire.",
+  "description": "À utiliser lorsqu’une idée t’attire mais reste encore vague ou interchangeable.",
+  "deliverable": "Une prémisse renforcée, prête à être comparée avec la version actuelle du projet.",
+  "requires_project": true,
+  "apply_label": "Proposer comme nouvelle prémisse",
+  "steps": [
+    {
+      "key": "attraction",
+      "title": "Noyau d’intérêt",
+      "concept_key": "intention",
+      "concept_label": "Intention",
+      "question": "Qu’est-ce que tu refuses de perdre dans cette idée ?",
+      "why": "Nommer l’élément irremplaçable évite d’améliorer l’idée jusqu’à la rendre plus correcte mais moins personnelle.",
+      "example": "Je veux garder le paradoxe d’une gardienne qui protège une œuvre contre le musée qui l’expose.",
+      "placeholder": "Ce que je veux absolument préserver…",
+      "tips": ["Un élément précis", "Explique ce qui t’attire", "Évite les qualités générales comme « original »"]
+    },
+    {
+      "key": "specificity",
+      "title": "Élément précis",
+      "concept_key": "idee",
+      "concept_label": "Singularité",
+      "question": "Quelle image, situation ou contradiction rend cette idée reconnaissable ?",
+      "why": "Une idée devient mémorable lorsqu’elle produit une image ou une question concrète, pas seulement un thème général.",
+      "example": "Chaque nuit, elle déplace le même tableau de trois centimètres pour faire apparaître une marque cachée.",
+      "placeholder": "L’élément concret qui distingue cette idée…",
+      "tips": ["Quelque chose que l’on peut imaginer à l’écran", "Une contradiction peut suffire"]
+    },
+    {
+      "key": "personal_pressure",
+      "title": "Pression personnelle",
+      "concept_key": "enjeux",
+      "concept_label": "Enjeu",
+      "question": "Pourquoi cette situation atteint-elle précisément cette personne ?",
+      "why": "Le même événement devient plus fort lorsqu’il touche une blessure, une valeur, une relation ou une responsabilité particulière.",
+      "example": "Elle a autrefois été licenciée pour avoir dénoncé une restauration frauduleuse que personne n’a crue.",
+      "placeholder": "Cette situation la touche particulièrement parce que…",
+      "tips": ["Relie le problème à la personne", "Cherche une conséquence émotionnelle ou concrète"]
+    },
+    {
+      "key": "resistance",
+      "title": "Résistance active",
+      "concept_key": "opposition",
+      "concept_label": "Opposition",
+      "question": "Quelle force oblige cette idée à devenir une histoire plutôt qu’une simple situation ?",
+      "why": "Sans résistance, l’idée s’explique mais ne progresse pas. L’opposition doit provoquer des actions, des adaptations et des conséquences.",
+      "example": "Le directeur surveille ses déplacements et accélère l’ouverture de l’exposition.",
+      "placeholder": "La force qui résiste et agit…",
+      "tips": ["Une force capable de réagir", "Elle touche directement la direction du protagoniste"]
+    },
+    {
+      "key": "strengthened_premise",
+      "title": "Prémisse renforcée",
+      "concept_key": "premisse",
+      "concept_label": "Synthèse",
+      "question": "Quelle version plus précise de l’idée apparaît maintenant ?",
+      "why": "Assemble la personne, la situation singulière, la pression personnelle et la résistance. Une à trois phrases suffisent.",
+      "example": "Une restauratrice déchue devenue gardienne de nuit déplace secrètement le tableau vedette du musée pour révéler une fraude. Quand le directeur accélère l’exposition et accuse un collègue, elle doit choisir entre réparer sa réputation et protéger un innocent.",
+      "placeholder": "Ma prémisse renforcée…",
+      "tips": ["Une personne précise", "Une situation singulière", "Une tension qui promet des décisions"]
+    }
+  ]
+}
