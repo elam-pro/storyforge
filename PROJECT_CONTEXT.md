@@ -32,7 +32,7 @@ Ce fichier est la mémoire opérationnelle du projet. Il complète l’historiqu
 
 - Branche actuelle : `main`
 - Commit de base avant migration : `74cc3ba chore: baseline StoryForge before Codex migration`
-- Dernier commit connu : `38fe137 docs: list canonical v0.30 tag`
+- Dernier commit connu : `2e69595 fix: make scene autocomplete usable on first use`
 - Tags de sécurité :
   - `v0.27.1-before-codex`
   - `v0.27.1-before-codex-tested`
