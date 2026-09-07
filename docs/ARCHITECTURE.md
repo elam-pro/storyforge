@@ -11,6 +11,7 @@ Vérifiée statiquement le 7 septembre 2026 sur le code applicatif 0.30.3. Ce do
 | `app.py` | Navigation, vues Qt, état partagé, règles métier, orchestration et SQL direct. |
 | `db.py` | Schéma, migrations, requêtes, sauvegarde SQLite, import/export de projet. |
 | `screenplay_model.py` | Blocs typés avec identifiants et document sérialisable, indépendant de Qt. |
+| `screenplay_adapter.py` | Lecture des paragraphes Qt et résolution texte/JSON, sans fenêtre ni accès à la base. |
 | `learning_content.py`, `content/sessions/` | Modèles et chargement des guides JSON. |
 | `learning_service.py` | Réponses, progression, miroir historique, applications aux outils et changements de maîtrise, sans Qt. |
 | `script_export.py` | Parsing, FDX, PDF scénario. |
@@ -34,6 +35,7 @@ Le principal couplage reste dans `StoryForgeWindow`. Une première extraction ve
 ## Scénario : représentations concurrentes
 
 L’éditeur Qt projette `ScreenplayDocument`. Le JSON est dans `script_meta.document_json` et le texte compatible dans `project_docs.content`.
+`screenplay_adapter.block_values` lit les paragraphes en une passe ; `block_type` conserve les états Qt explicites et infère les anciens paragraphes sans récursion. `load_document` centralise la politique de compatibilité actuelle, sans en changer la priorité. Les commandes d’édition, la mise en forme et l’orchestration des exports restent dans la fenêtre.
 `_save_script` délègue à `Database.save_screenplay` pour sauvegarder atomiquement texte et JSON. `_load_script_document` garde sa compatibilité avec le texte historique. Les nouvelles versions stockent structure et page de garde dans `snapshot_json`, colonne ajoutée sans suppression. Réécriture permet une restauration confirmée avec version de sécurité. Les versions sont également réimportées.
 Les anciennes versions textuelles sont reconstruites : leurs types exacts et métadonnées historiques ne sont pas récupérables.
 

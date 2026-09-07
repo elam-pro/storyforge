@@ -26,6 +26,8 @@ Vérification statique : 7 septembre 2026, code 0.30.3, base Git `13ed5f5`. « P
 
 ## Garanties et limites de validation
 
+`screenplay_adapter.py` sépare la lecture de la projection Qt et le chargement compatible. `tests/test_screenplay_adapter.py` protège les types explicites, les IDs, les préfixes incomplets, le conflit texte/JSON et un dialogue de 2 000 paragraphes sans récursion. Ce changement ne constitue pas une nouvelle pagination ni une prise en charge FDX étendue.
+
 La sauvegarde, la progression, les applications et les changements explicites de maîtrise passent par `learning_service.py:LearningService`. `tests/test_learning_service.py` vérifie sans Qt les miroirs historiques, la maîtrise, la fin/réouverture, l’isolation des réponses, les preuves et l’annulation sur erreur. La sélection des cibles et la navigation restent dans l’interface ; `tests/test_v027_connected_learning.py` protège leur intégration.
 
 Le contrôle antérieur V0.30.3 rapportait 59 tests réussis. Ce résultat n’est pas une nouvelle exécution lors de la clarification documentaire et ne mesure pas la couverture.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import screenplay_adapter
 from learning_service import LearningService
 
 import csv
@@ -17655,37 +17656,17 @@ class StoryForgeWindow(QMainWindow):
         self.script_text.setFocus()
 
     def _load_script_document(self, legacy_content: str) -> ScreenplayDocument:
-        """Load the structured script projection, migrating older plain text once."""
-
         meta = self._script_meta()
-        stored = str(meta["document_json"] or "") if meta else ""
-        document = ScreenplayDocument.from_json(stored)
-        legacy = str(legacy_content or "")
-        # project_docs is the compatibility source for pre-model databases. If
-        # a user imported or edited one of those documents outside this editor,
-        # the visible legacy content wins over a stale structured projection.
-        if document is None or (
-            legacy.strip()
-            and document.to_plain_text().strip() != legacy.strip()
-        ):
-            document = ScreenplayDocument.from_legacy_text(
-                legacy,
-                project_id=self.active_project,
-            )
-        document.metadata.setdefault("project_id", str(self.active_project))
-        return document
+        return screenplay_adapter.load_document(
+            str(meta["document_json"] or "") if meta else "",
+            legacy_content, self.active_project)
 
     def _script_block_values_from_editor(self) -> list[tuple[str, BlockType]]:
         editor = getattr(self, "script_text", None)
         if not isinstance(editor, ScreenplayEditor):
             return []
-        values: list[tuple[str, BlockType]] = []
-        block = editor.document().firstBlock()
-        while block.isValid():
-            element = self._infer_legacy_script_element_from_block(block)
-            values.append((block.text(), BlockType.from_value(element)))
-            block = block.next()
-        return values
+        return screenplay_adapter.block_values(
+            editor.document(), getattr(self, "script_element_mode", "action"))
 
     def _sync_script_document_from_editor(self) -> bool:
         """Update the model from the existing Qt projection after an edit."""
@@ -18480,50 +18461,8 @@ class StoryForgeWindow(QMainWindow):
         return self._infer_legacy_script_element_from_block(block)
 
     def _infer_legacy_script_element_from_block(self, block) -> str:
-        state_element = {
-            1001: "scene",
-            1002: "action",
-            1003: "character",
-            1004: "dialogue",
-            1005: "parenthetical",
-            1006: "transition",
-        }.get(block.userState())
-        if state_element:
-            return state_element
-        line = block.text().strip()
-        if not line:
-            return getattr(self, "script_element_mode", "action")
-        upper = line.upper()
-        # Keep an in-progress scene prefix in the scene mode.  Without this
-        # guard, a partial uppercase value such as ``INT`` is mistaken for a
-        # character cue before the writer has typed the period.
-        if upper in {"I", "IN", "INT", "E", "EX", "EXT", "I/E"}:
-            return "scene"
-        if upper.startswith(("INT.", "EXT.", "INT./EXT.", "EXT./INT.", "I/E.")):
-            return "scene"
-        if line.startswith("@"):
-            return "character"
-        if line.startswith("!"):
-            return "action"
-        if line.startswith("(") and line.endswith(")"):
-            return "parenthetical"
-        if upper.endswith((" TO:", " À :", " A :")) or upper in {
-            "CUT TO:",
-            "FADE IN:",
-            "FADE OUT.",
-            "FONDU :",
-        }:
-            return "transition"
-        previous = block.previous()
-        previous_text = previous.text().strip() if previous.isValid() else ""
-        previous_element = (
-            self._infer_legacy_script_element_from_block(previous) if previous.isValid() else ""
-        )
-        if previous_element in {"character", "dialogue", "parenthetical"} and previous_text:
-            return "dialogue"
-        if line == upper and len(line) <= 42:
-            return "character"
-        return "action"
+        return screenplay_adapter.block_type(
+            block, getattr(self, "script_element_mode", "action")).value
 
     def _apply_script_block_format(self, element: str, cursor: QTextCursor | None = None) -> None:
         editor = getattr(self, "script_text", None)
