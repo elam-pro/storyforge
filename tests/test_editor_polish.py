@@ -24,7 +24,8 @@ def test_scene_completion_enter_and_repeated_new_scene(tmp_path):
         QTest.keyClick(window.script_text, Qt.Key.Key_Tab)
         qt.processEvents()
         assert window.script_text.toPlainText() == expected
-        assert not window.script_text._type_rail.isVisible()
+        assert not hasattr(window.script_text, '_type_rail')
+        assert window.script_text.extraSelections()
     window.script_text.clear()
     window._set_script_element_mode("action")
     window._apply_script_block_format("action")

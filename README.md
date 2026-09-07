@@ -15,7 +15,7 @@ Les scripts affichent encore une ancienne version ; la référence est `APP_VERS
 
 ## Données et exports
 
-La base `storyforge.db`, les sauvegardes et les exports sont ignorés par Git. Un commit ne sauvegarde pas les histoires. Ouvrir l’application peut appliquer des migrations : ne pas utiliser les données personnelles pour tester.
+La base `storyforge.db`, les sauvegardes et les exports sont ignorés par Git. Le manuel cumulatif est généré dans `output/manuals/` à côté de la base ; l’ancien PDF racine reste local et n’est plus suivi. Un commit ne sauvegarde pas les histoires. Ouvrir l’application peut appliquer des migrations : ne pas utiliser les données personnelles pour tester.
 
 - Scénario : Éditeur de scripts → Page de garde → Exporter PDF ou FDX.
 - Histoire complète : Projets → Plus… → Exporter l’histoire terminée…, ou Vue d’ensemble.

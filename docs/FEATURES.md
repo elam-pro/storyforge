@@ -20,7 +20,7 @@ Vérification statique : 7 septembre 2026, code 0.30.3, base Git `13ed5f5`. « P
 | templates.images | Présent : personnalisation globale en settings ; absente de l’export individuel de projet. | `app.py` : chercher `template_image_` | `tests/test_layout_followup.py` |
 | search.navigation | Présent : recherche, tags, vues coordonnées et menu Projets repliable. | `app.py:show_search`, `show_story_overview`, `_build_shell` | `tests/test_ui_smoke.py`, `tests/test_layout_followup.py` |
 | language | Partiel : libellés anglais, contenus longs et formulaires encore incomplets. | `i18n.py`, appels `tr` dans `app.py` | `tests/test_editor_polish.py` |
-| ai.professor | Désactivé : `ask` lève une erreur ; code de compatibilité conservé. | `ai_service.py:ProfessorAI`, `app.py:AIWorker` | Réactivation non validée ; ne pas annoncer ce service disponible. |
+| ai.professor | Désactivé : `ask` lève une erreur ; shim et données conservés, ancienne interface et worker retirés. | `ai_service.py:ProfessorAI`, tables historiques dans `db.py` | `tests/test_cleanup.py` vérifie la conservation des données ; service indisponible. |
 | geography | Prévu, non implémenté. | Aucun outil géographique dédié identifié. | Pas de garantie existante. |
 | repository.mcp | Prévu, non implémenté. | Aucun serveur dans le repository. | À définir avant implémentation. |
 

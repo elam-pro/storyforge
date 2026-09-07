@@ -9,3 +9,4 @@ backups/
 storyforge.db
 *.db-shm
 *.db-wal
+/Mon manuel d’écriture & storytelling.pdf

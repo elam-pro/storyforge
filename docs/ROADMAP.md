@@ -8,14 +8,14 @@ Mise à jour : 7 septembre 2026. Ce document décrit le travail futur, pas des f
 | --- | --- | --- |
 | 1 | Documentation canonique — réalisée | README court, consignes, produit, architecture, décisions, état et roadmap séparés ; anciens textes archivés sans perte. Aucun changement applicatif. |
 | 2 | Sécurité des données — réalisée | Import validé et atomique ; sauvegarde scénario cohérente ; versions structurées. Tests d’échec, ancienne table de versions et restauration sur bases temporaires. |
-| 3 | Hygiène ciblée | Vérifier le manuel suivi et les données qu’il contient, le script ponctuel de localisation et le code IA historique. Aucune suppression globale de sauvegardes. |
+| 3 | Hygiène ciblée — réalisée | Manuel généré hors sources et ancien fichier local dé-suivi ; script ponctuel archivé en texte ; interface IA désactivée et rail masqué retirés. Shim, données, sauvegardes et historique Git conservés. Contenu privé éventuel de l’ancien historique non audité ni purgé. |
 | 4 | Frontière apprentissage | Extraire progression/application des widgets, clarifier preuves et maîtrise sans casser la reprise des guides. |
 | 5 | Frontière scénario | Consolider modèle canonique et adaptateur Qt avant intégration d’un éditeur avancé ; tests PDF/FDX représentatifs. |
 | 6 | Interface et performances | Mesurer changements de vue et images ; extraire uniquement les vues utiles, conserver les garanties d’autosauvegarde. |
 | 7 | Index ciblé | Relier fonctionnalités/code/tests et indexer incrémentalement les sources autorisées ; provenance et exclusion des données personnelles. |
 | 8 | MCP | Serveur de contexte du repository en lecture seule, sorties limitées ; aucun accès implicite aux histoires. |
 
-Chaque chantier doit rester un changement borné avec tests et retour arrière. Une migration SQLite exige une sauvegarde restaurable : revenir au code précédent seul peut ne pas suffire. La phase 2 est réalisée ; les étapes 3 à 8 ne sont pas engagées automatiquement.
+Chaque chantier doit rester un changement borné avec tests et retour arrière. Une migration SQLite exige une sauvegarde restaurable : revenir au code précédent seul peut ne pas suffire. Les phases 2 et 3 sont réalisées ; les étapes 4 à 8 ne sont pas engagées automatiquement.
 
 ## Fonctionnalités restantes : numéros d’origine conservés
 

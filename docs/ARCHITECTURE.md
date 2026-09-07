@@ -16,7 +16,7 @@ Vérifiée statiquement le 7 septembre 2026 sur le code applicatif 0.30.3. Ce do
 | `pdf_export.py`, `report_export.py` | Manuel pédagogique et documents PDF. |
 | `theme.py`, `i18n.py` | Styles et traduction partielle. |
 | `genres.py`, `template_diagrams.py` | Ressources et rendus narratifs. |
-| `ai_service.py` | Compatibilité historique désactivée. |
+| `ai_service.py` | Shim désactivé conservé pour anciens imports ; aucun appel depuis l’interface. |
 
 Le principal couplage est dans `StoryForgeWindow`, pas une boucle d’import entre les petits modules. Le métier et les accès SQL ne sont pas encore séparés en services par domaine.
 
@@ -44,7 +44,7 @@ Une application est unique par parcours/étape. Les méthodes de `StoryForgeWind
 ## Navigation et effets de bord
 
 Les vues sont reconstruites avec des sauvegardes différées et attributs partagés. Les changements de page, timers et caches d’images demandent des tests conjoints.
-Terminer le guide initial peut régénérer le manuel PDF à la racine : ne pas exécuter ce parcours sur les données personnelles pendant un contrôle.
+Terminer le guide initial régénère le manuel dans `output/manuals/`, à côté de la base utilisée. L’export manuel propose aussi ce dossier. L’ancien PDF racine est conservé localement mais ignoré par Git ; son historique Git n’est pas réécrit. Une erreur d’export automatique est signalée sans annuler l’enregistrement du guide.
 
 ## Contexte futur
 

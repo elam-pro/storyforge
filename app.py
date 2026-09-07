@@ -32,7 +32,6 @@ from PySide6.QtCore import (
     QRectF,
     QSize,
     Qt,
-    QThread,
     QTimer,
     QUrl,
     QStringListModel,
@@ -104,7 +103,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ai_service import ProfessorAI
 from db import NOW, Database
 from learning_content import load_session
 from pdf_export import export_manual_pdf
@@ -1285,62 +1283,6 @@ class NavigationButton(QPushButton):
             parent.setMinimumHeight(parent.layout().minimumSize().height() + 4)
 
 
-class SendEditor(QTextEdit):
-    send_requested = Signal()
-
-    def keyPressEvent(self, event: QKeyEvent) -> None:
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            self.send_requested.emit()
-            return
-        super().keyPressEvent(event)
-
-
-class ScreenplayTypeRail(QWidget):
-    """Paints paragraph types in the reserved gutter beside the manuscript."""
-
-    def __init__(self, editor: "ScreenplayEditor"):
-        super().__init__(editor)
-        self.editor = editor
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self.setAutoFillBackground(False)
-
-    def paintEvent(self, event) -> None:
-        editor = self.editor
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
-        rail_font = QFont(editor.font())
-        rail_font.setPointSize(max(8, round(editor.font().pointSize() * 0.68)))
-        rail_font.setWeight(QFont.Weight.DemiBold)
-        painter.setFont(rail_font)
-
-        active_block_number = editor.textCursor().block().blockNumber()
-        block = editor.document().firstBlock()
-        while block.isValid():
-            block_cursor = QTextCursor(block)
-            block_rect = editor.cursorRect(block_cursor)
-            block_top = block_rect.top()
-            block_bottom = block_rect.bottom()
-            if block_bottom >= 0 and block_top <= self.height():
-                label = editor._rail_label(block.userState(), block.text())
-                if label:
-                    active = block.blockNumber() == active_block_number
-                    painter.setPen(editor._script_accent if active else editor._script_muted)
-                    painter.drawText(
-                        QRectF(12, block_top, 84, block_rect.height()),
-                        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                        label,
-                    )
-                    painter.setPen(
-                        QPen(
-                            editor._script_accent if active else editor._script_muted,
-                            1.0 if active else 0.5,
-                        )
-                    )
-                    painter.drawLine(12, int(block_bottom), 94, int(block_bottom))
-            block = block.next()
-        painter.end()
-
-
 class ScreenplayEditor(QTextEdit):
     tab_requested = Signal(bool)
     return_pressed = Signal(str)
@@ -1352,39 +1294,18 @@ class ScreenplayEditor(QTextEdit):
     def __init__(self):
         super().__init__()
         self.current_element = "scene"
-        self._script_accent = QColor("#D04A33")
-        self._script_muted = QColor("#8F9693")
         self._script_active_background = QColor("#3B211C")
-        self._type_rail = ScreenplayTypeRail(self)
-        self._type_rail.hide()
-        self._type_rail.raise_()
-        self.verticalScrollBar().valueChanged.connect(self._update_type_rail)
-        self.horizontalScrollBar().valueChanged.connect(self._update_type_rail)
-        self.cursorPositionChanged.connect(self._update_type_rail)
-        self.document().contentsChanged.connect(self._update_type_rail)
 
-    def _position_type_rail(self) -> None:
-        # The selected format is already shown in the toolbar. A floating
-        # overlay inside QTextEdit can cover text on platform-specific styles.
-        self._type_rail.hide()
 
-    def _update_type_rail(self) -> None:
-        self._position_type_rail()
-
-    def set_type_rail_style(
+    def set_active_line_style(
         self,
-        accent: str,
-        muted: str,
         active_background: str,
     ) -> None:
-        """Configure the non-editable type rail drawn inside the editor."""
+        """Configure the active paragraph highlight without a text overlay."""
 
-        self._script_accent = QColor(accent)
-        self._script_muted = QColor(muted)
         self._script_active_background = QColor(active_background)
         self.refresh_active_line()
         self.viewport().update()
-        self._type_rail.update()
 
     def refresh_active_line(self) -> None:
         """Keep the current screenplay paragraph visible while editing."""
@@ -1400,24 +1321,7 @@ class ScreenplayEditor(QTextEdit):
         )
         self.setExtraSelections([selection])
         self.viewport().update()
-        self._type_rail.update()
 
-    @staticmethod
-    def _rail_label(user_state: int, text: str) -> str:
-        labels = {
-            1001: "SCÈNE",
-            1002: "ACTION",
-            1003: "PERSO",
-            1004: "DIALOGUE",
-            1005: "PARENTHÈSE",
-            1006: "TRANSITION",
-        }
-        if user_state in labels:
-            return labels[user_state]
-        return "" if not text.strip() else "ACTION"
-
-    def paintEvent(self, event) -> None:
-        super().paintEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         completer = getattr(self, "scene_completer", None)
@@ -1476,7 +1380,6 @@ class ScreenplayEditor(QTextEdit):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self._position_type_rail()
         self.layout_changed.emit()
 
 
@@ -3033,26 +2936,6 @@ class SequenceBlockWidget(QFrame):
         super().hideEvent(event)
 
 
-class AIWorker(QThread):
-    succeeded = Signal(str, object)
-    failed = Signal(str)
-
-    def __init__(self, api_key: str, model: str, prompt: str, context: str, history: list[dict]):
-        super().__init__()
-        self.api_key = api_key
-        self.model = model
-        self.prompt = prompt
-        self.context = context
-        self.history = history
-
-    def run(self) -> None:
-        try:
-            reply = ProfessorAI(self.api_key, self.model).ask(self.prompt, self.context, self.history)
-            self.succeeded.emit(reply.text, reply.response_id)
-        except Exception as exc:  # noqa: BLE001  # SDK failures share no stable base beyond Exception.
-            self.failed.emit(str(exc))
-
-
 class StoryForgeWindow(QMainWindow):
     def __init__(self, db_path: Path = DB_PATH):
         super().__init__()
@@ -3075,10 +2958,6 @@ class StoryForgeWindow(QMainWindow):
         self.story_map_pan_timer = QTimer(self)
         self.story_map_pan_timer.setInterval(24)
         self.story_map_pan_timer.timeout.connect(self._apply_story_map_auto_pan)
-        self.api_key = os.environ.get("OPENAI_API_KEY", "")
-        self.ai_model = self.db.setting("ai_model", "gpt-5.6-sol")
-        self.ai_mode = self.db.setting("ai_mode", "coach")
-        self._ai_worker: AIWorker | None = None
         self.setWindowTitle(f"{APP_NAME}  ·  v{APP_VERSION}")
         self.resize(1480, 940)
         self.setMinimumSize(1120, 720)
@@ -4588,8 +4467,7 @@ class StoryForgeWindow(QMainWindow):
         )
         self._mirror_legacy_guide_progress(target, "terminée" if finish else "en cours")
         if finish and self._guide_session.key == LEARNING_SESSION.key:
-            manual_path = BASE_DIR / "Mon manuel d’écriture & storytelling.pdf"
-            export_manual_pdf(manual_path, "StoryForge — Manuel cumulatif", self._manual_sections())
+            self._write_cumulative_manual()
         self.show_learning(run_id=self._guide_run_id)
         if finish:
             QTimer.singleShot(0, self._show_learning_summary)
@@ -17793,9 +17671,7 @@ class StoryForgeWindow(QMainWindow):
             "INT. LIEU - JOUR\n\nUne action visible et précise.\n\nPERSONNAGE\nUne première réplique."
         )
         self.script_text.setObjectName("ScriptEditor")
-        self.script_text.set_type_rail_style(
-            self.palette.accent,
-            self.palette.muted,
+        self.script_text.set_active_line_style(
             self.palette.accent_soft,
         )
         self.script_text.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
@@ -19425,10 +19301,27 @@ class StoryForgeWindow(QMainWindow):
         dialog.exec()
 
     def _manual_pdf(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(self, "Créer le manuel", "Mon manuel d’écriture & storytelling.pdf", "PDF (*.pdf)")
+        default_path = self._manual_output_path()
+        try:
+            default_path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            QMessageBox.warning(self, 'Dossier inaccessible', str(exc))
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Créer le manuel", str(default_path), "PDF (*.pdf)")
         if path:
             export_manual_pdf(Path(path), "StoryForge — Manuel cumulatif", self._manual_sections())
             QMessageBox.information(self, "PDF généré", f"Manuel créé :\n{path}")
+
+    def _manual_output_path(self) -> Path:
+        return self.db.path.parent / 'output' / 'manuals' / 'Mon manuel d’écriture & storytelling.pdf'
+
+    def _write_cumulative_manual(self) -> None:
+        try:
+            path = self._manual_output_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            export_manual_pdf(path, 'StoryForge — Manuel cumulatif', self._manual_sections())
+        except OSError as exc:
+            QMessageBox.warning(self, 'Manuel non exporté', f'Le guide est enregistré, mais le PDF n’a pas pu être généré : {exc}')
 
     def _manual_sections(self) -> list[tuple[str, str]]:
         sections: list[tuple[str, str]] = [
@@ -19475,273 +19368,6 @@ class StoryForgeWindow(QMainWindow):
         sections.append(("PROCHAINE ÉTAPE", "Reprendre la première notion encore fragile, ou transformer la graine terminée en projet court."))
         return sections
 
-    # ---------- AI professor ----------
-
-    def _ai_context(self) -> str:
-        parts = ["L'élève utilise StoryForge, application locale d'apprentissage de l'écriture."]
-        project = self.db.one("SELECT * FROM projects WHERE id=?", (self.active_project,)) if self.active_project else None
-        if project:
-            parts.append("\nPROJET ACTIF")
-            fields = [
-                ("title", "Titre"), ("stage", "Étape"), ("protagonist", "Protagoniste"),
-                ("desire", "Désir"), ("objective", "Objectif"), ("opposition", "Opposition"),
-                ("stakes", "Enjeux"), ("change_note", "Changement possible"), ("ending", "Fin provisoire"),
-                ("main_problem", "Problème principal"), ("next_decision", "Prochaine décision"),
-            ]
-            for key, caption in fields:
-                value = (project[key] or "").strip()
-                if value:
-                    parts.append(f"{caption}: {value}")
-            questions = self.db.q("SELECT question_key,answer FROM project_questions WHERE project_id=? AND TRIM(answer)<>'' ORDER BY updated_at", (self.active_project,))
-            if questions:
-                labels = dict(UNIVERSAL_QUESTIONS)
-                parts.append("\nRÉPONSES AUX QUESTIONS DE DÉVELOPPEMENT")
-                for question in questions:
-                    parts.append(f"- {labels.get(question['question_key'], question['question_key'])}: {question['answer']}")
-            dtype = self.db.setting(f"last_doc_{self.active_project}", "summary")
-            doc = self.db.one("SELECT content,title FROM project_docs WHERE project_id=? AND doc_type=?", (self.active_project, dtype))
-            if doc and (doc["content"] or "").strip():
-                content = doc["content"].strip()
-                if len(content) > 18000:
-                    content = content[:18000] + "\n[… document tronqué par StoryForge …]"
-                parts.append(f"\nDOCUMENT DE TRAVAIL ACTUEL — {doc['title']}\n{content}")
-        progress = self.db.one("SELECT step_index,status FROM progress WHERE session_key=?", (LEARNING_SESSION.key,))
-        if progress:
-            idx = min(progress["step_index"], len(LEARNING_SESSION.steps) - 1)
-            step = LEARNING_SESSION.steps[idx]
-            parts.append(f"\nAPPRENTISSAGE ACTUEL: Session 01, étape {idx + 1}/{len(LEARNING_SESSION.steps)} — {step.title}")
-            work = self.db.one("SELECT * FROM learning_work WHERE session_key=? AND step_index=?", (LEARNING_SESSION.key, idx))
-            if work:
-                if work["draft"].strip():
-                    parts.append(f"Premier essai de l'élève: {work['draft']}")
-                if work["revision"].strip():
-                    parts.append(f"Réécriture de l'élève: {work['revision']}")
-                if work["takeaway"].strip():
-                    parts.append(f"Ce que l'élève retient: {work['takeaway']}")
-        return "\n".join(parts)
-
-    def _ai_history(self) -> list[dict]:
-        if self.active_project:
-            rows = self.db.q("SELECT role,content FROM ai_messages WHERE project_id=? ORDER BY id DESC LIMIT 12", (self.active_project,))
-        else:
-            rows = self.db.q("SELECT role,content FROM ai_messages WHERE project_id IS NULL ORDER BY id DESC LIMIT 12")
-        return [dict(row) for row in reversed(rows)]
-
-    def _ai_settings(self) -> None:
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Réglages OpenAI")
-        dialog.resize(620, 370)
-        box = QVBoxLayout(dialog)
-        box.setContentsMargins(28, 26, 28, 24)
-        box.addWidget(make_label("Connexion OpenAI", "SectionTitle"))
-        box.addWidget(make_label("La clé n’est jamais enregistrée. Elle reste en mémoire jusqu’à la fermeture, ou vient de OPENAI_API_KEY.", "Muted", True))
-        box.addSpacing(14)
-        box.addWidget(make_label("Clé API", "Muted"))
-        key = QLineEdit(self.api_key)
-        key.setEchoMode(QLineEdit.EchoMode.Password)
-        key.setPlaceholderText("sk-…")
-        box.addWidget(key)
-        box.addWidget(make_label("Modèle", "Muted"))
-        model = QComboBox()
-        model.setEditable(True)
-        model.addItems(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4-mini"])
-        model.setCurrentText(self.ai_model)
-        box.addWidget(model)
-        box.addStretch()
-        actions = QHBoxLayout()
-        actions.addStretch()
-        actions.addWidget(make_button(tr("Annuler"), "secondary", dialog.reject))
-        save_button = make_button(tr("Enregistrer"), "primary")
-        actions.addWidget(save_button)
-        box.addLayout(actions)
-
-        def save() -> None:
-            self.api_key = key.text().strip()
-            self.ai_model = model.currentText().strip() or "gpt-5.6-sol"
-            self.db.set_setting("ai_model", self.ai_model)
-            dialog.accept()
-            if self.current_view == "ai":
-                self.show_ai()
-            elif self.current_view == "settings":
-                self.show_settings()
-
-        save_button.clicked.connect(save)
-        dialog.exec()
-
-    def show_ai(self) -> None:
-        page = self._begin_page("Professeur IA", "ai")
-        self._page_header(page, "Apprentissage guidé", "Ton professeur dans StoryForge", "Il lit le contexte utile et t’aide une difficulté à la fois. Ce n’est pas un bouton « écris mon film ».")
-        body = QHBoxLayout()
-        body.setSpacing(14)
-
-        side = make_card()
-        side.setFixedWidth(282)
-        side_box = QVBoxLayout(side)
-        side_box.setContentsMargins(14, 16, 14, 16)
-        side_box.addWidget(make_label("MODE", "Caption"))
-        mode_group = QButtonGroup(self)
-        mode_group.setExclusive(True)
-        modes = [
-            ("coach", "Continuer mon apprentissage"),
-            ("diagnostic", "Diagnostiquer mon travail"),
-            ("rewrite", "Préparer une réécriture"),
-            ("explore", "Explorer une idée"),
-        ]
-        self.ai_mode_buttons: dict[str, QPushButton] = {}
-        for key, caption in modes:
-            button = QPushButton(caption)
-            button.setProperty("segment", True)
-            button.setCheckable(True)
-            button.setChecked(key == self.ai_mode)
-            button.setCursor(Qt.CursorShape.PointingHandCursor)
-            button.clicked.connect(lambda _checked=False, k=key: self._set_ai_mode(k))
-            mode_group.addButton(button)
-            side_box.addWidget(button)
-            self.ai_mode_buttons[key] = button
-        side_box.addSpacing(16)
-        side_box.addWidget(make_label("CONTEXTE ENVOYÉ", "Caption"))
-        context_copy = "Projet actif + réponses + document de travail + étape pédagogique" if self.active_project else "Étape pédagogique actuelle · aucun projet actif"
-        side_box.addWidget(make_label(context_copy, "Muted", True))
-        side_box.addSpacing(14)
-        side_box.addWidget(make_button("Réglages OpenAI", "secondary", self._ai_settings))
-        side_box.addWidget(make_button("Nouvelle conversation", "secondary", self._ai_clear_chat))
-        side_box.addStretch()
-        state = "Prêt" if self.api_key else "Clé API requise"
-        side_box.addWidget(make_label(f"●  {state}\n{self.ai_model}", "Muted", True))
-        body.addWidget(side)
-
-        main = make_card()
-        main_box = QVBoxLayout(main)
-        main_box.setContentsMargins(18, 17, 18, 17)
-        main_box.addWidget(make_label("Conversation pédagogique", "SectionTitle"))
-        main_box.addSpacing(8)
-        self.ai_scroll = QScrollArea()
-        self.ai_scroll.setWidgetResizable(True)
-        self.ai_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        messages = QWidget()
-        messages.setObjectName("ChatCanvas")
-        self.ai_messages_layout = QVBoxLayout(messages)
-        self.ai_messages_layout.setContentsMargins(2, 4, 8, 4)
-        self.ai_messages_layout.setSpacing(11)
-        self.ai_messages_layout.addStretch()
-        history = self._ai_history()
-        if history:
-            for message in history:
-                self._add_ai_bubble(message["role"], message["content"])
-        else:
-            self._add_ai_bubble("assistant", "Je connais l’étape pédagogique où tu te trouves. Écris ce qui te bloque ou utilise simplement : « Continue avec moi ».")
-        self.ai_scroll.setWidget(messages)
-        main_box.addWidget(self.ai_scroll, 1)
-        main_box.addSpacing(8)
-        composer = QHBoxLayout()
-        self.ai_input = SendEditor()
-        self.ai_input.setAcceptRichText(False)
-        self.ai_input.setPlaceholderText("Écris ce qui te bloque…   Ctrl + Entrée pour envoyer")
-        self.ai_input.setFixedHeight(92)
-        self.ai_input.send_requested.connect(self._ai_send)
-        composer.addWidget(self.ai_input, 1)
-        self.ai_send_button = make_button("Envoyer  →", "primary", self._ai_send)
-        composer.addWidget(self.ai_send_button, 0, Qt.AlignmentFlag.AlignBottom)
-        main_box.addLayout(composer)
-        self.ai_status = make_label("", "Muted")
-        if self._ai_worker and self._ai_worker.isRunning():
-            self.ai_send_button.setEnabled(False)
-            self.ai_status.setText("Une autre demande au professeur est en cours…")
-        main_box.addWidget(self.ai_status)
-        body.addWidget(main, 1)
-        page.addLayout(body, 1)
-        QTimer.singleShot(0, self._scroll_ai_to_bottom)
-
-    def _set_ai_mode(self, mode: str) -> None:
-        self.ai_mode = mode
-        self.db.set_setting("ai_mode", mode)
-
-    def _add_ai_bubble(self, role: str, content: str) -> None:
-        row = QHBoxLayout()
-        bubble = QFrame()
-        bubble.setProperty("message", "user" if role == "user" else "assistant")
-        bubble.setMaximumWidth(720)
-        bubble_box = QVBoxLayout(bubble)
-        bubble_box.setContentsMargins(14, 11, 14, 12)
-        bubble_box.setSpacing(5)
-        bubble_box.addWidget(make_label("TOI" if role == "user" else "PROFESSEUR", "Caption"))
-        bubble_box.addWidget(make_label((content or "").strip(), "Body", True))
-        if role == "user":
-            row.addStretch()
-            row.addWidget(bubble)
-        else:
-            row.addWidget(bubble)
-            row.addStretch()
-        self.ai_messages_layout.insertLayout(max(0, self.ai_messages_layout.count() - 1), row)
-
-    def _scroll_ai_to_bottom(self) -> None:
-        bar = self.ai_scroll.verticalScrollBar()
-        bar.setValue(bar.maximum())
-
-    def _ai_clear_chat(self) -> None:
-        if QMessageBox.question(self, "Nouvelle conversation", "Effacer l’historique IA de ce contexte ?") != QMessageBox.StandardButton.Yes:
-            return
-        if self.active_project:
-            self.db.run("DELETE FROM ai_messages WHERE project_id=?", (self.active_project,))
-        else:
-            self.db.run("DELETE FROM ai_messages WHERE project_id IS NULL")
-        self.show_ai()
-
-    def _ai_send(self) -> None:
-        text = self.ai_input.toPlainText().strip()
-        if not text or (self._ai_worker and self._ai_worker.isRunning()):
-            return
-        if not self.api_key:
-            QMessageBox.information(self, "Clé API nécessaire", "Ouvre « Réglages OpenAI » et saisis une clé API, ou définis OPENAI_API_KEY avant de lancer StoryForge.")
-            self._ai_settings()
-            return
-        mode = self.ai_mode
-        prefixes = {
-            "coach": "Continue la formation à partir de mon état actuel. Une seule difficulté à la fois.",
-            "diagnostic": "Diagnostique mon travail actuel. Identifie mon intention puis un problème principal avant toute solution.",
-            "rewrite": "Aide-moi à préparer une réécriture. Diagnostic avant correction, macro avant micro.",
-            "explore": "Aide-moi à explorer cette idée sans inventer le film à ma place et sans imposer de structure.",
-        }
-        prompt = prefixes.get(mode, "") + "\n\nMessage de l'élève : " + text
-        project_id = self.active_project if self.active_project else None
-        self.db.run(
-            "INSERT INTO ai_messages(created_at,project_id,role,mode,content,response_id) VALUES(?,?,?,?,?,?)",
-            (NOW(), project_id, "user", mode, text, ""),
-        )
-        self._add_ai_bubble("user", text)
-        self.ai_input.clear()
-        self.ai_send_button.setEnabled(False)
-        self.ai_status.setText("Le professeur lit ton contexte…")
-        self._scroll_ai_to_bottom()
-
-        history = self._ai_history()[:-1]
-        worker = AIWorker(self.api_key, self.ai_model, prompt, self._ai_context(), history)
-        self._ai_worker = worker
-        worker.succeeded.connect(lambda reply, response_id: self._ai_receive(reply, response_id, mode, project_id))
-        worker.failed.connect(self._ai_error)
-        worker.finished.connect(worker.deleteLater)
-        worker.finished.connect(lambda: setattr(self, "_ai_worker", None))
-        worker.start()
-
-    def _ai_receive(self, text: str, response_id: object, mode: str, project_id: int | None) -> None:
-        self.db.run(
-            "INSERT INTO ai_messages(created_at,project_id,role,mode,content,response_id) VALUES(?,?,?,?,?,?)",
-            (NOW(), project_id, "assistant", mode, text, str(response_id or "")),
-        )
-        if self.current_view == "ai":
-            self._add_ai_bubble("assistant", text)
-            self.ai_send_button.setEnabled(True)
-            self.ai_status.setText("")
-            QTimer.singleShot(0, self._scroll_ai_to_bottom)
-        else:
-            self.save_state.setText("Réponse du professeur reçue")
-            QTimer.singleShot(2600, lambda: self.save_state.setText(""))
-
-    def _ai_error(self, message: str) -> None:
-        if self.current_view == "ai":
-            self.ai_send_button.setEnabled(True)
-            self.ai_status.setText("")
-        QMessageBox.critical(self, "Erreur IA", message)
 
     # ---------- Rewriting ----------
 
@@ -21363,10 +20989,6 @@ class StoryForgeWindow(QMainWindow):
             QMessageBox.critical(self, "Dossier inaccessible", str(exc))
 
     def closeEvent(self, event) -> None:
-        if self._ai_worker and self._ai_worker.isRunning():
-            QMessageBox.information(self, "Le professeur travaille", "Une réponse IA est encore en cours. Attends sa fin avant de fermer StoryForge afin de ne pas perdre le retour.")
-            event.ignore()
-            return
         self._autosave_current_view()
         self.autosave_timer.stop()
         self.story_map_pan_timer.stop()

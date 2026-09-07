@@ -1,3 +1,11 @@
+# Migration ponctuelle des libellés — archive non exécutable
+
+Archivée le 8 septembre 2026. Script utilisé pour une migration mécanique passée,
+pas une commande de maintenance. Il réécrivait directement app.py lors de son
+exécution ou import ; ne pas le réexécuter. Modifier désormais les appels tr ciblés.
+Le code original est conservé ci-dessous pour traçabilité, ses chemins sont historiques.
+
+```python
 """One-off mechanical migration of known static UI literals, never user values."""
 import ast
 from pathlib import Path
@@ -30,3 +38,4 @@ for start, end in sorted(changes, reverse=True):
     source = source[:start] + "tr(" + source[start:end] + ")" + source[end:]
 path.write_text(source)
 print(f"Localised {len(changes)} known static UI literals")
+```
