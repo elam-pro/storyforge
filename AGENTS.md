@@ -1,0 +1,24 @@
+# Travailler sur StoryForge
+
+- Respecter le périmètre demandé ; une roadmap n’autorise pas sa mise en œuvre.
+- Vérifier `git status` avant modification et préserver les changements existants.
+- Travailler dans le repository existant, sans nouvelle copie de l’application.
+- Cible : Linux, Python/PySide6 et SQLite ; pas de réécriture ni service obligatoire.
+- L’apprentissage est central, l’atelier son terrain d’application ; voir `docs/PRODUCT.md`.
+- Ne pas imposer de structure narrative ni traduire les textes de l’utilisateur.
+- Ne pas tester sur `storyforge.db` ou les histoires personnelles.
+- Ne pas supprimer les sauvegardes, exports, migrations ou compatibilités sans validation.
+- Attention : construire `Database` ou ouvrir l’application peut écrire et migrer les données.
+- Avant migration de données : prévoir une sauvegarde restaurable et un retour arrière.
+- Lire `docs/FEATURES.md` pour trouver les symboles/tests du domaine, pas tout `app.py`.
+- Lire `docs/ARCHITECTURE.md` pour les flux et `docs/DECISIONS.md` pour les contraintes.
+- `docs/ROADMAP.md` décrit uniquement le travail futur ; les archives ne sont pas normatives.
+- Ne pas annoncer l’anglais complet, un FDX sans perte ou un professeur IA disponible sans code et tests correspondants.
+- Pour le code : reproduire, modifier au minimum, exécuter les tests ciblés puis la suite complète.
+- Commande : `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q`.
+- Pytest est requis ; certains tests PDF demandent Poppler. Signaler tests ignorés/non exécutés.
+- Pour la documentation seule : vérifier liens, cohérence, conservation historique et `git diff --check` ; aucun lancement applicatif nécessaire.
+- Mettre à jour uniquement la source documentaire concernée, sans recopier l’état ailleurs.
+- Garder les consignes ici courtes ; ajouter les explications dans la documentation ciblée.
+- Faire un commit local cohérent après vérification ; ne pas pousser automatiquement.
+- Ne jamais inclure bases personnelles, secrets ou exports utilisateur dans Git ou un futur index MCP.

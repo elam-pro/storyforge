@@ -1,0 +1,51 @@
+# Architecture actuelle
+
+Vérifiée statiquement le 7 septembre 2026 sur le code applicatif 0.30.3. Ce document ne décrit pas une architecture déjà refactorisée.
+
+## Points d’entrée et dépendances
+
+`run_linux.sh` → `app.py:main` → `StoryForgeWindow` → `Database` et modules spécialisés.
+
+| Module | Responsabilité actuelle |
+| --- | --- |
+| `app.py` | Navigation, vues Qt, état partagé, règles métier, orchestration et SQL direct. |
+| `db.py` | Schéma, migrations, requêtes, sauvegarde SQLite, import/export de projet. |
+| `screenplay_model.py` | Blocs typés avec identifiants et document sérialisable, indépendant de Qt. |
+| `learning_content.py`, `content/sessions/` | Modèles et chargement des guides JSON. |
+| `script_export.py` | Parsing, FDX, PDF scénario. |
+| `pdf_export.py`, `report_export.py` | Manuel pédagogique et documents PDF. |
+| `theme.py`, `i18n.py` | Styles et traduction partielle. |
+| `genres.py`, `template_diagrams.py` | Ressources et rendus narratifs. |
+| `ai_service.py` | Compatibilité historique désactivée. |
+
+Le principal couplage est dans `StoryForgeWindow`, pas une boucle d’import entre les petits modules. Le métier et les accès SQL ne sont pas encore séparés en services par domaine.
+
+## Données et écritures
+
+- SQLite locale ; images en BLOB et préférences dans `settings`.
+- `Database.__init__` appelle l’initialisation et les migrations. La fenêtre possède aussi des migrations historiques.
+- `Database.run` valide chaque requête ; toutes les opérations composées ne sont pas transactionnelles.
+- `Database.import_project` remappe les identifiants, mais peut persister un import partiel en cas d’échec tardif.
+- Certains liens utilisent `target_type/target_id` : vérifier explicitement leur validité et leur appartenance au projet.
+- `backup_to` utilise l’API de sauvegarde SQLite. Git ne sauvegarde pas la base personnelle.
+
+## Scénario : représentations concurrentes
+
+L’éditeur Qt projette `ScreenplayDocument`. Le JSON est dans `script_meta.document_json` et le texte compatible dans `project_docs.content`.
+`_save_script` les écrit séparément ; `_load_script_document` peut préférer le texte historique différent. `_snapshot_script` conserve actuellement le texte, pas un instantané structuré complet.
+Ce sont des limites actuelles, pas une stratégie cible à recopier dans un nouvel éditeur.
+
+## Apprentissage
+
+Les guides chargés alimentent `guided_runs`, `guided_answers` et `guided_applications`. La maîtrise globale est dans `concept_mastery` ; des tables historiques restent maintenues pour compatibilité.
+Une application est unique par parcours/étape. Les méthodes de `StoryForgeWindow` assurent la liaison aux outils et le retour au guide. Ne pas créer un système parallèle sans examiner ces liens.
+
+## Navigation et effets de bord
+
+Les vues sont reconstruites avec des sauvegardes différées et attributs partagés. Les changements de page, timers et caches d’images demandent des tests conjoints.
+Terminer le guide initial peut régénérer le manuel PDF à la racine : ne pas exécuter ce parcours sur les données personnelles pendant un contrôle.
+
+## Contexte futur
+
+Aucun serveur MCP n’est implémenté. Un futur index devrait lire les sources autorisées, exclure bases/caches/exports/archives par défaut et citer fichier, symbole et révision. Il ne doit pas instancier `Database` pour lire le repository.
+Les extractions envisagées sont dans [ROADMAP.md](ROADMAP.md), pas réalisées ici.
