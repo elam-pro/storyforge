@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from learning_service import LearningService
 
 import csv
 import base64
@@ -2940,6 +2941,7 @@ class StoryForgeWindow(QMainWindow):
     def __init__(self, db_path: Path = DB_PATH):
         super().__init__()
         self.db = Database(Path(db_path))
+        self.learning_service = LearningService(self.db)
         set_language(self.db.setting("interface_language", "fr"))
         self._migrate_question_learning_flow()
         self._migrate_guided_runs()
@@ -4391,8 +4393,7 @@ class StoryForgeWindow(QMainWindow):
     def _learning_step(self, idx: int) -> None:
         if hasattr(self, "learning_draft"):
             self._save_learning_work(silent=True)
-        self.db.update_guided_run(self._guide_run_id, current_step=idx, status="ongoing")
-        self._mirror_legacy_guide_progress(idx, "en cours")
+        self.learning_service.move(self._guide_run_id, self._guide_session, idx)
         self.show_learning(run_id=self._guide_run_id)
 
     def _move_learning(self, target: int) -> None:
@@ -4400,56 +4401,17 @@ class StoryForgeWindow(QMainWindow):
         self._learning_step(target)
 
     def _save_learning_work(self, _checked: bool = False, silent: bool = False, status: str | None = None) -> None:
-        idx = self._learning_idx
-        session = self._guide_session
-        step = session.steps[idx]
-        draft = self.learning_draft.toPlainText().strip()
-        saved = self.db.ensure_guided_answer(self._guide_run_id, step.key, idx)
-        requested = {"terminé": "complete", "brouillon": "draft"}.get(status or "", status)
-        inferred = requested or ("complete" if saved["status"] == "complete" else "draft")
-        self.db.save_guided_answer(self._guide_run_id, step.key, idx, draft, inferred)
-        current_mastery = self.db.one(
-            "SELECT status,evidence FROM concept_mastery WHERE concept_key=?",
-            (step.concept_key,),
-        )
-        if (
-            current_mastery
-            and current_mastery["status"] == "acquis"
-            and current_mastery["evidence"] == draft
-        ):
-            mastery_status = "acquis"
-        else:
-            mastery_status = "en pratique" if draft else "découverte"
-        self.db.set_concept_mastery(
-            step.concept_key, step.concept_label, mastery_status, draft
-        )
-        run = self.db.guided_run(self._guide_run_id)
-        if run and run["legacy_session_key"]:
-            legacy = self.db.ensure_learning_work(run["legacy_session_key"], idx, step.concept_key)
-            self.db.save_learning_work(
-                run["legacy_session_key"],
-                idx,
-                step.concept_key,
-                draft,
-                legacy["feedback"],
-                legacy["revision"],
-                legacy["takeaway"],
-                legacy["mastery"],
-                "terminé" if inferred == "complete" else "brouillon",
-            )
-
+        self.learning_service.save_answer(
+            self._guide_run_id, self._guide_session, self._learning_idx,
+            self.learning_draft.toPlainText(), status)
         if not silent:
             self.save_state.setText("Réponse enregistrée localement")
             QTimer.singleShot(2200, lambda: self.save_state.setText(""))
 
     def _mark_learning_incomplete(self) -> None:
-        self._save_learning_work(silent=True, status="brouillon")
-        self.db.update_guided_run(
-            self._guide_run_id,
-            current_step=self._learning_idx,
-            status="ongoing",
-        )
-        self._mirror_legacy_guide_progress(self._learning_idx, "en cours")
+        self.learning_service.mark_incomplete(
+            self._guide_run_id, self._guide_session, self._learning_idx,
+            self.learning_draft.toPlainText())
         self.save_state.setText("Étape enregistrée comme non terminée")
         self.show_learning(run_id=self._guide_run_id)
 
@@ -4457,15 +4419,9 @@ class StoryForgeWindow(QMainWindow):
         if not self.learning_draft.toPlainText().strip():
             QMessageBox.information(self, "Une réponse suffit", "Écris simplement une réponse avant de continuer. Elle peut rester provisoire.")
             return
-        self._save_learning_work(silent=True, status="terminé")
-        finish = self._learning_idx == len(self._guide_session.steps) - 1
-        target = self._learning_idx if finish else self._learning_idx + 1
-        self.db.update_guided_run(
-            self._guide_run_id,
-            current_step=target,
-            status="completed" if finish else "ongoing",
-        )
-        self._mirror_legacy_guide_progress(target, "terminée" if finish else "en cours")
+        finish = self.learning_service.complete_step(
+            self._guide_run_id, self._guide_session, self._learning_idx,
+            self.learning_draft.toPlainText())
         if finish and self._guide_session.key == LEARNING_SESSION.key:
             self._write_cumulative_manual()
         self.show_learning(run_id=self._guide_run_id)
@@ -4483,15 +4439,7 @@ class StoryForgeWindow(QMainWindow):
         self.show_learning(run_id=self._guide_run_id)
 
     def _mirror_legacy_guide_progress(self, step_index: int, status: str) -> None:
-        run = self.db.guided_run(self._guide_run_id)
-        if not run or not run["legacy_session_key"]:
-            return
-        self.db.run(
-            """INSERT INTO progress(session_key,step_index,status,updated_at)
-            VALUES(?,?,?,?) ON CONFLICT(session_key) DO UPDATE SET
-            step_index=excluded.step_index,status=excluded.status,updated_at=excluded.updated_at""",
-            (run["legacy_session_key"], step_index, status, NOW()),
-        )
+        self.learning_service.mirror_progress(self._guide_run_id, step_index, status)
 
     def _learning_seed_recap(self) -> str:
         labels = {

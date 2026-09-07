@@ -26,6 +26,8 @@ Vérification statique : 7 septembre 2026, code 0.30.3, base Git `13ed5f5`. « P
 
 ## Garanties et limites de validation
 
+La sauvegarde et la progression passent par `learning_service.py:LearningService`. `tests/test_learning_service.py` vérifie sans Qt les miroirs historiques, la maîtrise, la fin/réouverture, l’isolation des réponses et l’annulation sur erreur. La sélection des cibles et les preuves d’application restent pilotées par l’interface.
+
 Le contrôle antérieur V0.30.3 rapportait 59 tests réussis. Ce résultat n’est pas une nouvelle exécution lors de la clarification documentaire et ne mesure pas la couverture.
 Qt hors écran ne remplace pas un contrôle Fedora réel. `tests/test_atomic_persistence.py` protège désormais les échecs d’import/sauvegarde, transactions imbriquées, restauration structurée, échanges de versions et migration additive. Gros projets et fidélité Unicode/FDX restent à approfondir.
 

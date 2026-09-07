@@ -12,13 +12,14 @@ Vérifiée statiquement le 7 septembre 2026 sur le code applicatif 0.30.3. Ce do
 | `db.py` | Schéma, migrations, requêtes, sauvegarde SQLite, import/export de projet. |
 | `screenplay_model.py` | Blocs typés avec identifiants et document sérialisable, indépendant de Qt. |
 | `learning_content.py`, `content/sessions/` | Modèles et chargement des guides JSON. |
+| `learning_service.py` | Sauvegarde des réponses, progression, fin/réouverture d’étape et miroir historique, sans Qt. |
 | `script_export.py` | Parsing, FDX, PDF scénario. |
 | `pdf_export.py`, `report_export.py` | Manuel pédagogique et documents PDF. |
 | `theme.py`, `i18n.py` | Styles et traduction partielle. |
 | `genres.py`, `template_diagrams.py` | Ressources et rendus narratifs. |
 | `ai_service.py` | Shim désactivé conservé pour anciens imports ; aucun appel depuis l’interface. |
 
-Le principal couplage est dans `StoryForgeWindow`, pas une boucle d’import entre les petits modules. Le métier et les accès SQL ne sont pas encore séparés en services par domaine.
+Le principal couplage reste dans `StoryForgeWindow`. Une première extraction vers `LearningService` sépare la persistance et la progression pédagogique ; les autres domaines restent majoritairement dans la fenêtre.
 
 ## Données et écritures
 
@@ -40,6 +41,7 @@ Les anciennes versions textuelles sont reconstruites : leurs types exacts et mé
 
 Les guides chargés alimentent `guided_runs`, `guided_answers` et `guided_applications`. La maîtrise globale est dans `concept_mastery` ; des tables historiques restent maintenues pour compatibilité.
 Une application est unique par parcours/étape. Les méthodes de `StoryForgeWindow` assurent la liaison aux outils et le retour au guide. Ne pas créer un système parallèle sans examiner ces liens.
+`LearningService` reçoit la session, le parcours, l’indice et le texte explicitement : aucun widget ni état de fenêtre. Réponses, maîtrise et miroir historique sont sauvegardés ensemble ; terminer une étape inclut la progression dans la même transaction. Les règles existantes sont conservées : acquis reste acquis si la preuve est inchangée, sinon une réponse non vide revient à en pratique. La maîtrise reste globale ; cette extraction ne crée pas de nouvelles preuves par projet.
 
 ## Navigation et effets de bord
 
