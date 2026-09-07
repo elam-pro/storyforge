@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -12,7 +13,20 @@ class Database:
         self.path = path
         self.conn = sqlite3.connect(path)
         self.conn.row_factory = sqlite3.Row
+        self._transaction_depth = 0
         self.conn.execute("PRAGMA foreign_keys=ON")
+        # Back up an existing schema before the additive version migration.
+        columns = {row[1] for row in self.conn.execute('PRAGMA table_info(doc_versions)')}
+        if columns and 'snapshot_json' not in columns:
+            backup_dir = Path(path).parent / 'backups'
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+            backup_path = backup_dir / f'{Path(path).stem}_before_structured_versions_{stamp}.db'
+            destination = sqlite3.connect(backup_path)
+            try:
+                self.conn.backup(destination)
+            finally:
+                destination.close()
         self._init()
 
     def _init(self):
@@ -880,12 +894,33 @@ class Database:
                 "INSERT INTO settings(key,value) VALUES(?,?)",
                 (migration_key, "1"),
             )
+        if 'snapshot_json' not in {row[1] for row in self.conn.execute('PRAGMA table_info(doc_versions)')}:
+            self.conn.execute("ALTER TABLE doc_versions ADD COLUMN snapshot_json TEXT NOT NULL DEFAULT ''")
         self.conn.commit()
 
     def q(self, sql, params=()): return self.conn.execute(sql, params).fetchall()
     def one(self, sql, params=()): return self.conn.execute(sql, params).fetchone()
     def run(self, sql, params=()):
-        cur=self.conn.execute(sql, params); self.conn.commit(); return cur
+        cur = self.conn.execute(sql, params)
+        if not self._transaction_depth:
+            self.conn.commit()
+        return cur
+
+    @contextmanager
+    def transaction(self):
+        """Nestable savepoints; helpers must not commit the caller's work."""
+        name = f'storyforge_{self._transaction_depth}'
+        self.conn.execute(f'SAVEPOINT {name}')
+        self._transaction_depth += 1
+        try:
+            yield
+            self.conn.execute(f'RELEASE SAVEPOINT {name}')
+        except BaseException:
+            self.conn.execute(f'ROLLBACK TO SAVEPOINT {name}')
+            self.conn.execute(f'RELEASE SAVEPOINT {name}')
+            raise
+        finally:
+            self._transaction_depth -= 1
     def setting(self, key, default=""):
         row=self.one("SELECT value FROM settings WHERE key=?",(key,)); return row[0] if row else default
     def set_setting(self,key,value):
@@ -909,7 +944,7 @@ class Database:
             name = str(raw_name).strip().lstrip("#").strip()
             if name and name.casefold() not in {value.casefold() for value in cleaned}:
                 cleaned.append(name)
-        with self.conn:
+        with self.transaction():
             self.conn.execute(
                 """DELETE FROM entity_tags WHERE target_type=? AND entity_id=?
                 AND tag_id IN (SELECT id FROM tags WHERE project_id=?)""",
@@ -971,9 +1006,61 @@ class Database:
         return self.one("SELECT * FROM project_docs WHERE project_id=? AND doc_type=?",(pid,doc_type))
     def save_doc(self,pid,doc_type,content):
         self.run("UPDATE project_docs SET content=?,updated_at=? WHERE project_id=? AND doc_type=?",(content,NOW(),pid,doc_type))
-    def snapshot(self,pid,doc_type,content,label=None):
+    def snapshot(self,pid,doc_type,content,label=None,snapshot_json=""):
         n=self.one("SELECT COUNT(*) c FROM doc_versions WHERE project_id=? AND doc_type=?",(pid,doc_type))[0]+1
-        self.run("INSERT INTO doc_versions(project_id,doc_type,label,content,created_at) VALUES(?,?,?,?,?)",(pid,doc_type,label or f"V{n}",content,NOW()))
+        return self.run("INSERT INTO doc_versions(project_id,doc_type,label,content,created_at,snapshot_json) VALUES(?,?,?,?,?,?)",(pid,doc_type,label or f"V{n}",content,NOW(),snapshot_json)).lastrowid
+    def save_screenplay(self, pid, document_json, *, title_meta=None):
+        from screenplay_model import ScreenplayDocument
+        document = ScreenplayDocument.from_json(document_json)
+        if document is None:
+            raise ValueError('Scénario structuré invalide')
+        with self.transaction():
+            project = self.one('SELECT title FROM projects WHERE id=?', (pid,))
+            if not project:
+                raise ValueError('Projet introuvable')
+            self.ensure_doc(pid, 'script', 'Scénario')
+            self.save_doc(pid, 'script', document.to_plain_text())
+            self.run('INSERT OR IGNORE INTO script_meta(project_id,title,updated_at) VALUES(?,?,?)',
+                     (pid, project['title'], NOW()))
+            self.run('UPDATE script_meta SET document_json=?,updated_at=? WHERE project_id=?',
+                     (document.to_json(), NOW(), pid))
+            if title_meta is not None:
+                fields = ('title', 'author', 'contact', 'draft_date', 'based_on', 'copyright_notice', 'include_title_page')
+                for field in fields:
+                    if field in title_meta:
+                        self.run(f'UPDATE script_meta SET {field}=? WHERE project_id=?', (title_meta[field], pid))
+            self.run("UPDATE projects SET current_document='script' WHERE id=?", (pid,))
+
+    def snapshot_screenplay(self, pid, label=None):
+        with self.transaction():
+            meta = self.one('SELECT * FROM script_meta WHERE project_id=?', (pid,))
+            doc = self.one("SELECT content FROM project_docs WHERE project_id=? AND doc_type='script'", (pid,))
+            if not meta or not doc:
+                raise ValueError('Scénario introuvable')
+            payload = json.dumps({'format': 'storyforge-script-snapshot-v1', 'meta': dict(meta)}, ensure_ascii=False)
+            return self.snapshot(pid, 'script', doc['content'], label, payload)
+
+    def restore_screenplay_version(self, pid, version_id):
+        from screenplay_model import ScreenplayDocument
+        with self.transaction():
+            row = self.one("SELECT * FROM doc_versions WHERE id=? AND project_id=? AND doc_type='script'", (version_id, pid))
+            if not row:
+                raise ValueError('Version de scénario introuvable')
+            meta = None
+            if row['snapshot_json']:
+                payload = json.loads(row['snapshot_json'])
+                if payload.get('format') != 'storyforge-script-snapshot-v1':
+                    raise ValueError('Format de version inconnu')
+                meta = payload['meta']
+                document = ScreenplayDocument.from_json(meta['document_json'])
+                if document is None:
+                    raise ValueError('Version structurée invalide')
+            else:
+                document = ScreenplayDocument.from_legacy_text(row['content'], project_id=pid)
+            if self.one('SELECT project_id FROM script_meta WHERE project_id=?', (pid,)):
+                self.snapshot_screenplay(pid, 'Avant restauration')
+            self.save_screenplay(pid, document.to_json(), title_meta=meta)
+
     def ensure_learning_work(self, session_key, step_index, concept_key):
         previous = self.one(
             "SELECT answer FROM learning_answers WHERE session_key=? AND step_index=?",
@@ -1162,7 +1249,7 @@ class Database:
             (title, purpose, events, consequence, NOW(), block_id),
         )
     def reorder_sequence_blocks(self, project_id, ordered_ids):
-        with self.conn:
+        with self.transaction():
             for position, block_id in enumerate(ordered_ids):
                 self.conn.execute(
                     "UPDATE sequence_blocks SET position=?,updated_at=? WHERE id=? AND project_id=?",
@@ -1216,7 +1303,7 @@ class Database:
                 (item_type, title, summary, function_note, consequence, NOW(), item_id),
             )
     def save_outline_structure(self, project_id, placements):
-        with self.conn:
+        with self.transaction():
             for item_id, parent_id, position in placements:
                 self.conn.execute(
                     """UPDATE outline_items SET parent_id=?,position=?,updated_at=?
@@ -1522,7 +1609,26 @@ class Database:
             reference["image_data"] = bytes(reference["image_data"]).hex()
         path.write_text(json.dumps({"format":"storyforge-project-v1","project":p,"docs":docs,"questions":qs,"story_map":story_map,"synopsis_answers":synopsis_answers,"story_map_nodes":map_nodes,"story_map_links":map_links,"sequence_blocks":sequence_blocks,"scene_rows":scene_rows,"outline_items":outline_items,"development_status":development_status,"characters":characters,"world_profile":world_profile,"world_rules":world_rules,"world_terms":world_terms,"theme_profile":theme_profile,"theme_positions":theme_positions,"theme_position_characters":theme_position_characters,"theme_motifs":theme_motifs,"theme_motif_locations":theme_motif_locations,"theme_motif_events":theme_motif_events,"theme_motif_images":theme_motif_images,"conflicts":conflicts,"conflict_characters":conflict_characters,"conflict_groups":conflict_groups,"conflict_scenes":conflict_scenes,"conflict_story_nodes":conflict_story_nodes,"conflict_events":conflict_events,"conflict_theme_positions":conflict_theme_positions,"character_arcs":character_arcs,"character_arc_scenes":character_arc_scenes,"character_arc_story_nodes":character_arc_story_nodes,"character_arc_events":character_arc_events,"character_arc_conflicts":character_arc_conflicts,"hook_profile":hook_profile,"story_promises":story_promises,"story_promise_story_nodes":story_promise_story_nodes,"story_promise_scenes":story_promise_scenes,"story_moments":story_moments,"story_moment_story_nodes":story_moment_story_nodes,"story_moment_sequences":story_moment_sequences,"story_moment_scenes":story_moment_scenes,"story_moment_events":story_moment_events,"story_moment_conflicts":story_moment_conflicts,"world_rule_characters":world_rule_characters,"world_rule_groups":world_rule_groups,"world_rule_events":world_rule_events,"world_rule_images":world_rule_images,"relationship_maps":relationship_maps,"relationship_map_nodes":relationship_map_nodes,"character_relationships":relationships,"character_groups":character_groups,"character_group_members":character_group_members,"character_references":character_references,"character_custom_fields":character_custom_fields,"form_templates":form_templates,"form_template_sections":form_template_sections,"form_template_fields":form_template_fields,"project_form_templates":project_form_templates,"form_field_values":form_field_values,"tags":tags,"entity_tags":entity_tags,"scene_characters":scene_characters,"scene_events":scene_events,"scene_story_nodes":scene_story_nodes,"scene_theme_positions":scene_theme_positions,"scene_theme_motifs":scene_theme_motifs,"story_map_node_characters":map_characters,"timeline_tracks":timeline_tracks,"timeline_events":timeline_events,"timeline_event_characters":timeline_event_characters,"script_meta":script_meta,"images":images,"locations":locations,"location_characters":location_characters,"location_events":location_events,"location_scenes":location_scenes,"location_images":location_images,"versions":versions,"guided_runs":guided_runs,"guided_answers":guided_answers,"guided_applications":guided_applications},ensure_ascii=False,indent=2),encoding="utf-8")
     def import_project(self,path:Path):
-        data=json.loads(path.read_text(encoding="utf-8")); p=data["project"]
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or not isinstance(data.get('project'), dict):
+            raise ValueError('Projet StoryForge invalide')
+        if data.get('format', 'storyforge-project-v1') != 'storyforge-project-v1':
+            raise ValueError('Format de projet non pris en charge')
+        if not isinstance(data['project'].get('title'), str):
+            raise ValueError('Titre de projet invalide')
+        for key, value in data.items():
+            if key in {'format', 'project'}:
+                continue
+            if key in {'script_meta', 'world_profile', 'theme_profile', 'hook_profile'}:
+                if value is not None and not isinstance(value, dict):
+                    raise ValueError(f'Objet invalide : {key}')
+            elif not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
+                raise ValueError(f'Collection invalide : {key}')
+        with self.transaction():
+            return self._import_project_data(data)
+
+    def _import_project_data(self, data):
+        p = data['project']
         fields=["created_at","title","stage","protagonist","desire","objective","opposition","stakes","change_note","ending","current_document","main_problem","next_decision","open_questions","project_type","story_format","target_duration","start_mode","project_status","archived","updated_at"]
         defaults={
             "created_at": NOW(), "stage": "Idée", "project_type": "film", "story_format": "free",
@@ -2397,6 +2503,9 @@ class Database:
                     VALUES(?,?,?)""",
                     (tag_id, target_type, entity_id),
                 )
+        for version in data.get('versions', []):
+            self.snapshot(pid, version['doc_type'], version.get('content', ''),
+                          version.get('label'), version.get('snapshot_json', ''))
         imported_runs = {}
         for run in data.get("guided_runs", []):
             imported_run_id = self.create_guided_run(

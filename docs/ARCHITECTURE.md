@@ -24,16 +24,17 @@ Le principal couplage est dans `StoryForgeWindow`, pas une boucle d’import ent
 
 - SQLite locale ; images en BLOB et préférences dans `settings`.
 - `Database.__init__` appelle l’initialisation et les migrations. La fenêtre possède aussi des migrations historiques.
-- `Database.run` valide chaque requête ; toutes les opérations composées ne sont pas transactionnelles.
-- `Database.import_project` remappe les identifiants, mais peut persister un import partiel en cas d’échec tardif.
+- `Database.run` valide les requêtes isolées ; `transaction` protège les opérations composées avec des savepoints imbriqués.
+- `Database.import_project` valide format et forme des collections puis remappe les identifiants dans une transaction. Un échec annule les écritures de cet import.
 - Certains liens utilisent `target_type/target_id` : vérifier explicitement leur validité et leur appartenance au projet.
 - `backup_to` utilise l’API de sauvegarde SQLite. Git ne sauvegarde pas la base personnelle.
+- Avant l’ajout de `doc_versions.snapshot_json` à une base existante, le constructeur crée une sauvegarde SQLite dans `backups/`, suffixée `before_structured_versions`. Les bases neuves ne déclenchent pas cette sauvegarde. Pour un retour au code antérieur, restaurer cette copie après fermeture de l’application ; les modifications ultérieures doivent être préservées séparément.
 
 ## Scénario : représentations concurrentes
 
 L’éditeur Qt projette `ScreenplayDocument`. Le JSON est dans `script_meta.document_json` et le texte compatible dans `project_docs.content`.
-`_save_script` les écrit séparément ; `_load_script_document` peut préférer le texte historique différent. `_snapshot_script` conserve actuellement le texte, pas un instantané structuré complet.
-Ce sont des limites actuelles, pas une stratégie cible à recopier dans un nouvel éditeur.
+`_save_script` délègue à `Database.save_screenplay` pour sauvegarder atomiquement texte et JSON. `_load_script_document` garde sa compatibilité avec le texte historique. Les nouvelles versions stockent structure et page de garde dans `snapshot_json`, colonne ajoutée sans suppression. Réécriture permet une restauration confirmée avec version de sécurité. Les versions sont également réimportées.
+Les anciennes versions textuelles sont reconstruites : leurs types exacts et métadonnées historiques ne sont pas récupérables.
 
 ## Apprentissage
 

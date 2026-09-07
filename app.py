@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+
 import csv
 import base64
 import json
@@ -19184,25 +19186,19 @@ class StoryForgeWindow(QMainWindow):
         if hasattr(self, "script_save_timer"):
             self.script_save_timer.stop()
         self._sync_script_document_from_editor()
-        self.db.ensure_doc(self.active_project, "script", "Scénario")
         document = getattr(self, "script_document", None)
-        content = document.to_plain_text() if isinstance(document, ScreenplayDocument) else editor.toPlainText()
-        self.db.save_doc(self.active_project, "script", content)
-        self._script_meta()
-        if isinstance(document, ScreenplayDocument):
-            self.db.run(
-                "UPDATE script_meta SET document_json=?,updated_at=? WHERE project_id=?",
-                (document.to_json(), NOW(), self.active_project),
-            )
-            self._script_document_dirty = False
-        self.db.run("UPDATE projects SET current_document='script' WHERE id=?", (self.active_project,))
+        if not isinstance(document, ScreenplayDocument):
+            document = ScreenplayDocument.from_legacy_text(editor.toPlainText(), project_id=self.active_project)
+        self.db.save_screenplay(self.active_project, document.to_json())
+        self._script_document_dirty = False
         if not silent:
             self.save_state.setText("Scénario enregistré")
             QTimer.singleShot(2400, lambda: self.save_state.setText(""))
 
     def _snapshot_script(self) -> None:
-        self._save_script(silent=True)
-        self.db.snapshot(self.active_project, "script", self.script_text.toPlainText())
+        with self.db.transaction():
+            self._save_script(silent=True)
+            self.db.snapshot_screenplay(self.active_project)
         self.save_state.setText("Version du scénario créée")
         QTimer.singleShot(2400, lambda: self.save_state.setText(""))
 
@@ -19781,6 +19777,7 @@ class StoryForgeWindow(QMainWindow):
         self.version_text = make_editor(350)
         self.version_text.setReadOnly(True)
         right_box.addWidget(self.version_text, 1)
+        right_box.addWidget(make_button('Restaurer ce scénario…', 'secondary', self._restore_script_version))
         body.addWidget(right, 1)
         page.addLayout(body, 1)
 
@@ -19792,6 +19789,24 @@ class StoryForgeWindow(QMainWindow):
         row = self.db.one("SELECT * FROM doc_versions WHERE id=?", (version_id,))
         if row:
             self.version_text.setPlainText(row["content"])
+
+    def _restore_script_version(self):
+        selected = self.version_tree.selectedItems()
+        if not selected:
+            return
+        version_id = int(selected[0].data(0, Qt.ItemDataRole.UserRole))
+        row = self.db.one("SELECT doc_type FROM doc_versions WHERE id=? AND project_id=?", (version_id, self.active_project))
+        if not row or row['doc_type'] != 'script':
+            QMessageBox.information(self, 'Restauration', 'Sélectionne une version de scénario.')
+            return
+        if QMessageBox.question(self, 'Restaurer le scénario', 'Remplacer le scénario actuel ? Une version de sécurité sera conservée. Les anciennes versions textuelles sont reconstruites sans leurs métadonnées historiques.') != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.db.restore_screenplay_version(self.active_project, version_id)
+        except (ValueError, KeyError, sqlite3.Error) as exc:
+            QMessageBox.warning(self, 'Restauration impossible', str(exc))
+            return
+        self.show_script_editor()
 
     # ---------- Journey ----------
 
