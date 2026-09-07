@@ -4268,34 +4268,17 @@ class StoryForgeWindow(QMainWindow):
         layout.addWidget(card)
 
     def _set_learning_mastery(self, status: str) -> None:
-        run = self.db.guided_run(self._guide_run_id)
-        if not run:
+        if not self.db.guided_run(self._guide_run_id):
             return
-        step = self._guide_session.steps[self._learning_idx]
-        application = self.db.guided_application(run["id"], step.key)
-        if status == "acquis" and not application:
-            QMessageBox.information(
-                self,
-                "Application nécessaire",
-                "Ouvre d’abord l’outil du projet et confronte ta réponse au travail réel.",
-            )
+        try:
+            self.learning_service.set_mastery(
+                self._guide_run_id, self._guide_session, self._learning_idx,
+                self.learning_draft.toPlainText(), status)
+        except ValueError as exc:
+            QMessageBox.information(self, "Application nécessaire", str(exc))
             return
-        self._save_learning_work(silent=True)
-        evidence = self.learning_draft.toPlainText().strip()
-        self.db.set_concept_mastery(step.concept_key, step.concept_label, status, evidence)
-        if application:
-            self.db.save_guided_application(
-                run["id"],
-                step.key,
-                int(application["project_id"]),
-                application["target_type"],
-                int(application["target_id"] or 0),
-                application["target_field"],
-                status,
-                evidence,
-            )
         self.save_state.setText(f"Notion · {status}")
-        self.show_learning(run_id=run["id"])
+        self.show_learning(run_id=self._guide_run_id)
 
     def _open_learning_tool(self, _checked: bool = False) -> None:
         run = self.db.guided_run(self._guide_run_id)
@@ -4306,25 +4289,11 @@ class StoryForgeWindow(QMainWindow):
         if not link:
             return
         view, document, _destination, target_type, target_field, _instruction = link
-        self._save_learning_work(silent=True)
         target_combo = getattr(self, "learning_target_combo", None)
         target_id = int(target_combo.currentData() or 0) if isinstance(target_combo, QComboBox) else 0
-        evidence = self.learning_draft.toPlainText().strip()
-        self.db.save_guided_application(
-            run["id"],
-            step.key,
-            int(run["project_id"]),
-            target_type,
-            target_id,
-            target_field,
-            "en pratique",
-            evidence,
-        )
-        self.db.set_concept_mastery(step.concept_key, step.concept_label, "en pratique", evidence)
-        self.db.set_setting("learning_return_run", str(run["id"]))
-        self.db.set_setting("learning_return_step", str(self._learning_idx))
-        self.active_project = int(run["project_id"])
-        self.db.set_setting("active_project", str(self.active_project))
+        self.active_project = self.learning_service.apply_to_tool(
+            run["id"], self._guide_session, self._learning_idx,
+            self.learning_draft.toPlainText(), target_type, target_id, target_field)
         self._update_project_chips()
         self._navigate_learning_destination(view, document, target_type, target_id, target_field)
 

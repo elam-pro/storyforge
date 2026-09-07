@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from db import Database
+from db import Database, NOW
 from learning_content import load_session
 from learning_service import LearningService
 
@@ -74,3 +74,67 @@ def test_two_runs_keep_answers_separate(learning):
     assert db.one('SELECT answer FROM guided_answers WHERE run_id=?', (first,))[0] == 'Premier'
     assert db.one('SELECT answer FROM guided_answers WHERE run_id=?', (second,))[0] == 'Second'
     assert db.one('SELECT draft FROM learning_work')[0] == 'Premier'
+
+
+def attach_project(db, run):
+    pid = db.run('INSERT INTO projects(created_at,title,stage) VALUES(?,?,?)', (NOW(), 'Projet', 'Idée')).lastrowid
+    db.update_guided_run(run, project_id=pid)
+    return pid
+
+
+def test_application_and_explicit_mastery(learning):
+    db, service, session, run = learning
+    pid = attach_project(db, run)
+    assert service.apply_to_tool(run, session, 0, ' Preuve ', 'project', 0, 'desire') == pid
+    application = db.guided_application(run, session.steps[0].key)
+    assert application['evidence'] == 'Preuve'
+    assert application['status'] == 'en pratique'
+    assert db.setting('learning_return_run') == str(run)
+    assert db.setting('learning_return_step') == '0'
+    assert db.setting('active_project') == str(pid)
+    service.set_mastery(run, session, 0, 'Preuve affinée', 'acquis')
+    application = db.guided_application(run, session.steps[0].key)
+    assert application['status'] == 'acquis'
+    assert application['evidence'] == 'Preuve affinée'
+    assert application['target_field'] == 'desire'
+    assert db.one('SELECT status FROM concept_mastery')[0] == 'acquis'
+    service.set_mastery(run, session, 0, 'Preuve affinée', 'à revoir')
+    assert db.guided_application(run, session.steps[0].key)['status'] == 'à revoir'
+
+
+def test_mastery_requires_application_and_application_requires_project(learning):
+    db, service, session, run = learning
+    with pytest.raises(ValueError):
+        service.set_mastery(run, session, 0, 'Essai', 'acquis')
+    with pytest.raises(ValueError):
+        service.apply_to_tool(run, session, 0, 'Essai', 'project', 0, '')
+    assert db.one('SELECT COUNT(*) FROM guided_answers')[0] == 0
+
+
+def test_application_failure_rolls_back_context_and_evidence(learning, monkeypatch):
+    db, service, session, run = learning
+    attach_project(db, run)
+    original = db.set_setting
+    def fail(key, value):
+        if key == 'active_project':
+            raise RuntimeError('failure')
+        original(key, value)
+    monkeypatch.setattr(db, 'set_setting', fail)
+    with pytest.raises(RuntimeError):
+        service.apply_to_tool(run, session, 0, 'Essai', 'project', 0, '')
+    assert db.guided_application(run, session.steps[0].key) is None
+    assert db.setting('learning_return_run', 'missing') == 'missing'
+    assert db.one('SELECT COUNT(*) FROM guided_answers')[0] == 0
+
+
+def test_mastery_failure_preserves_previous_evidence(learning, monkeypatch):
+    db, service, session, run = learning
+    attach_project(db, run)
+    service.apply_to_tool(run, session, 0, 'Avant', 'project', 0, '')
+    def fail(*args, **kwargs):
+        raise RuntimeError('failure')
+    monkeypatch.setattr(db, 'save_guided_application', fail)
+    with pytest.raises(RuntimeError):
+        service.set_mastery(run, session, 0, 'Après', 'acquis')
+    assert db.one('SELECT answer FROM guided_answers')[0] == 'Avant'
+    assert db.one('SELECT status FROM concept_mastery')[0] == 'en pratique'

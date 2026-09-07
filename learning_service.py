@@ -1,7 +1,7 @@
 """Learning persistence and progression, independent from Qt widgets.
 
 Keep existing mastery semantics and legacy mirrors during this extraction.
-Application target selection and navigation remain in the UI for now.
+Application target selection and navigation remain in the UI.
 """
 from db import NOW, Database
 from learning_content import LearningSession
@@ -35,6 +35,37 @@ class LearningService:
                 self.db.save_learning_work(run['legacy_session_key'], index, step.concept_key,
                                           draft, legacy['feedback'], legacy['revision'], legacy['takeaway'],
                                           legacy['mastery'], 'terminé' if inferred == 'complete' else 'brouillon')
+
+    def apply_to_tool(self, run_id, session, index, draft, target_type, target_id, target_field):
+        """Record evidence and return context together, before UI navigation."""
+        with self.db.transaction():
+            run, step = self._step(run_id, session, index)
+            if not run['project_id']:
+                raise ValueError('Un projet est nécessaire pour appliquer cette notion')
+            self.save_answer(run_id, session, index, draft)
+            evidence = draft.strip()
+            project_id = int(run['project_id'])
+            self.db.save_guided_application(run_id, step.key, project_id, target_type,
+                                           target_id, target_field, 'en pratique', evidence)
+            self.db.set_concept_mastery(step.concept_key, step.concept_label, 'en pratique', evidence)
+            self.db.set_setting('learning_return_run', str(run_id))
+            self.db.set_setting('learning_return_step', str(index))
+            self.db.set_setting('active_project', str(project_id))
+            return project_id
+
+    def set_mastery(self, run_id, session, index, draft, status):
+        with self.db.transaction():
+            run, step = self._step(run_id, session, index)
+            application = self.db.guided_application(run_id, step.key)
+            if status == 'acquis' and not application:
+                raise ValueError('Ouvre d’abord l’outil du projet et confronte ta réponse au travail réel.')
+            self.save_answer(run_id, session, index, draft)
+            evidence = draft.strip()
+            self.db.set_concept_mastery(step.concept_key, step.concept_label, status, evidence)
+            if application:
+                self.db.save_guided_application(run_id, step.key, int(application['project_id']),
+                                               application['target_type'], int(application['target_id'] or 0),
+                                               application['target_field'], status, evidence)
 
     def mirror_progress(self, run_id, index, status):
         run = self.db.guided_run(run_id)
