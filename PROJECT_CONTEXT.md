@@ -12,8 +12,9 @@ Ce fichier est la mémoire opérationnelle du projet. Il complète l’historiqu
 - Dossier de travail unique : `/home/elam/Documents/Test/storyforge_desktop_v051`
 - Interface : PySide6, application locale, sans IA obligatoire, sans abonnement et sans synchronisation distante.
 - Base de données locale : SQLite (`storyforge.db`, ignorée par Git car elle contient les données de travail).
-- Version déclarée dans `app.py` : `0.30.2`.
-- `README.md` et `RELEASE_NOTES.md` suivent la version visible courante `0.30.2`.
+- Version déclarée dans `app.py` : `0.30.3`.
+- `README.md` et `RELEASE_NOTES.md` suivent la version visible courante `0.30.3`.
+- V0.30.3 : marges de Rechercher/Vue d’ensemble/Modèles de fiches corrigées ; page du script centrée ; popup hors de la ligne ; images personnalisées des templates intégrées dans les settings SQLite (`template_image_<key>`).
 - État détaillé et travaux non terminés : `ROADMAP_REMAINING.md`. Ne pas annoncer l’anglais intégral ni tous les schémas spécifiques comme terminés.
 
 ## 2. Règles de travail à respecter
@@ -73,7 +74,7 @@ Tests complets :
 ```
 
 La suite V0.30.2 inclut les tests de préfixes au clavier, scènes répétées, langue, navigation et PDF multipage (Poppler requis pour le test d’extraction).
-Dernière exécution complète : **57 passed**. Contrôle visuel du scénario, des genres, des templates et d’un rapport PDF multipage sur une base temporaire, sans utiliser la base personnelle.
+Dernière exécution complète (V0.30.3) : **59 passed**. Tests des marges, du centrage, du popup hors de la ligne et de la persistance des images de templates. Contrôle visuel des pages Recherche et Vue d’ensemble sur une base temporaire, sans utiliser la base personnelle. Les contrôles PDF, genres et templates de V0.30.2 restent couverts par la suite.
 
 Contrôles Git recommandés :
 

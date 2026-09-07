@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import base64
 import json
 import math
 import mimetypes
@@ -21,6 +22,9 @@ from pathlib import Path
 from xml.etree.ElementTree import ParseError
 
 from PySide6.QtCore import (
+    QByteArray,
+    QBuffer,
+    QIODevice,
     QPoint,
     QPointF,
     QRectF,
@@ -33,6 +37,7 @@ from PySide6.QtCore import (
     Signal,
 )
 from PySide6.QtGui import (
+    QImageReader,
     QBrush,
     QColor,
     QDesktopServices,
@@ -106,7 +111,7 @@ from screenplay_model import BlockType, ScreenplayDocument
 from theme import DARK, LIGHT, Palette, stylesheet
 
 APP_NAME = "StoryForge"
-APP_VERSION = "0.30.2"
+APP_VERSION = "0.30.3"
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get("STORYFORGE_DB_PATH", BASE_DIR / "storyforge.db"))
 IDEA_ATTACHMENT_LIMIT = 25 * 1024 * 1024
@@ -8737,7 +8742,7 @@ class StoryForgeWindow(QMainWindow):
     # ---------- Global search and tags ----------
 
     def show_search(self) -> None:
-        page = self._begin_page("Recherche", "search", compact=True)
+        page = self._begin_page("Recherche", "search")
         self._page_header(
             page,
             "Retrouver et croiser",
@@ -15717,7 +15722,7 @@ class StoryForgeWindow(QMainWindow):
     # ---------- Coordinated story views ----------
 
     def show_story_overview(self) -> None:
-        page = self._begin_page("Vue d’ensemble", "overview", compact=True)
+        page = self._begin_page("Vue d’ensemble", "overview")
         if not self.active_project:
             page.addWidget(make_label("Crée ou sélectionne d’abord un projet.", "Muted"))
             page.addStretch()
@@ -15922,7 +15927,12 @@ class StoryForgeWindow(QMainWindow):
         box.addWidget(self.overview_script_summary)
         self.overview_script_excerpt = make_editor(240)
         self.overview_script_excerpt.setReadOnly(True)
-        box.addWidget(self.overview_script_excerpt, 1)
+        self.overview_script_excerpt.setMaximumWidth(820)
+        script_page_row = QHBoxLayout()
+        script_page_row.addStretch(1)
+        script_page_row.addWidget(self.overview_script_excerpt, 20)
+        script_page_row.addStretch(1)
+        box.addLayout(script_page_row, 1)
         script_actions = QHBoxLayout()
         script_actions.addWidget(
             make_button("Ouvrir l’Éditeur de scripts", "primary", self.show_script_editor)
@@ -18380,6 +18390,25 @@ class StoryForgeWindow(QMainWindow):
         cursor_rect = editor.cursorRect()
         cursor_rect.setWidth(420)
         completer.complete(cursor_rect)
+        self._position_script_completion_popup()
+
+    def _position_script_completion_popup(self) -> None:
+        editor = self.script_text
+        popup = self.script_scene_completer.popup()
+        # QTextEdit.cursorRect is viewport-relative, whereas QCompleter expects
+        # widget coordinates. Position explicitly to include the styled padding.
+        cursor = editor.cursorRect()
+        top = editor.viewport().mapToGlobal(cursor.topLeft())
+        bottom = editor.viewport().mapToGlobal(cursor.bottomLeft())
+        screen = editor.screen().availableGeometry()
+        width = min(420, screen.width())
+        height = min(popup.sizeHintForRow(0) * min(6, self.script_scene_completer.completionCount()) + 8, 200)
+        height = max(35, height)
+        y = bottom.y() + 8
+        if y + height > screen.bottom():
+            y = top.y() - height - 8
+        x = max(screen.left(), min(bottom.x(), screen.right() - width + 1))
+        popup.setGeometry(x, y, width, height)
 
     def _apply_script_scene_completion(self, value: str) -> None:
         editor = getattr(self, "script_text", None)
@@ -20145,7 +20174,7 @@ class StoryForgeWindow(QMainWindow):
     # ---------- Reusable form templates ----------
 
     def show_form_templates(self) -> None:
-        page = self._begin_page("Modèles de fiches", "form_templates", compact=True)
+        page = self._begin_page("Modèles de fiches", "form_templates")
         self._page_header(
             page,
             "Outils du projet",
@@ -20901,12 +20930,21 @@ class StoryForgeWindow(QMainWindow):
         if template_view_mode == "visual":
             detail_box.addWidget(
                 make_label(
-                    "Schéma officiel StoryForge · lecture seule. Les visuels sont fournis par l’application.",
+                    "Schéma StoryForge ou image personnalisée · glisse pour explorer le visuel.",
                     "Muted",
                     True,
                 )
             )
             detail_box.addWidget(self._build_template_visual_view(selected), 1)
+            visual_actions = QHBoxLayout()
+            visual_actions.addWidget(make_button("Importer une image…", "secondary",
+                                     lambda: self._import_template_visual(selected["key"])))
+            restore = make_button("Rétablir le schéma StoryForge", "tertiary",
+                                  lambda: self._reset_template_visual(selected["key"]))
+            restore.setEnabled(bool(self.db.setting(f"template_image_{selected['key']}", "")))
+            visual_actions.addWidget(restore)
+            visual_actions.addStretch()
+            detail_box.addLayout(visual_actions)
         else:
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
@@ -20959,7 +20997,59 @@ class StoryForgeWindow(QMainWindow):
         self.show_templates()
 
     def _build_template_visual_view(self, template: dict) -> QGraphicsView:
+        encoded = self.db.setting(f"template_image_{template['key']}", "")
+        if encoded:
+            pixmap = QPixmap()
+            try:
+                pixmap.loadFromData(base64.b64decode(encoded, validate=True))
+            except ValueError:
+                pass
+            if not pixmap.isNull():
+                view = QGraphicsView(QGraphicsScene(self))
+                view.setObjectName("TemplateVisualCanvas")
+                view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+                view.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+                view.scene().addPixmap(pixmap)
+                view.scene().setSceneRect(QRectF(pixmap.rect()))
+                QTimer.singleShot(0, view, lambda: view.fitInView(view.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio))
+                return view
         return build_diagram(template, self.palette, self)
+
+    def _store_template_visual(self, key: str, filename: str) -> None:
+        if key not in {item["key"] for item in TEMPLATE_LIBRARY}:
+            raise ValueError("Template inconnu")
+        reader = QImageReader(filename)
+        reader.setAutoTransform(True)
+        size = reader.size()
+        if not size.isValid() or size.width() * size.height() > 100_000_000:
+            raise ValueError("Image invalide ou trop grande (maximum 100 mégapixels).")
+        if max(size.width(), size.height()) > 4096:
+            reader.setScaledSize(size.scaled(4096, 4096, Qt.AspectRatioMode.KeepAspectRatio))
+        image = reader.read()
+        if image.isNull():
+            raise ValueError("Impossible de lire cette image.")
+        data = QByteArray()
+        buffer = QBuffer(data)
+        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+        if not image.save(buffer, "PNG"):
+            raise ValueError("Impossible d’enregistrer cette image.")
+        buffer.close()
+        self.db.set_setting(f"template_image_{key}", base64.b64encode(bytes(data)).decode("ascii"))
+
+    def _import_template_visual(self, key: str) -> None:
+        filename, _ = QFileDialog.getOpenFileName(self, "Image du template", "", "Images (*.png *.jpg *.jpeg *.webp *.bmp)")
+        if not filename:
+            return
+        try:
+            self._store_template_visual(key, filename)
+        except ValueError as error:
+            QMessageBox.warning(self, "Image non importée", str(error))
+            return
+        self.show_templates()
+
+    def _reset_template_visual(self, key: str) -> None:
+        self.db.set_setting(f"template_image_{key}", "")
+        self.show_templates()
 
 
     def _template_tree_clicked(self, item: QTreeWidgetItem) -> None:

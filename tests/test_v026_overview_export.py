@@ -165,7 +165,7 @@ def test_overview_reuses_project_data_and_final_export_is_portable(tmp_path: Pat
         assert metadata["project"]["title"] == "Les Veilleurs"
         final_manifest = json.loads(archive.read("00_manifest.json").decode("utf-8"))
         assert final_manifest["format"] == "storyforge-final-v2"
-        assert final_manifest["application_version"] == "0.30.2"
+        assert final_manifest["application_version"] == "0.30.3"
         assert final_manifest["counts"]["story_map_nodes"] == 2
         assert final_manifest["counts"]["story_map_links"] == 1
         assert archive.read("03_Plan/cartes.pdf").startswith(b"%PDF")

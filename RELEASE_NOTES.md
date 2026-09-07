@@ -1,3 +1,11 @@
+# StoryForge 0.30.3 — Correctifs d’affichage ciblés
+
+- Rétablissement des marges extérieures sur les trois pages signalées.
+- Centrage de la page de scénario en lecture seule.
+- Positionnement du popup à partir des coordonnées globales du viewport, hors de la ligne de saisie.
+- Images personnalisées par template, copie intégrée dans SQLite, validation et retour au schéma fourni.
+- Tests de géométrie, acceptation par Tab et persistance des images sans leur fichier source.
+
 # StoryForge 0.30.2 — Stabilisation éditeur et PDF
 
 - Complétion progressive des préfixes, lieux et moments ; retour Action → Personnage.

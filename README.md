@@ -1,4 +1,14 @@
-# StoryForge Desktop 0.30.2 — Corrections éditeur et dossiers PDF
+# StoryForge Desktop 0.30.3 — Marges, aperçu et images des templates
+
+## V0.30.3
+
+- Rechercher, Vue d’ensemble et Modèles de fiches utilisent les marges de la page Aujourd’hui.
+- La page du scénario est centrée dans Vue d’ensemble, avec ses retraits conservés.
+- Le menu d’autocomplétion se place sous la ligne, ou au-dessus en bas d’écran, sans recouvrir le curseur.
+- Templates → Vue visuelle → **Importer une image…** remplace le schéma du template sélectionné.
+  L’image est conservée localement dans la base, même si le fichier source est déplacé.
+  **Rétablir le schéma StoryForge** retire la personnalisation. Ces images sont des préférences
+  globales de la bibliothèque, incluses dans la sauvegarde SQLite, pas dans l’export d’un projet.
 
 ## V0.30.2
 
