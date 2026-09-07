@@ -12,8 +12,9 @@ Ce fichier est la mémoire opérationnelle du projet. Il complète l’historiqu
 - Dossier de travail unique : `/home/elam/Documents/Test/storyforge_desktop_v051`
 - Interface : PySide6, application locale, sans IA obligatoire, sans abonnement et sans synchronisation distante.
 - Base de données locale : SQLite (`storyforge.db`, ignorée par Git car elle contient les données de travail).
-- Version déclarée dans `app.py` : `0.30.1`.
-- `README.md` et `RELEASE_NOTES.md` suivent désormais la version visible courante `0.30.1`.
+- Version déclarée dans `app.py` : `0.30.2`.
+- `README.md` et `RELEASE_NOTES.md` suivent la version visible courante `0.30.2`.
+- État détaillé et travaux non terminés : `ROADMAP_REMAINING.md`. Ne pas annoncer l’anglais intégral ni tous les schémas spécifiques comme terminés.
 
 ## 2. Règles de travail à respecter
 
@@ -32,7 +33,7 @@ Ce fichier est la mémoire opérationnelle du projet. Il complète l’historiqu
 
 - Branche actuelle : `main`
 - Commit de base avant migration : `74cc3ba chore: baseline StoryForge before Codex migration`
-- Dernier commit connu : `2e69595 fix: make scene autocomplete usable on first use`
+- Base du correctif V0.30.2 : `3059731 docs: record autocomplete patch release`. Consulter `git log -1` pour le commit courant.
 - Tags de sécurité :
   - `v0.27.1-before-codex`
   - `v0.27.1-before-codex-tested`
@@ -71,7 +72,8 @@ Tests complets :
 .venv/bin/python -m pytest -q
 ```
 
-La dernière vérification connue après la V0.30.1 était : `54 passed`.
+La suite V0.30.2 inclut les tests de préfixes au clavier, scènes répétées, langue, navigation et PDF multipage (Poppler requis pour le test d’extraction).
+Dernière exécution complète : **57 passed**. Contrôle visuel du scénario, des genres, des templates et d’un rapport PDF multipage sur une base temporaire, sans utiliser la base personnelle.
 
 Contrôles Git recommandés :
 
@@ -87,6 +89,9 @@ git log --oneline --decorate -8
 - `theme.py` : tokens et styles de l’interface.
 - `script_export.py` : lecture/écriture FDX, PDF scénario et parsing du script.
 - `pdf_export.py` : export du manuel pédagogique.
+- `report_export.py` : PDF paginés des documents du projet, avec Qt (pas de dépendance supplémentaire).
+- `i18n.py` : catalogue anglais partiel des libellés statiques ; ne pas traduire les valeurs utilisateur.
+- `genres.py` et `template_diagrams.py` : ressources de genres et vues structurelles natives.
 - `learning_content.py` : contenus des guides et sessions.
 - `ai_service.py` : couche optionnelle ; ne jamais en faire une dépendance obligatoire.
 - `content/sessions/` : contenus pédagogiques JSON.

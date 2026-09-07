@@ -1,3 +1,13 @@
+# StoryForge 0.30.2 — Stabilisation éditeur et PDF
+
+- Complétion progressive des préfixes, lieux et moments ; retour Action → Personnage.
+- Création répétée de scènes avec types conservés, suppression du rail superposé au texte.
+- Aperçu structuré du scénario et documents de l’export complet convertis en PDF Unicode paginés.
+- Navigation Projets repliable et mémorisée, indication du guide sélectionné, espacement des titres et tailles de champs cohérentes.
+- Bibliothèque de genres consultable et remplacement des rectangles des templates par des repères visuels.
+- Catalogue anglais initial, volontairement sans traduction automatique des textes de l’auteur. **Traduction intégrale non terminée.**
+- Les visuels propres à chaque structure restent à enrichir ; voir `ROADMAP_REMAINING.md`.
+
 # StoryForge 0.30.1 — Correction de l’autocomplétion des scènes
 
 ## V0.30.1

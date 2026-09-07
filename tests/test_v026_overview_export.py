@@ -143,21 +143,21 @@ def test_overview_reuses_project_data_and_final_export_is_portable(tmp_path: Pat
     with zipfile.ZipFile(destination) as archive:
         names = set(archive.namelist())
         assert {
-            "00_LIRE_MOI.md",
+            "00_LIRE_MOI.pdf",
             "00_metadata.json",
             "00_manifest.json",
             "01_Scenario/scenario.pdf",
             "01_Scenario/scenario.fdx",
             "01_Scenario/scenario.fountain",
             "01_Scenario/scenario.json",
-            "03_Plan/cartes.md",
+            "03_Plan/cartes.pdf",
             "03_Plan/cartes.csv",
-            "03_Plan/scenes.md",
+            "03_Plan/scenes.pdf",
             "04_Chronologie/chronologie.csv",
-            "04_Chronologie/chronologie.md",
-            "05_Personnages/personnages.md",
-            "05_Personnages/relations.md",
-            "06_Univers/lieux.md",
+            "04_Chronologie/chronologie.pdf",
+            "05_Personnages/personnages.pdf",
+            "05_Personnages/relations.pdf",
+            "06_Univers/lieux.pdf",
             "08_Sauvegarde/projet.storyforge.json",
         }.issubset(names)
         metadata = json.loads(archive.read("00_metadata.json").decode("utf-8"))
@@ -165,10 +165,11 @@ def test_overview_reuses_project_data_and_final_export_is_portable(tmp_path: Pat
         assert metadata["project"]["title"] == "Les Veilleurs"
         final_manifest = json.loads(archive.read("00_manifest.json").decode("utf-8"))
         assert final_manifest["format"] == "storyforge-final-v2"
-        assert final_manifest["application_version"] == "0.30.1"
+        assert final_manifest["application_version"] == "0.30.2"
         assert final_manifest["counts"]["story_map_nodes"] == 2
         assert final_manifest["counts"]["story_map_links"] == 1
-        assert "déclenche" in archive.read("03_Plan/cartes.md").decode("utf-8")
+        assert archive.read("03_Plan/cartes.pdf").startswith(b"%PDF")
+        assert not any(name.endswith(".md") for name in names)
         scenario = json.loads(archive.read("01_Scenario/scenario.json").decode("utf-8"))
         assert scenario["format"] == "storyforge-screenplay-v1"
         assert scenario["elements"][0] == ["Scene Heading", "INT. MUSÉE - NUIT"]
@@ -177,7 +178,5 @@ def test_overview_reuses_project_data_and_final_export_is_portable(tmp_path: Pat
         )
         assert exported["project"]["title"] == "Les Veilleurs"
         assert exported["characters"][0]["name"] == "Mina"
-        assert "Le tableau bouge" in archive.read(
-            "04_Chronologie/chronologie.md"
-        ).decode("utf-8")
+        assert archive.read("04_Chronologie/chronologie.pdf").startswith(b"%PDF")
     window.close()

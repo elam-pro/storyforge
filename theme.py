@@ -549,7 +549,7 @@ def stylesheet(p: Palette, editor_font_size: int = 15) -> str:
     QTextEdit#IdeaEditor:focus {{ border-color: {p.accent}; }}
     QTextEdit#ScriptEditor {{
         color: {p.text}; background: {p.surface}; border: 1px solid {p.border_strong};
-        border-radius: 12px; padding: 30px 42px 30px 108px;
+        border-radius: 12px; padding: 24px 36px;
         font-family: "Courier Prime", "Courier New", monospace;
         font-size: {editor_font_size}px;
     }}
@@ -689,4 +689,15 @@ def stylesheet(p: Palette, editor_font_size: int = 15) -> str:
         border-radius: 3px;
     }}
     QTreeWidget::item, QListWidget::item {{ border-radius: 2px; }}
+    QLineEdit, QComboBox, QTextEdit[editor="true"], QTextEdit[characterField="true"],
+    QTextEdit[arcField="true"], QTextEdit[sceneField="true"],
+    QTextEdit[universeField="true"], QTextEdit[locationField="true"],
+    QTextEdit[themeField="true"], QTextEdit[conflictField="true"],
+    QTextEdit[promiseField="true"] {{ font-size: {editor_font_size}px; }}
+    QTreeWidget#GuideCatalog::item:selected {{
+        background: {p.accent_soft}; color: {p.text}; border-left: 3px solid {p.accent};
+    }}
+    QListWidget#GenreList {{ border: 1px solid {p.border}; background: {p.surface}; }}
+    QListWidget#GenreList::item {{ padding: 8px; }}
+    QListWidget#GenreList::item:selected {{ background: {p.accent_soft}; color: {p.text}; }}
     """

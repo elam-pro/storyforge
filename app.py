@@ -10,6 +10,11 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+from html import escape
+from report_export import export_report_pdf
+from template_diagrams import build_diagram
+from genres import GENRES
+from i18n import set_language, tr
 from datetime import datetime
 from itertools import pairwise
 from pathlib import Path
@@ -101,7 +106,7 @@ from screenplay_model import BlockType, ScreenplayDocument
 from theme import DARK, LIGHT, Palette, stylesheet
 
 APP_NAME = "StoryForge"
-APP_VERSION = "0.30.1"
+APP_VERSION = "0.30.2"
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get("STORYFORGE_DB_PATH", BASE_DIR / "storyforge.db"))
 IDEA_ATTACHMENT_LIMIT = 25 * 1024 * 1024
@@ -1148,7 +1153,7 @@ def make_editor(minimum_height: int = 100, placeholder: str = "") -> QTextEdit:
     editor.setAcceptRichText(False)
     editor.setProperty("editor", True)
     editor.setMinimumHeight(minimum_height)
-    editor.setPlaceholderText(placeholder)
+    editor.setPlaceholderText(tr(placeholder))
     return editor
 
 
@@ -1221,7 +1226,7 @@ class NavigationButton(QPushButton):
         self.nav_icon_label.setObjectName("NavIcon")
         self.nav_icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.nav_icon_label.setFixedWidth(22)
-        self.nav_title_label = QLabel(title)
+        self.nav_title_label = QLabel(tr(title))
         self.nav_title_label.setObjectName("NavLabel")
         self.nav_title_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         for label in (self.nav_icon_label, self.nav_title_label):
@@ -1344,6 +1349,7 @@ class ScreenplayEditor(QTextEdit):
         self._script_muted = QColor("#8F9693")
         self._script_active_background = QColor("#3B211C")
         self._type_rail = ScreenplayTypeRail(self)
+        self._type_rail.hide()
         self._type_rail.raise_()
         self.verticalScrollBar().valueChanged.connect(self._update_type_rail)
         self.horizontalScrollBar().valueChanged.connect(self._update_type_rail)
@@ -1351,11 +1357,9 @@ class ScreenplayEditor(QTextEdit):
         self.document().contentsChanged.connect(self._update_type_rail)
 
     def _position_type_rail(self) -> None:
-        viewport = self.viewport()
-        left = max(0, viewport.geometry().left())
-        self._type_rail.setGeometry(0, viewport.geometry().top(), left, viewport.height())
-        self._type_rail.raise_()
-        self._type_rail.update()
+        # The selected format is already shown in the toolbar. A floating
+        # overlay inside QTextEdit can cover text on platform-specific styles.
+        self._type_rail.hide()
 
     def _update_type_rail(self) -> None:
         self._position_type_rail()
@@ -1382,6 +1386,7 @@ class ScreenplayEditor(QTextEdit):
         selection.cursor = self.textCursor()
         selection.cursor.clearSelection()
         selection.format.setBackground(self._script_active_background)
+        selection.format.setForeground(self.palette().color(self.foregroundRole()))
         selection.format.setProperty(
             QTextFormat.Property.FullWidthSelection,
             True,
@@ -2039,7 +2044,7 @@ class RelationshipMapDialog(QDialog):
         title_copy.addWidget(make_label("Carte des relations", "SectionTitle"))
         title_row.addLayout(title_copy)
         title_row.addStretch()
-        title_row.addWidget(make_button("Fermer", "secondary", self.accept))
+        title_row.addWidget(make_button(tr("Fermer"), "secondary", self.accept))
         root.addLayout(title_row)
 
         controls = make_card()
@@ -2067,9 +2072,9 @@ class RelationshipMapDialog(QDialog):
         add_map_button.setMenu(map_menu)
         controls_box.addWidget(add_map_button)
         controls_box.addWidget(make_button("Renommer", "quiet", self._rename_map))
-        controls_box.addWidget(make_button("Supprimer", "quiet", self._delete_map))
+        controls_box.addWidget(make_button(tr("Supprimer"), "quiet", self._delete_map))
         controls_box.addSpacing(12)
-        controls_box.addWidget(make_label("PERSONNAGE", "Caption"))
+        controls_box.addWidget(make_label(tr("PERSONNAGE"), "Caption"))
         self.character_filter = QComboBox()
         self.character_filter.addItem("Tous", 0)
         for row in self.db.q(
@@ -2111,8 +2116,8 @@ class RelationshipMapDialog(QDialog):
         detail_copy.addWidget(self.detail_title)
         detail_copy.addWidget(self.detail_text)
         detail_box.addLayout(detail_copy, 1)
-        self.edit_relation_button = make_button("Modifier", "secondary", self._edit_selected_relation)
-        self.delete_relation_button = make_button("Supprimer", "danger", self._delete_selected_relation)
+        self.edit_relation_button = make_button(tr("Modifier"), "secondary", self._edit_selected_relation)
+        self.delete_relation_button = make_button(tr("Supprimer"), "danger", self._delete_selected_relation)
         self.edit_relation_button.setEnabled(False)
         self.delete_relation_button.setEnabled(False)
         detail_box.addWidget(self.edit_relation_button)
@@ -2429,7 +2434,7 @@ class RelationshipMapDialog(QDialog):
             tension.setPlainText(row["tension"])
             secret.setPlainText(row["secret"])
             evolution.setPlainText(row["evolution"])
-        box.addWidget(make_label("DESCRIPTION", "Caption"))
+        box.addWidget(make_label(tr("DESCRIPTION"), "Caption"))
         box.addWidget(description)
         box.addWidget(make_label("TENSION / DÉSÉQUILIBRE", "Caption"))
         box.addWidget(tension)
@@ -2464,7 +2469,7 @@ class RelationshipMapDialog(QDialog):
         update_color_button()
         actions = QHBoxLayout()
         actions.addStretch()
-        actions.addWidget(make_button("Annuler", "secondary", dialog.reject))
+        actions.addWidget(make_button(tr("Annuler"), "secondary", dialog.reject))
         actions.addWidget(make_button("Enregistrer la relation", "primary", dialog.accept))
         box.addLayout(actions)
         if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -2954,7 +2959,7 @@ class SequenceBlockWidget(QFrame):
         number_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         header.addWidget(number_label)
         self.title = QLineEdit(row["title"] or "")
-        self.title.setPlaceholderText("Titre de la séquence")
+        self.title.setPlaceholderText(tr("Titre de la séquence"))
         header.addWidget(self.title, 1)
         duplicate = make_button("⧉", "quiet", lambda: on_duplicate(self.block_id))
         duplicate.setFixedWidth(36)
@@ -2980,14 +2985,14 @@ class SequenceBlockWidget(QFrame):
         content.setSpacing(10)
         events_box = QVBoxLayout()
         events_box.setSpacing(4)
-        events_box.addWidget(make_label("ÉVÉNEMENTS", "Caption"))
+        events_box.addWidget(make_label(tr("ÉVÉNEMENTS"), "Caption"))
         self.events = make_editor(76, "Que se passe-t-il, dans quel ordre, et quelles décisions sont prises ?")
         self.events.setMaximumHeight(100)
         events_box.addWidget(self.events)
         content.addLayout(events_box, 3)
         consequence_box = QVBoxLayout()
         consequence_box.setSpacing(4)
-        consequence_box.addWidget(make_label("CONSÉQUENCE", "Caption"))
+        consequence_box.addWidget(make_label(tr("CONSÉQUENCE"), "Caption"))
         self.consequence = make_editor(76, "Qu’est-ce que cette séquence change pour la suivante ?")
         self.consequence.setMaximumHeight(100)
         consequence_box.addWidget(self.consequence)
@@ -3045,6 +3050,7 @@ class StoryForgeWindow(QMainWindow):
     def __init__(self, db_path: Path = DB_PATH):
         super().__init__()
         self.db = Database(Path(db_path))
+        set_language(self.db.setting("interface_language", "fr"))
         self._migrate_question_learning_flow()
         self._migrate_guided_runs()
         self._migrate_studio_appearance()
@@ -3070,6 +3076,7 @@ class StoryForgeWindow(QMainWindow):
         self.resize(1480, 940)
         self.setMinimumSize(1120, 720)
         self._build_shell()
+        self._sync_project_navigation()
         self._apply_appearance()
         app = QApplication.instance()
         if app and hasattr(app.styleHints(), "colorSchemeChanged"):
@@ -3240,7 +3247,7 @@ class StoryForgeWindow(QMainWindow):
         top.addStretch()
         self.save_state = make_label("", "Muted")
         top.addWidget(self.save_state)
-        top.addWidget(make_button("Gérer les projets", "quiet", self.show_projects))
+        top.addWidget(make_button(tr("Gérer les projets"), "quiet", self.show_projects))
         self.theme_button = make_button("", "quiet", self.toggle_theme)
         self.theme_button.setFixedWidth(36)
         self.theme_button.setToolTip("Changer l’apparence")
@@ -3299,7 +3306,7 @@ class StoryForgeWindow(QMainWindow):
         add_nav("learning", "◉", "Guides d’écriture", self.show_guides)
         add_nav("guide_runs", "◌", "Guides en cours", self.show_guide_runs, child=True)
         add_nav_separator()
-        add_nav("projects", "▣", "Projets", self.show_projects)
+        add_nav("projects", "▣", "Projets ▾", self._toggle_project_navigation)
         add_nav("overview", "▦", "Vue d’ensemble", self.show_story_overview, child=True)
         add_nav("development", "≡", "Construction", self.show_development, child=True)
         add_nav("timeline", "↔", "Chronologie", self.show_timeline, child=True)
@@ -3319,6 +3326,7 @@ class StoryForgeWindow(QMainWindow):
         add_nav("form_templates", "▥", "Modèles de fiches", self.show_form_templates)
         add_nav("templates", "▦", "Templates", self.show_templates)
         add_nav("glossary", "≡", "Glossaire", self.show_glossary)
+        add_nav("genres", "◐", "Genres", self.show_genres)
         add_nav_separator()
         add_nav("settings", "⚙", "Paramètres", self.show_settings)
         nav.addStretch()
@@ -3377,6 +3385,20 @@ class StoryForgeWindow(QMainWindow):
         self.sidebar_expanded = not bool(getattr(self, "sidebar_expanded", True))
         self.db.set_setting("sidebar_expanded", "1" if self.sidebar_expanded else "0")
         self._sync_sidebar_toggle()
+
+    def _toggle_project_navigation(self) -> None:
+        expanded = self.db.setting("project_navigation_expanded", "1") != "1"
+        self.db.set_setting("project_navigation_expanded", "1" if expanded else "0")
+        self._sync_project_navigation()
+        self.show_projects()
+
+    def _sync_project_navigation(self) -> None:
+        expanded = self.db.setting("project_navigation_expanded", "1") == "1"
+        for key in ("overview", "development", "timeline", "universe", "locations",
+                    "characters", "arcs", "promises", "theme", "conflicts", "images"):
+            self.nav_buttons[key].setVisible(expanded)
+        self.nav_canvas.setMinimumHeight(self.nav_canvas.layout().minimumSize().height() + 4)
+        self.nav_buttons["projects"].nav_title_label.setText(tr("Projets ▾" if expanded else "Projets ▸"))
 
     def _sync_guide_return_button(self) -> None:
         button = getattr(self, "guide_return_button", None)
@@ -3573,6 +3595,7 @@ class StoryForgeWindow(QMainWindow):
             "form_templates": self.show_form_templates,
             "templates": self.show_templates,
             "glossary": self.show_glossary,
+            "genres": self.show_genres,
         }
         callback = destinations.get(self.current_view)
         if callback:
@@ -3649,10 +3672,10 @@ class StoryForgeWindow(QMainWindow):
         return layout
 
     def _page_header(self, layout: QVBoxLayout, kicker: str, title: str, subtitle: str) -> None:
-        layout.addWidget(make_label(kicker.upper(), "Kicker"))
-        layout.addSpacing(5)
+        layout.addWidget(make_label(tr(kicker.upper()), "Kicker"))
+        layout.addSpacing(10)
         layout.addWidget(make_label(title, "PageTitle"))
-        layout.addSpacing(5)
+        layout.addSpacing(12)
         copy = make_label(subtitle, "Muted", True)
         copy.setMaximumWidth(920)
         layout.addWidget(copy)
@@ -3783,7 +3806,7 @@ class StoryForgeWindow(QMainWindow):
         active_head = QHBoxLayout()
         active_copy = QVBoxLayout()
         active_copy.setSpacing(3)
-        active_copy.addWidget(make_label("GUIDES EN COURS", "Caption"))
+        active_copy.addWidget(make_label(tr("GUIDES EN COURS"), "Caption"))
         active_copy.addWidget(make_label("Reprendre un travail commencé", "CardTitle"))
         active_head.addLayout(active_copy, 1)
         self.guide_run_count_badge = make_label(str(len(runs)), "AccentPill")
@@ -3852,10 +3875,10 @@ class StoryForgeWindow(QMainWindow):
         catalog_box = QVBoxLayout(catalog_card)
         catalog_box.setContentsMargins(20, 18, 20, 18)
         catalog_box.setSpacing(10)
-        catalog_box.addWidget(make_label("COMMENCER UN GUIDE", "Caption"))
+        catalog_box.addWidget(make_label(tr("COMMENCER UN GUIDE"), "Caption"))
         catalog_box.addWidget(make_label("Choisis un seul besoin concret", "CardTitle"))
         self.guide_catalog_tree = QTreeWidget()
-        self.guide_catalog_tree.setObjectName("ProjectTree")
+        self.guide_catalog_tree.setObjectName("GuideCatalog")
         self.guide_catalog_tree.setHeaderLabels(["Guide", "À utiliser quand…", "Livrable"])
         self.guide_catalog_tree.setRootIsDecorated(False)
         self.guide_catalog_tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -3872,6 +3895,12 @@ class StoryForgeWindow(QMainWindow):
         self.guide_catalog_tree.setCurrentItem(self.guide_catalog_tree.topLevelItem(0))
         self.guide_catalog_tree.itemDoubleClicked.connect(lambda *_args: self._start_selected_guide())
         catalog_box.addWidget(self.guide_catalog_tree)
+        self.guide_selection_label = make_label("", "Body", True)
+        def show_guide_selection(current, _previous=None):
+            self.guide_selection_label.setText(f"✓ Guide sélectionné : {current.text(0)}" if current else "")
+        self.guide_catalog_tree.currentItemChanged.connect(show_guide_selection)
+        show_guide_selection(self.guide_catalog_tree.currentItem())
+        catalog_box.addWidget(self.guide_selection_label)
         catalog_actions = QHBoxLayout()
         local_note = make_label(
             "Les guides sont locaux et fonctionnent sans IA ni abonnement.", "Muted"
@@ -3978,7 +4007,7 @@ class StoryForgeWindow(QMainWindow):
             project = self.db.one("SELECT * FROM projects WHERE id=?", (self.active_project,))
         if title is None or assistance_level is None:
             dialog = QDialog(self)
-            dialog.setWindowTitle("Commencer un guide")
+            dialog.setWindowTitle(tr("Commencer un guide"))
             dialog.resize(520, 300)
             box = QVBoxLayout(dialog)
             box.setContentsMargins(24, 22, 24, 20)
@@ -4000,7 +4029,7 @@ class StoryForgeWindow(QMainWindow):
             box.addStretch()
             actions = QHBoxLayout()
             actions.addStretch()
-            actions.addWidget(make_button("Annuler", "secondary", dialog.reject))
+            actions.addWidget(make_button(tr("Annuler"), "secondary", dialog.reject))
             actions.addWidget(make_button("Commencer →", "primary", dialog.accept))
             box.addLayout(actions)
             if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -4218,7 +4247,7 @@ class StoryForgeWindow(QMainWindow):
         previous_button = make_button("← Précédent", "secondary", lambda: self._move_learning(max(idx - 1, 0)))
         previous_button.setEnabled(idx > 0)
         actions.addWidget(previous_button)
-        actions.addWidget(make_button("Enregistrer", "secondary", self._save_learning_work))
+        actions.addWidget(make_button(tr("Enregistrer"), "secondary", self._save_learning_work))
         actions.addWidget(
             make_button("Pas terminé", "secondary", self._mark_learning_incomplete)
         )
@@ -4342,7 +4371,7 @@ class StoryForgeWindow(QMainWindow):
                 )
                 mastery_actions.addWidget(
                     make_button(
-                        "À revoir",
+                        tr("À revoir"),
                         "tertiary",
                         lambda: self._set_learning_mastery("à revoir"),
                     )
@@ -5047,7 +5076,7 @@ class StoryForgeWindow(QMainWindow):
         combo.setEnabled(bool(rows))
         box.addWidget(combo)
         box.addStretch()
-        box.addWidget(make_button("Gérer les projets", "quiet", self.show_projects))
+        box.addWidget(make_button(tr("Gérer les projets"), "quiet", self.show_projects))
         combo.currentIndexChanged.connect(
             lambda _index, selector=combo, destination=callback: self._change_project_context(
                 selector,
@@ -5176,7 +5205,7 @@ class StoryForgeWindow(QMainWindow):
         )
         status_actions.addWidget(
             make_button(
-                "Terminé",
+                tr("Terminé"),
                 "primary",
                 lambda: self._set_development_step_status("complete"),
             )
@@ -5295,7 +5324,7 @@ class StoryForgeWindow(QMainWindow):
         previous = make_button("←" if compact else "← Précédent", "secondary", self._previous_development_document)
         previous.setEnabled(selected_index > 0)
         actions.addWidget(previous)
-        actions.addWidget(make_button("Enregistrer", "secondary", self._save_development_document))
+        actions.addWidget(make_button(tr("Enregistrer"), "secondary", self._save_development_document))
         if selected_key == "beats":
             actions.addWidget(make_button("Utiliser un template", "secondary", self._insert_beat_template))
         actions.addWidget(
@@ -5307,7 +5336,7 @@ class StoryForgeWindow(QMainWindow):
                 make_button("Continuer →" if compact else "Enregistrer et continuer →", "primary", self._continue_development_document)
             )
         else:
-            actions.addWidget(make_button("Enregistrer", "primary", self._save_development_document))
+            actions.addWidget(make_button(tr("Enregistrer"), "primary", self._save_development_document))
         workspace_box.addWidget(action_bar)
 
     def _build_outline_workspace(self, workspace_box: QVBoxLayout) -> None:
@@ -5395,8 +5424,8 @@ class StoryForgeWindow(QMainWindow):
         self.outline_add_type.addItem("Scène", "scene")
         primary_actions.addWidget(self.outline_add_type)
         primary_actions.addWidget(make_button("+ Ajouter", "primary", self._add_outline_item))
-        primary_actions.addWidget(make_button("Dupliquer", "secondary", self._duplicate_outline_item))
-        primary_actions.addWidget(make_button("Supprimer", "danger", self._delete_outline_item))
+        primary_actions.addWidget(make_button(tr("Dupliquer"), "secondary", self._duplicate_outline_item))
+        primary_actions.addWidget(make_button(tr("Supprimer"), "danger", self._delete_outline_item))
         primary_actions.addStretch()
         primary_actions.addWidget(
             make_button(
@@ -6091,7 +6120,7 @@ class StoryForgeWindow(QMainWindow):
         actions.addWidget(make_button("+ Séquence", "primary", self._add_sequence_block))
         import_label = "Depuis les cartes" if self.width() < 1250 else "Importer les cartes"
         actions.addWidget(make_button(import_label, "secondary", self._import_story_cards_to_sequences))
-        actions.addWidget(make_button("Enregistrer", "secondary", self._save_sequence_board))
+        actions.addWidget(make_button(tr("Enregistrer"), "secondary", self._save_sequence_board))
         actions.addStretch()
         template_label = "Templates" if self.width() < 1250 else "Voir les templates"
         actions.addWidget(make_button(template_label, "secondary", self.show_templates))
@@ -6501,10 +6530,10 @@ class StoryForgeWindow(QMainWindow):
         self.scene_tabs.setDocumentMode(True)
         self.scene_tabs.addTab(self._scene_essential_tab(), "Noyau")
         self.scene_tabs.addTab(self._scene_progression_tab(), "Déroulement")
-        self.scene_tabs.addTab(self._scene_connections_tab(), "Connexions")
+        self.scene_tabs.addTab(self._scene_connections_tab(), tr("Connexions"))
         self.scene_tabs.addTab(
             self._build_record_template_tab("scene", 0),
-            "Modèle de fiche",
+            tr("Modèle de fiche"),
         )
         details_box.addWidget(self.scene_tabs, 1)
         workspace_box.addWidget(details, 3)
@@ -6677,7 +6706,7 @@ class StoryForgeWindow(QMainWindow):
         notes.setProperty("sceneField", True)
         notes.setMaximumHeight(88)
         self.scene_detail_fields["notes"] = notes
-        grid.addWidget(make_label("NOTES", "Caption"), 6, 0, 1, 2)
+        grid.addWidget(make_label(tr("NOTES"), "Caption"), 6, 0, 1, 2)
         grid.addWidget(notes, 7, 0, 1, 2)
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)
@@ -7679,7 +7708,7 @@ class StoryForgeWindow(QMainWindow):
         box = QVBoxLayout(dialog)
         box.setContentsMargins(24, 22, 24, 22)
         box.setSpacing(7)
-        box.addWidget(make_label("CARTE DE L’HISTOIRE", "Caption"))
+        box.addWidget(make_label(tr("CARTE DE L’HISTOIRE"), "Caption"))
         box.addWidget(make_label("Une idée par carte", "SectionTitle"))
         box.addWidget(make_label("Type", "Muted"))
         kind = QComboBox()
@@ -7735,8 +7764,8 @@ class StoryForgeWindow(QMainWindow):
         box.addWidget(characters)
         actions = QHBoxLayout()
         actions.addStretch()
-        actions.addWidget(make_button("Annuler", "secondary", dialog.reject))
-        actions.addWidget(make_button("Enregistrer", "primary", dialog.accept))
+        actions.addWidget(make_button(tr("Annuler"), "secondary", dialog.reject))
+        actions.addWidget(make_button(tr("Enregistrer"), "primary", dialog.accept))
         box.addLayout(actions)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return None
@@ -8070,7 +8099,7 @@ class StoryForgeWindow(QMainWindow):
         previous = make_button("←" if compact else "← Précédent", "secondary", self._previous_story_map_step)
         previous.setEnabled(self.story_map_step_index > 0)
         actions.addWidget(previous)
-        actions.addWidget(make_button("Enregistrer", "secondary", self._save_story_map_step))
+        actions.addWidget(make_button(tr("Enregistrer"), "secondary", self._save_story_map_step))
         actions.addWidget(make_button("Carte" if compact else "Vue carte", "secondary", self._show_story_map_board))
         actions.addStretch()
         if self.story_map_step_index < len(STORY_MAP_STEPS) - 1:
@@ -8189,7 +8218,7 @@ class StoryForgeWindow(QMainWindow):
 
     def _show_story_map_summary(self, completed: bool) -> None:
         dialog = QDialog(self)
-        dialog.setWindowTitle("Carte de l’histoire")
+        dialog.setWindowTitle(tr("Carte de l’histoire"))
         dialog.resize(720, 680)
         box = QVBoxLayout(dialog)
         box.setContentsMargins(26, 24, 26, 24)
@@ -8210,7 +8239,7 @@ class StoryForgeWindow(QMainWindow):
         box.addWidget(summary, 1)
         actions = QHBoxLayout()
         actions.addStretch()
-        actions.addWidget(make_button("Fermer", "primary", dialog.accept))
+        actions.addWidget(make_button(tr("Fermer"), "primary", dialog.accept))
         box.addLayout(actions)
         dialog.exec()
 
@@ -8251,7 +8280,7 @@ class StoryForgeWindow(QMainWindow):
         brief_box.addLayout(brief_head)
 
         progress_row = QHBoxLayout()
-        progress_row.addWidget(make_label("PROGRESSION", "Caption"))
+        progress_row.addWidget(make_label(tr("PROGRESSION"), "Caption"))
         progress_row.addStretch()
         progress_row.addWidget(
             make_label(
@@ -8330,7 +8359,7 @@ class StoryForgeWindow(QMainWindow):
         previous = make_button("←" if compact else "← Précédent", "secondary", self._previous_synopsis_step)
         previous.setEnabled(self.synopsis_step_index > 0)
         actions.addWidget(previous)
-        actions.addWidget(make_button("Enregistrer", "secondary", self._save_synopsis_step))
+        actions.addWidget(make_button(tr("Enregistrer"), "secondary", self._save_synopsis_step))
         actions.addWidget(make_button("Texte final" if compact else "Voir le synopsis final", "secondary", self._show_synopsis_final))
         actions.addStretch()
         if self.synopsis_step_index < len(SYNOPSIS_STEPS) - 1:
@@ -8527,7 +8556,7 @@ class StoryForgeWindow(QMainWindow):
         actions.setSpacing(8)
         compact = self.width() < 1250
         actions.addWidget(make_button("← Guide" if compact else "← Reprendre les questions", "secondary", self._show_synopsis_guide))
-        actions.addWidget(make_button("Enregistrer", "secondary", self._save_synopsis_final))
+        actions.addWidget(make_button(tr("Enregistrer"), "secondary", self._save_synopsis_final))
         actions.addWidget(make_button("Version" if compact else "Créer une version", "secondary", self._snapshot_synopsis_final))
         actions.addStretch()
         rebuild = make_button("Réassembler" if compact else "Réassembler depuis les réponses", "primary", self._rebuild_synopsis_from_answers)
@@ -8846,7 +8875,7 @@ class StoryForgeWindow(QMainWindow):
         manager_box.addWidget(
             make_button("+ Nouveau tag", "primary", self._new_managed_tag)
         )
-        manager_box.addWidget(make_label("NOM", "Caption"))
+        manager_box.addWidget(make_label(tr("NOM"), "Caption"))
         self.tag_manager_name = QLineEdit()
         self.tag_manager_name.setEnabled(False)
         manager_box.addWidget(self.tag_manager_name)
@@ -8863,13 +8892,13 @@ class StoryForgeWindow(QMainWindow):
         manager_box.addLayout(color_row)
         managed_actions = QGridLayout()
         self.tag_manager_save_button = make_button(
-            "Enregistrer", "primary", self._save_managed_tag
+            tr("Enregistrer"), "primary", self._save_managed_tag
         )
         self.tag_manager_merge_button = make_button(
             "Fusionner", "secondary", self._merge_managed_tag
         )
         self.tag_manager_delete_button = make_button(
-            "Supprimer", "danger", self._delete_managed_tag
+            tr("Supprimer"), "danger", self._delete_managed_tag
         )
         for button in (
             self.tag_manager_save_button,
@@ -9370,7 +9399,7 @@ class StoryForgeWindow(QMainWindow):
         left_box.addLayout(list_head)
         left_box.addWidget(make_button("+ Nouvelle idée", "primary", self._new_idea))
         self.idea_search = QLineEdit()
-        self.idea_search.setPlaceholderText("Rechercher…")
+        self.idea_search.setPlaceholderText(tr("Rechercher…"))
         self.idea_search.textChanged.connect(self._filter_ideas)
         left_box.addWidget(self.idea_search)
         self.idea_type_filter = QComboBox()
@@ -9574,7 +9603,7 @@ class StoryForgeWindow(QMainWindow):
         actions = QHBoxLayout()
         actions.addWidget(make_button("Enregistrer l’idée", "primary", self._save_idea))
         actions.addStretch()
-        actions.addWidget(make_button("Supprimer", "danger", self._delete_idea))
+        actions.addWidget(make_button(tr("Supprimer"), "danger", self._delete_idea))
         right_box.addLayout(actions)
         right_scroll = QScrollArea()
         right_scroll.setWidgetResizable(True)
@@ -9868,7 +9897,7 @@ class StoryForgeWindow(QMainWindow):
         self._page_header(
             page,
             "Temps de l’histoire",
-            "Chronologie",
+            tr("Chronologie"),
             "Place les événements dans le temps, puis isole l’intrigue, la backstory ou le parcours d’un personnage.",
         )
         if not self.active_project:
@@ -9977,8 +10006,8 @@ class StoryForgeWindow(QMainWindow):
         detail_copy.addWidget(self.timeline_detail_title)
         detail_copy.addWidget(self.timeline_detail_description)
         detail_box.addLayout(detail_copy, 1)
-        self.timeline_edit_button = make_button("Modifier", "secondary", self._edit_timeline_event)
-        self.timeline_delete_button = make_button("Supprimer", "danger", self._delete_timeline_event)
+        self.timeline_edit_button = make_button(tr("Modifier"), "secondary", self._edit_timeline_event)
+        self.timeline_delete_button = make_button(tr("Supprimer"), "danger", self._delete_timeline_event)
         self.timeline_edit_button.setEnabled(False)
         self.timeline_delete_button.setEnabled(False)
         detail_box.addWidget(self.timeline_edit_button)
@@ -10071,12 +10100,12 @@ class StoryForgeWindow(QMainWindow):
         color_button.setText(chosen_color.name().upper())
         box.addWidget(color_button)
         actions = QHBoxLayout()
-        delete_button = make_button("Supprimer", "danger")
+        delete_button = make_button(tr("Supprimer"), "danger")
         delete_button.setEnabled(len(self.timeline_tracks) > 1)
         actions.addWidget(delete_button)
         actions.addStretch()
-        actions.addWidget(make_button("Annuler", "secondary", dialog.reject))
-        actions.addWidget(make_button("Enregistrer", "primary", dialog.accept))
+        actions.addWidget(make_button(tr("Annuler"), "secondary", dialog.reject))
+        actions.addWidget(make_button(tr("Enregistrer"), "primary", dialog.accept))
         box.addLayout(actions)
         delete_requested = {"value": False}
 
@@ -10272,21 +10301,21 @@ class StoryForgeWindow(QMainWindow):
             track.setCurrentIndex(max(0, track.findData(preferred_track)))
         place = QLineEdit(row["place"] if row else "")
         place.setPlaceholderText("Lieu concerné")
-        form.addWidget(make_label("NOM", "Caption"), 0, 0, 1, 2)
+        form.addWidget(make_label(tr("NOM"), "Caption"), 0, 0, 1, 2)
         form.addWidget(title, 1, 0, 1, 2)
         form.addWidget(make_label("POSITION RELATIVE", "Caption"), 2, 0)
         form.addWidget(make_label("REPÈRE AFFICHÉ", "Caption"), 2, 1)
         form.addWidget(time_value, 3, 0)
         form.addWidget(display_label, 3, 1)
         form.addWidget(make_label("TIMELINE", "Caption"), 4, 0)
-        form.addWidget(make_label("CATÉGORIE", "Caption"), 4, 1)
+        form.addWidget(make_label(tr("CATÉGORIE"), "Caption"), 4, 1)
         form.addWidget(track, 5, 0)
         form.addWidget(category, 5, 1)
         form.addWidget(make_label("LIEU", "Caption"), 6, 0, 1, 2)
         form.addWidget(place, 7, 0, 1, 2)
         box.addLayout(form)
 
-        box.addWidget(make_label("DESCRIPTION", "Caption"))
+        box.addWidget(make_label(tr("DESCRIPTION"), "Caption"))
         description = make_editor(92, "Que s’est-il passé concrètement ?")
         description.setPlainText(row["description"] if row else "")
         box.addWidget(description)
@@ -10329,7 +10358,7 @@ class StoryForgeWindow(QMainWindow):
 
         actions = QHBoxLayout()
         actions.addStretch()
-        actions.addWidget(make_button("Annuler", "secondary", dialog.reject))
+        actions.addWidget(make_button(tr("Annuler"), "secondary", dialog.reject))
         actions.addWidget(make_button("Enregistrer l’événement", "primary", dialog.accept))
         box.addLayout(actions)
         if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -10405,13 +10434,13 @@ class StoryForgeWindow(QMainWindow):
             return
         self.universe_tabs = QTabWidget()
         self.universe_tabs.setObjectName("UniverseTabs")
-        self.universe_tabs.addTab(self._build_world_profile_tab(), "Cadre")
-        self.universe_tabs.addTab(self._build_world_rules_tab(), "Règles")
-        self.universe_tabs.addTab(self._build_world_history_tab(), "Histoire")
-        self.universe_tabs.addTab(self._build_world_lexicon_tab(), "Lexique")
+        self.universe_tabs.addTab(self._build_world_profile_tab(), tr("Cadre"))
+        self.universe_tabs.addTab(self._build_world_rules_tab(), tr("Règles"))
+        self.universe_tabs.addTab(self._build_world_history_tab(), tr("Histoire"))
+        self.universe_tabs.addTab(self._build_world_lexicon_tab(), tr("Lexique"))
         self.universe_tabs.addTab(
             self._build_record_template_tab("world", self.active_project),
-            "Modèle de fiche",
+            tr("Modèle de fiche"),
         )
         tab_index = int(self.db.setting(f"universe_tab_{self.active_project}", "0") or 0)
         self.universe_tabs.setCurrentIndex(min(max(tab_index, 0), self.universe_tabs.count() - 1))
@@ -10433,7 +10462,7 @@ class StoryForgeWindow(QMainWindow):
         head_copy.addWidget(make_label("CADRE DU RÉCIT", "Caption"))
         head_copy.addWidget(make_label("Les repères qui agissent réellement sur l’histoire", "CardTitle", True))
         head.addLayout(head_copy, 1)
-        head.addWidget(make_button("Enregistrer", "primary", self._save_world_profile))
+        head.addWidget(make_button(tr("Enregistrer"), "primary", self._save_world_profile))
         card_box.addLayout(head)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -10497,7 +10526,7 @@ class StoryForgeWindow(QMainWindow):
         nav.setContentsMargins(14, 14, 14, 14)
         nav.addWidget(make_label("RÈGLES DU MONDE", "Caption"))
         self.world_rule_search = QLineEdit()
-        self.world_rule_search.setPlaceholderText("Rechercher…")
+        self.world_rule_search.setPlaceholderText(tr("Rechercher…"))
         self.world_rule_search.setClearButtonEnabled(True)
         nav.addWidget(self.world_rule_search)
         self.world_rule_list = QListWidget()
@@ -10550,7 +10579,7 @@ class StoryForgeWindow(QMainWindow):
             self.world_rule_fields[key] = field
             form.addWidget(field)
         form.addWidget(make_separator())
-        form.addWidget(make_label("CONNEXIONS", "Caption"))
+        form.addWidget(make_label(tr("CONNEXIONS"), "Caption"))
         form.addWidget(
             make_label(
                 "Coche les éléments directement concernés par cette règle. Ces liens restent facultatifs.",
@@ -10610,9 +10639,9 @@ class StoryForgeWindow(QMainWindow):
         scroll.setWidget(canvas)
         detail_box.addWidget(scroll, 1)
         actions = QHBoxLayout()
-        actions.addWidget(make_button("Enregistrer", "primary", self._save_world_rule))
+        actions.addWidget(make_button(tr("Enregistrer"), "primary", self._save_world_rule))
         actions.addStretch()
-        actions.addWidget(make_button("Supprimer", "danger", self._delete_world_rule))
+        actions.addWidget(make_button(tr("Supprimer"), "danger", self._delete_world_rule))
         detail_box.addLayout(actions)
         outer.addWidget(detail, 1)
         self.world_rule_id: int | None = None
@@ -10811,7 +10840,7 @@ class StoryForgeWindow(QMainWindow):
         head.addWidget(make_label("LEXIQUE PROPRE AU PROJET", "Caption"))
         head.addStretch()
         head.addWidget(make_button("+ Terme", "secondary", self._add_world_term_row))
-        head.addWidget(make_button("Enregistrer", "primary", self._save_world_terms))
+        head.addWidget(make_button(tr("Enregistrer"), "primary", self._save_world_terms))
         box.addLayout(head)
         box.addWidget(make_label("Noms, expressions, objets ou institutions dont le sens doit rester cohérent.", "Muted", True))
         self.world_terms_table = QTableWidget(0, 4)
@@ -10907,7 +10936,7 @@ class StoryForgeWindow(QMainWindow):
         self.theme_tabs.addTab(self._build_theme_motifs_tab(), "Motifs")
         self.theme_tabs.addTab(
             self._build_record_template_tab("theme", self.active_project),
-            "Modèle de fiche",
+            tr("Modèle de fiche"),
         )
         tab_index = int(self.db.setting(f"theme_tab_{self.active_project}", "0") or 0)
         self.theme_tabs.setCurrentIndex(min(max(tab_index, 0), self.theme_tabs.count() - 1))
@@ -10930,7 +10959,7 @@ class StoryForgeWindow(QMainWindow):
         copy.addWidget(make_label(title, "CardTitle", True))
         copy.addWidget(make_label(intro, "Muted", True))
         head.addLayout(copy, 1)
-        head.addWidget(make_button("Enregistrer", "primary", self._save_theme_profile))
+        head.addWidget(make_button(tr("Enregistrer"), "primary", self._save_theme_profile))
         box.addLayout(head)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -11019,7 +11048,7 @@ class StoryForgeWindow(QMainWindow):
         nav.addWidget(make_label("POINTS DE VUE", "Caption"))
         nav.addWidget(make_label("Plusieurs personnages peuvent répondre différemment à la même question.", "Muted", True))
         self.theme_position_search = QLineEdit()
-        self.theme_position_search.setPlaceholderText("Rechercher…")
+        self.theme_position_search.setPlaceholderText(tr("Rechercher…"))
         self.theme_position_search.setClearButtonEnabled(True)
         nav.addWidget(self.theme_position_search)
         self.theme_position_list = QListWidget()
@@ -11084,9 +11113,9 @@ class StoryForgeWindow(QMainWindow):
         scroll.setWidget(canvas)
         box.addWidget(scroll, 1)
         actions = QHBoxLayout()
-        actions.addWidget(make_button("Enregistrer", "primary", self._save_theme_position))
+        actions.addWidget(make_button(tr("Enregistrer"), "primary", self._save_theme_position))
         actions.addStretch()
-        actions.addWidget(make_button("Supprimer", "danger", self._delete_theme_position))
+        actions.addWidget(make_button(tr("Supprimer"), "danger", self._delete_theme_position))
         box.addLayout(actions)
         outer.addWidget(detail, 1)
         self.theme_position_id: int | None = None
@@ -11219,7 +11248,7 @@ class StoryForgeWindow(QMainWindow):
         nav.setContentsMargins(14, 14, 14, 14)
         nav.addWidget(make_label("MOTIFS DU PROJET", "Caption"))
         self.theme_motif_search = QLineEdit()
-        self.theme_motif_search.setPlaceholderText("Rechercher…")
+        self.theme_motif_search.setPlaceholderText(tr("Rechercher…"))
         self.theme_motif_search.setClearButtonEnabled(True)
         nav.addWidget(self.theme_motif_search)
         self.theme_motif_filter = QComboBox()
@@ -11268,7 +11297,7 @@ class StoryForgeWindow(QMainWindow):
             self.theme_motif_fields[key] = field
             form.addWidget(field)
         form.addWidget(make_separator())
-        form.addWidget(make_label("CONNEXIONS", "Caption"))
+        form.addWidget(make_label(tr("CONNEXIONS"), "Caption"))
         form.addWidget(make_label("Relie le motif aux éléments où il existe déjà. Ces liens sont facultatifs.", "Muted", True))
         grid = QGridLayout()
         grid.setHorizontalSpacing(10)
@@ -11313,9 +11342,9 @@ class StoryForgeWindow(QMainWindow):
         scroll.setWidget(canvas)
         box.addWidget(scroll, 1)
         actions = QHBoxLayout()
-        actions.addWidget(make_button("Enregistrer", "primary", self._save_theme_motif))
+        actions.addWidget(make_button(tr("Enregistrer"), "primary", self._save_theme_motif))
         actions.addStretch()
-        actions.addWidget(make_button("Supprimer", "danger", self._delete_theme_motif))
+        actions.addWidget(make_button(tr("Supprimer"), "danger", self._delete_theme_motif))
         box.addLayout(actions)
         outer.addWidget(detail, 1)
         self.theme_motif_id: int | None = None
@@ -11471,10 +11500,10 @@ class StoryForgeWindow(QMainWindow):
         navigation.setFixedWidth(300)
         nav = QVBoxLayout(navigation)
         nav.setContentsMargins(14, 14, 14, 14)
-        nav.addWidget(make_label("CONFLITS", "Caption"))
+        nav.addWidget(make_label(tr("CONFLITS"), "Caption"))
         nav.addWidget(make_label("Principal, secondaire, interne ou relationnel.", "Muted", True))
         self.conflict_search = QLineEdit()
-        self.conflict_search.setPlaceholderText("Rechercher…")
+        self.conflict_search.setPlaceholderText(tr("Rechercher…"))
         self.conflict_search.setClearButtonEnabled(True)
         nav.addWidget(self.conflict_search)
         self.conflict_importance_filter = QComboBox()
@@ -11520,8 +11549,8 @@ class StoryForgeWindow(QMainWindow):
         self.conflict_tabs.setObjectName("ConflictTabs")
         self.conflict_tabs.addTab(self._build_conflict_nucleus_tab(), "Noyau")
         self.conflict_tabs.addTab(self._build_conflict_forces_tab(), "Forces")
-        self.conflict_tabs.addTab(self._build_conflict_progression_tab(), "Progression")
-        self.conflict_tabs.addTab(self._build_conflict_connections_tab(), "Connexions")
+        self.conflict_tabs.addTab(self._build_conflict_progression_tab(), tr("Progression"))
+        self.conflict_tabs.addTab(self._build_conflict_connections_tab(), tr("Connexions"))
         tab_index = int(self.db.setting(f"conflict_tab_{self.active_project}", "0") or 0)
         self.conflict_tabs.setCurrentIndex(min(max(tab_index, 0), self.conflict_tabs.count() - 1))
         self.conflict_tabs.currentChanged.connect(
@@ -11529,9 +11558,9 @@ class StoryForgeWindow(QMainWindow):
         )
         detail_box.addWidget(self.conflict_tabs, 1)
         actions = QHBoxLayout()
-        actions.addWidget(make_button("Enregistrer", "primary", self._save_conflict))
+        actions.addWidget(make_button(tr("Enregistrer"), "primary", self._save_conflict))
         actions.addStretch()
-        actions.addWidget(make_button("Supprimer", "danger", self._delete_conflict))
+        actions.addWidget(make_button(tr("Supprimer"), "danger", self._delete_conflict))
         detail_box.addLayout(actions)
         workspace.addWidget(detail, 1)
         page.addLayout(workspace, 1)
@@ -12036,13 +12065,13 @@ class StoryForgeWindow(QMainWindow):
         library_box.setContentsMargins(14, 14, 14, 14)
         library_box.setSpacing(8)
         library_head = QHBoxLayout()
-        library_head.addWidget(make_label("LIEUX DU PROJET", "Caption"))
+        library_head.addWidget(make_label(tr("LIEUX DU PROJET"), "Caption"))
         library_head.addStretch()
         self.location_count = make_label("0 LIEU", "AccentPill")
         library_head.addWidget(self.location_count)
         library_box.addLayout(library_head)
         self.location_search = QLineEdit()
-        self.location_search.setPlaceholderText("Rechercher un lieu…")
+        self.location_search.setPlaceholderText(tr("Rechercher un lieu…"))
         self.location_search.setClearButtonEnabled(True)
         library_box.addWidget(self.location_search)
         self.location_category_filter = QComboBox()
@@ -12069,7 +12098,7 @@ class StoryForgeWindow(QMainWindow):
         order_actions.addWidget(make_button("↑ Monter", "tertiary", lambda: self._move_location(-1)))
         order_actions.addWidget(make_button("↓ Descendre", "tertiary", lambda: self._move_location(1)))
         library_box.addLayout(order_actions)
-        library_box.addWidget(make_button("+ Nouveau lieu", "primary", self._new_location))
+        library_box.addWidget(make_button(tr("+ Nouveau lieu"), "primary", self._new_location))
         body.addWidget(library)
 
         visual = make_card()
@@ -12079,7 +12108,7 @@ class StoryForgeWindow(QMainWindow):
         visual_box.setContentsMargins(14, 14, 14, 14)
         visual_box.setSpacing(8)
         visual_head = QHBoxLayout()
-        visual_head.addWidget(make_label("IMAGE ET ATMOSPHÈRE", "Caption"))
+        visual_head.addWidget(make_label(tr("IMAGE ET ATMOSPHÈRE"), "Caption"))
         visual_head.addStretch()
         self.location_image_count = make_label("0 IMAGE", "AccentPill")
         visual_head.addWidget(self.location_image_count)
@@ -12108,7 +12137,7 @@ class StoryForgeWindow(QMainWindow):
         image_actions.setHorizontalSpacing(7)
         image_actions.setVerticalSpacing(7)
         self.location_add_image_button = make_button(
-            "+ Ajouter une image", "secondary", self._add_location_image
+            tr("+ Ajouter une image"), "secondary", self._add_location_image
         )
         self.location_primary_image_button = make_button(
             "Définir comme couverture", "secondary", self._set_location_primary_image
@@ -12133,7 +12162,7 @@ class StoryForgeWindow(QMainWindow):
         detail_box = QVBoxLayout(detail)
         detail_box.setContentsMargins(16, 12, 16, 14)
         detail_box.setSpacing(9)
-        detail_box.addWidget(make_label("FICHE DU LIEU", "Caption"))
+        detail_box.addWidget(make_label(tr("FICHE DU LIEU"), "Caption"))
         self.location_fields: dict[str, QLineEdit | QTextEdit | QComboBox] = {}
         self.location_tabs = QTabWidget()
         self.location_tabs.setObjectName("LocationTabs")
@@ -12149,7 +12178,7 @@ class StoryForgeWindow(QMainWindow):
                     ("DESCRIPTION", "description", "text", "Ce qu’il faut comprendre ou visualiser rapidement."),
                 )
             ),
-            "Identité",
+            tr("Identité"),
         )
         self.location_tabs.addTab(
             self._location_form_tab(
@@ -12161,18 +12190,18 @@ class StoryForgeWindow(QMainWindow):
                     ("NOTES", "notes", "text", "Détails pratiques, idées à vérifier ou variantes."),
                 )
             ),
-            "Fonction narrative",
+            tr("Fonction narrative"),
         )
-        self.location_tabs.addTab(self._location_connections_tab(), "Connexions")
+        self.location_tabs.addTab(self._location_connections_tab(), tr("Connexions"))
         self.location_tabs.addTab(
             self._build_record_template_tab("location", self.location_id or 0),
-            "Modèle de fiche",
+            tr("Modèle de fiche"),
         )
         detail_box.addWidget(self.location_tabs, 1)
-        location_save_button = make_button("Enregistrer", "primary", self._save_location)
-        location_cancel_button = make_button("Annuler", "tertiary", self._cancel_location_edits)
+        location_save_button = make_button(tr("Enregistrer"), "primary", self._save_location)
+        location_cancel_button = make_button(tr("Annuler"), "tertiary", self._cancel_location_edits)
         self.location_delete_button = make_button(
-            "Supprimer le lieu", "danger", self._delete_location
+            tr("Supprimer le lieu"), "danger", self._delete_location
         )
         if self.width() < 1500:
             primary_actions = QHBoxLayout()
@@ -12823,13 +12852,13 @@ class StoryForgeWindow(QMainWindow):
         roster_box.setContentsMargins(14, 14, 14, 14)
         roster_box.setSpacing(8)
         roster_head = QHBoxLayout()
-        roster_head.addWidget(make_label("PERSONNAGES", "Caption"))
+        roster_head.addWidget(make_label(tr("PERSONNAGES"), "Caption"))
         roster_head.addStretch()
         self.character_count = make_label("0", "AccentPill")
         roster_head.addWidget(self.character_count)
         roster_box.addLayout(roster_head)
         self.character_list_search = QLineEdit()
-        self.character_list_search.setPlaceholderText("Rechercher…")
+        self.character_list_search.setPlaceholderText(tr("Rechercher…"))
         self.character_list_search.setClearButtonEnabled(True)
         roster_box.addWidget(self.character_list_search)
         self.character_list_role_filter = QComboBox()
@@ -12850,7 +12879,7 @@ class StoryForgeWindow(QMainWindow):
         self.character_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.character_list.setWordWrap(True)
         roster_box.addWidget(self.character_list, 1)
-        roster_box.addWidget(make_button("+ Nouveau personnage", "primary", self._new_character))
+        roster_box.addWidget(make_button(tr("+ Nouveau personnage"), "primary", self._new_character))
         body.addWidget(roster, 0)
 
         left = make_card()
@@ -12859,9 +12888,9 @@ class StoryForgeWindow(QMainWindow):
         left_box = QVBoxLayout(left)
         left_box.setContentsMargins(14, 14, 14, 14)
         left_box.setSpacing(8)
-        left_box.addWidget(make_label("SILHOUETTE ET RÉFÉRENCES", "Caption"))
+        left_box.addWidget(make_label(tr("SILHOUETTE ET RÉFÉRENCES"), "Caption"))
         gender_row = QHBoxLayout()
-        gender_row.addWidget(make_label("Silhouette", "Muted"))
+        gender_row.addWidget(make_label(tr("Silhouette"), "Muted"))
         self.character_gender = QComboBox()
         self.character_gender.addItem("Non précisée", "unspecified")
         self.character_gender.addItem("Femme", "female")
@@ -12877,7 +12906,7 @@ class StoryForgeWindow(QMainWindow):
         left_box.addWidget(self.character_portrait_preview, 1)
         portrait_actions = QHBoxLayout()
         self.character_add_portrait_button = make_button(
-            "+ Ajouter une image", "secondary", self._choose_character_portrait
+            tr("+ Ajouter une image"), "secondary", self._choose_character_portrait
         )
         self.character_remove_portrait_button = make_button(
             "Retirer le portrait", "tertiary", self._remove_character_portrait
@@ -12934,7 +12963,7 @@ class StoryForgeWindow(QMainWindow):
         detail_box = QVBoxLayout(detail)
         detail_box.setContentsMargins(16, 12, 16, 14)
         detail_box.setSpacing(9)
-        detail_box.addWidget(make_label("FICHE DU PERSONNAGE", "Caption"))
+        detail_box.addWidget(make_label(tr("FICHE DU PERSONNAGE"), "Caption"))
         self.character_fields: dict[str, QLineEdit | QTextEdit | QComboBox] = {}
         self.character_tabs = QTabWidget()
         self.character_tabs.setObjectName("CharacterTabs")
@@ -12958,7 +12987,7 @@ class StoryForgeWindow(QMainWindow):
                     ("GROUPES / FACTIONS", "__groups__", False, ""),
                 )
             ),
-            "Essentiel",
+            tr("Essentiel"),
         )
         self.character_tabs.addTab(
             self._character_form_tab(
@@ -12974,7 +13003,7 @@ class StoryForgeWindow(QMainWindow):
                     ("SECRETS", "secrets", True, "Information cachée qui peut modifier les relations ou l’action"),
                 )
             ),
-            "Dramaturgie",
+            tr("Dramaturgie"),
         )
         self.character_tabs.addTab(
             self._character_form_tab(
@@ -12985,7 +13014,7 @@ class StoryForgeWindow(QMainWindow):
                     ("SITUATION À LA FIN", "end_situation", True, "Qui est-elle devenue, ou qu’a-t-elle refusé de devenir ?"),
                 )
             ),
-            "Arc et transformation",
+            tr("Arc et transformation"),
         )
         self.character_tabs.addTab(
             self._character_form_tab(
@@ -12997,17 +13026,17 @@ class StoryForgeWindow(QMainWindow):
                     ("NOTES LIBRES", "notes", True, "Relations, gestes, détails utiles, idées à vérifier…"),
                 )
             ),
-            "Voix et notes",
+            tr("Voix et notes"),
         )
         self.character_connections_tab_index = self.character_tabs.addTab(
-            self._character_connections_tab(), "Connexions"
+            self._character_connections_tab(), tr("Connexions")
         )
         self.character_template_tab_index = self.character_tabs.addTab(
             self._build_record_template_tab("character", self.character_id or 0),
-            "Modèle de fiche",
+            tr("Modèle de fiche"),
         )
         self.character_custom_tab_index = self.character_tabs.addTab(
-            self._character_custom_fields_tab(), "Champs libres"
+            self._character_custom_fields_tab(), tr("Champs libres")
         )
         self.character_tabs.tabBar().hide()
         character_tab_grid = QGridLayout()
@@ -13037,15 +13066,15 @@ class StoryForgeWindow(QMainWindow):
         self.character_tabs.currentChanged.connect(self._character_tab_changed)
         detail_box.addLayout(character_tab_grid)
         detail_box.addWidget(self.character_tabs, 1)
-        character_save_button = make_button("Enregistrer", "primary", self._save_character)
+        character_save_button = make_button(tr("Enregistrer"), "primary", self._save_character)
         character_relations_button = make_button(
-            "Relations", "secondary", self._edit_character_relationships
+            tr("Relations"), "secondary", self._edit_character_relationships
         )
         character_cancel_button = make_button(
-            "Annuler", "tertiary", self._cancel_character_edits
+            tr("Annuler"), "tertiary", self._cancel_character_edits
         )
         self.character_delete_button = make_button(
-            "Supprimer le personnage", "danger", self._delete_character
+            tr("Supprimer le personnage"), "danger", self._delete_character
         )
         if self.width() < 1500:
             primary_actions = QHBoxLayout()
@@ -13091,7 +13120,7 @@ class StoryForgeWindow(QMainWindow):
         box.setContentsMargins(6, 10, 10, 10)
         box.setSpacing(7)
         for label, key, multiline, placeholder in definitions:
-            box.addWidget(make_label(label, "Caption"))
+            box.addWidget(make_label(tr(label), "Caption"))
             if key == "__tags__":
                 self.character_tags = QLineEdit()
                 self.character_tags.setPlaceholderText(
@@ -13527,7 +13556,7 @@ class StoryForgeWindow(QMainWindow):
         groups.setMinimumWidth(250)
         content.addWidget(groups, 2)
         form = QVBoxLayout()
-        form.addWidget(make_label("NOM", "Caption"))
+        form.addWidget(make_label(tr("NOM"), "Caption"))
         name = QLineEdit()
         name.setPlaceholderText("Famille Morel, garde municipale…")
         form.addWidget(name)
@@ -13536,7 +13565,7 @@ class StoryForgeWindow(QMainWindow):
         group_type.setEditable(True)
         group_type.addItems(CHARACTER_GROUP_TYPES)
         form.addWidget(group_type)
-        form.addWidget(make_label("DESCRIPTION", "Caption"))
+        form.addWidget(make_label(tr("DESCRIPTION"), "Caption"))
         description = make_editor(120, "Ce qui rassemble ces personnages et ce que le groupe cherche à obtenir.")
         form.addWidget(description)
         form.addStretch()
@@ -13626,10 +13655,10 @@ class StoryForgeWindow(QMainWindow):
         refresh_groups()
         buttons = QHBoxLayout()
         buttons.addWidget(make_button("Nouveau groupe", "secondary", new_group))
-        buttons.addWidget(make_button("Enregistrer", "primary", save_group))
-        buttons.addWidget(make_button("Supprimer", "danger", delete_group))
+        buttons.addWidget(make_button(tr("Enregistrer"), "primary", save_group))
+        buttons.addWidget(make_button(tr("Supprimer"), "danger", delete_group))
         buttons.addStretch()
-        buttons.addWidget(make_button("Fermer", "secondary", dialog.accept))
+        buttons.addWidget(make_button(tr("Fermer"), "secondary", dialog.accept))
         root.addLayout(buttons)
         dialog.exec()
         self._refresh_character_group_choices()
@@ -14049,9 +14078,9 @@ class StoryForgeWindow(QMainWindow):
         library.itemDoubleClicked.connect(lambda _item: dialog.accept())
         refresh_library()
         actions = QHBoxLayout()
-        actions.addWidget(make_button("+ Nouveau personnage", "secondary", lambda: (dialog.reject(), self._new_character())))
+        actions.addWidget(make_button(tr("+ Nouveau personnage"), "secondary", lambda: (dialog.reject(), self._new_character())))
         actions.addStretch()
-        actions.addWidget(make_button("Fermer", "secondary", dialog.reject))
+        actions.addWidget(make_button(tr("Fermer"), "secondary", dialog.reject))
         actions.addWidget(make_button("Ouvrir la fiche", "primary", dialog.accept))
         box.addLayout(actions)
         if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -14213,9 +14242,9 @@ class StoryForgeWindow(QMainWindow):
         buttons = QHBoxLayout()
         buttons.addWidget(make_button("Nouvelle relation", "secondary", new_relation))
         buttons.addWidget(make_button("Enregistrer la relation", "primary", save_relation))
-        buttons.addWidget(make_button("Supprimer", "danger", delete_relation))
+        buttons.addWidget(make_button(tr("Supprimer"), "danger", delete_relation))
         buttons.addStretch()
-        buttons.addWidget(make_button("Fermer", "secondary", dialog.accept))
+        buttons.addWidget(make_button(tr("Fermer"), "secondary", dialog.accept))
         box.addLayout(buttons)
         dialog.exec()
 
@@ -14260,7 +14289,7 @@ class StoryForgeWindow(QMainWindow):
         library_head.addWidget(self.arc_character_count)
         library_box.addLayout(library_head)
         self.arc_search = QLineEdit()
-        self.arc_search.setPlaceholderText("Rechercher…")
+        self.arc_search.setPlaceholderText(tr("Rechercher…"))
         self.arc_search.setClearButtonEnabled(True)
         library_box.addWidget(self.arc_search)
         self.arc_role_filter = QComboBox()
@@ -14304,9 +14333,9 @@ class StoryForgeWindow(QMainWindow):
         self.arc_tabs.setObjectName("ArcTabs")
         self.arc_tabs.setDocumentMode(True)
         self.arc_overview_table = self._build_arc_overview_tab()
-        self.arc_tabs.addTab(self.arc_overview_table, "Vue d’ensemble")
-        self.arc_tabs.addTab(self._build_arc_trajectory_tab(), "Trajectoire")
-        self.arc_tabs.addTab(self._build_arc_connections_tab(), "Connexions")
+        self.arc_tabs.addTab(self.arc_overview_table, tr("Vue d’ensemble"))
+        self.arc_tabs.addTab(self._build_arc_trajectory_tab(), tr("Trajectoire"))
+        self.arc_tabs.addTab(self._build_arc_connections_tab(), tr("Connexions"))
         workspace_box.addWidget(self.arc_tabs, 1)
         actions = QHBoxLayout()
         actions.addWidget(make_button("Enregistrer l’arc", "primary", self._save_character_arc))
@@ -14384,7 +14413,7 @@ class StoryForgeWindow(QMainWindow):
                 self.arc_fields[key] = field
                 grid.addWidget(field, row + 1, column)
             row += 2
-        grid.addWidget(make_label("NOTES", "Caption"), row, 0, 1, 2)
+        grid.addWidget(make_label(tr("NOTES"), "Caption"), row, 0, 1, 2)
         notes = make_editor(88, "Variantes, hésitations ou éléments à vérifier.")
         notes.setProperty("arcField", True)
         self.arc_fields["notes"] = notes
@@ -14783,7 +14812,7 @@ class StoryForgeWindow(QMainWindow):
         box.setContentsMargins(16, 14, 16, 14)
         box.setSpacing(8)
         heading = QHBoxLayout()
-        heading.addWidget(make_label("ACCROCHE ET PROMESSES", "Caption"))
+        heading.addWidget(make_label(tr("ACCROCHE ET PROMESSES"), "Caption"))
         heading.addStretch()
         self.promise_diagnostic = make_label("0 À SUIVRE", "AccentPill")
         heading.addWidget(self.promise_diagnostic)
@@ -14799,10 +14828,10 @@ class StoryForgeWindow(QMainWindow):
         self.promise_tabs = QTabWidget()
         self.promise_tabs.setObjectName("PromiseTabs")
         self.promise_tabs.setDocumentMode(True)
-        self.promise_tabs.addTab(self._build_hook_tab(), "Accroche")
-        self.promise_tabs.addTab(self._build_promises_tab(), "Promesses")
-        self.promise_tabs.addTab(self._build_story_moments_tab(), "Moments forts")
-        self.promise_tabs.addTab(self._build_promise_control_tab(), "Vue de contrôle")
+        self.promise_tabs.addTab(self._build_hook_tab(), tr("Accroche"))
+        self.promise_tabs.addTab(self._build_promises_tab(), tr("Promesses"))
+        self.promise_tabs.addTab(self._build_story_moments_tab(), tr("Moments forts"))
+        self.promise_tabs.addTab(self._build_promise_control_tab(), tr("Vue de contrôle"))
         box.addWidget(self.promise_tabs, 1)
         page.addWidget(workspace, 1)
 
@@ -14869,13 +14898,13 @@ class StoryForgeWindow(QMainWindow):
         library_box.setContentsMargins(12, 12, 12, 12)
         library_box.setSpacing(8)
         head = QHBoxLayout()
-        head.addWidget(make_label("PROMESSES", "Caption"))
+        head.addWidget(make_label(tr("PROMESSES"), "Caption"))
         head.addStretch()
         self.story_promise_count = make_label("0", "AccentPill")
         head.addWidget(self.story_promise_count)
         library_box.addLayout(head)
         self.story_promise_search = QLineEdit()
-        self.story_promise_search.setPlaceholderText("Rechercher…")
+        self.story_promise_search.setPlaceholderText(tr("Rechercher…"))
         self.story_promise_search.setClearButtonEnabled(True)
         library_box.addWidget(self.story_promise_search)
         self.story_promise_filter = QComboBox()
@@ -14914,7 +14943,7 @@ class StoryForgeWindow(QMainWindow):
         status = QComboBox()
         status.addItems(STORY_PROMISE_STATUSES)
         self.story_promise_fields.update(title=title, promise_type=promise_type, status=status)
-        form.addWidget(make_label("TITRE", "Caption"), 0, 0, 1, 2)
+        form.addWidget(make_label(tr("TITRE"), "Caption"), 0, 0, 1, 2)
         form.addWidget(title, 1, 0, 1, 2)
         form.addWidget(make_label("TYPE", "Caption"), 2, 0)
         form.addWidget(make_label("ÉTAT", "Caption"), 2, 1)
@@ -14956,9 +14985,9 @@ class StoryForgeWindow(QMainWindow):
         scroll.setWidget(canvas)
         detail_box.addWidget(scroll, 1)
         actions = QHBoxLayout()
-        actions.addWidget(make_button("Enregistrer", "primary", self._save_story_promise))
+        actions.addWidget(make_button(tr("Enregistrer"), "primary", self._save_story_promise))
         actions.addStretch()
-        actions.addWidget(make_button("Supprimer", "danger", self._delete_story_promise))
+        actions.addWidget(make_button(tr("Supprimer"), "danger", self._delete_story_promise))
         detail_box.addLayout(actions)
         body.addWidget(detail, 1)
 
@@ -14984,7 +15013,7 @@ class StoryForgeWindow(QMainWindow):
         head.addWidget(self.story_moment_count)
         library_box.addLayout(head)
         self.story_moment_search = QLineEdit()
-        self.story_moment_search.setPlaceholderText("Rechercher…")
+        self.story_moment_search.setPlaceholderText(tr("Rechercher…"))
         self.story_moment_search.setClearButtonEnabled(True)
         library_box.addWidget(self.story_moment_search)
         self.story_moment_filter = QComboBox()
@@ -15023,7 +15052,7 @@ class StoryForgeWindow(QMainWindow):
         status = QComboBox()
         status.addItems(STORY_MOMENT_STATUSES)
         self.story_moment_fields.update(title=title, moment_type=moment_type, status=status)
-        form.addWidget(make_label("TITRE", "Caption"), 0, 0, 1, 2)
+        form.addWidget(make_label(tr("TITRE"), "Caption"), 0, 0, 1, 2)
         form.addWidget(title, 1, 0, 1, 2)
         form.addWidget(make_label("TYPE", "Caption"), 2, 0)
         form.addWidget(make_label("ÉTAT", "Caption"), 2, 1)
@@ -15064,12 +15093,12 @@ class StoryForgeWindow(QMainWindow):
         scroll.setWidget(canvas)
         detail_box.addWidget(scroll, 1)
         actions = QHBoxLayout()
-        actions.addWidget(make_button("Enregistrer", "primary", self._save_story_moment))
+        actions.addWidget(make_button(tr("Enregistrer"), "primary", self._save_story_moment))
         actions.addWidget(make_button("Créer une carte", "secondary", lambda: self._convert_story_moment("story_node")))
         actions.addWidget(make_button("Créer une séquence", "secondary", lambda: self._convert_story_moment("sequence")))
         actions.addWidget(make_button("Créer une scène", "secondary", lambda: self._convert_story_moment("scene")))
         actions.addStretch()
-        actions.addWidget(make_button("Supprimer", "danger", self._delete_story_moment))
+        actions.addWidget(make_button(tr("Supprimer"), "danger", self._delete_story_moment))
         detail_box.addLayout(actions)
         body.addWidget(detail, 1)
         self.story_moment_search.textChanged.connect(self._refresh_story_moments)
@@ -15518,7 +15547,7 @@ class StoryForgeWindow(QMainWindow):
         head.addStretch()
         self.image_count = make_label("0", "AccentPill")
         head.addWidget(self.image_count)
-        head.addWidget(make_button("+ Ajouter une image", "primary", self._add_library_image))
+        head.addWidget(make_button(tr("+ Ajouter une image"), "primary", self._add_library_image))
         library_box.addLayout(head)
         filters = QHBoxLayout()
         self.image_search = QLineEdit()
@@ -15551,7 +15580,7 @@ class StoryForgeWindow(QMainWindow):
         library_box.addWidget(self.image_library_list, 1)
         actions = QHBoxLayout()
         actions.addWidget(make_button("Ouvrir", "secondary", self._open_library_image))
-        actions.addWidget(make_button("Supprimer", "danger", self._delete_library_image))
+        actions.addWidget(make_button(tr("Supprimer"), "danger", self._delete_library_image))
         actions.addStretch()
         actions.addWidget(make_label("Les images sont enregistrées dans la base locale du projet.", "Muted"))
         library_box.addLayout(actions)
@@ -15697,7 +15726,7 @@ class StoryForgeWindow(QMainWindow):
 
         heading = QHBoxLayout()
         title_box = QVBoxLayout()
-        title_box.setSpacing(3)
+        title_box.setSpacing(12)
         title_box.addWidget(make_label("VUE COORDONNÉE DU RÉCIT", "Kicker"))
         title_box.addWidget(
             make_label(project["title"] if project else "Vue d’ensemble", "PageTitle")
@@ -15886,7 +15915,7 @@ class StoryForgeWindow(QMainWindow):
         box = QVBoxLayout(panel)
         box.setContentsMargins(22, 22, 22, 22)
         box.setSpacing(8)
-        box.addWidget(make_label("SCÉNARIO", "Caption"))
+        box.addWidget(make_label(tr("SCÉNARIO"), "Caption"))
         self.overview_script_title = make_label("Scénario du projet", "SectionTitle")
         box.addWidget(self.overview_script_title)
         self.overview_script_summary = make_label("", "Muted", True)
@@ -16107,14 +16136,27 @@ class StoryForgeWindow(QMainWindow):
             (self.active_project,),
         )
         script_text = script["content"] if script else ""
-        elements = parse_screenplay(script_text)
+        meta = self.db.one("SELECT document_json FROM script_meta WHERE project_id=?", (self.active_project,))
+        document = ScreenplayDocument.from_json(meta["document_json"] if meta else "")
+        elements = (document.elements() if document and document.to_plain_text().strip() == script_text.strip()
+                    else parse_screenplay(script_text))
         scene_count = sum(1 for element, _value in elements if element == "Scene Heading")
         self.overview_script_title.setText(script["title"] if script else "Scénario")
         self.overview_script_summary.setText(
             f"{scene_count} scène{'s' if scene_count != 1 else ''} écrite{'s' if scene_count != 1 else ''} · "
             f"{len(script_text.split())} mots · le texte affiché ici reste en lecture seule."
         )
-        self.overview_script_excerpt.setPlainText(script_text)
+        blocks = []
+        indents = {"Scene Heading": (0, 0), "Action": (0, 0),
+                   "Character": (40, 10), "Dialogue": (20, 20),
+                   "Parenthetical": (28, 25), "Transition": (60, 0)}
+        for kind, value in elements:
+            left, right = indents.get(kind, (0, 0))
+            blocks.append(f'<p style="margin-left:{left * 5}px; margin-right:{right * 5}px; '
+                          f'margin-top:12px;">{escape(value).replace(chr(10), "<br>")}</p>')
+        self.overview_script_excerpt.setHtml(
+            '<html><body style="font-family:Courier; font-size:12pt;">' + ''.join(blocks) + '</body></html>'
+        )
 
     def _refresh_overview_timeline(
         self, query: str, tag_id: int, tagged_pairs: set[tuple[str, int]]
@@ -16383,7 +16425,7 @@ class StoryForgeWindow(QMainWindow):
 
         actions = QHBoxLayout()
         actions.addStretch()
-        actions.addWidget(make_button("Annuler", "secondary", dialog.reject))
+        actions.addWidget(make_button(tr("Annuler"), "secondary", dialog.reject))
         actions.addWidget(
             make_button("Continuer" if include_start_mode else "Enregistrer", "primary", dialog.accept)
         )
@@ -16435,7 +16477,7 @@ class StoryForgeWindow(QMainWindow):
         head.addStretch()
         self.project_count = make_label("0", "AccentPill")
         head.addWidget(self.project_count)
-        head.addWidget(make_button("Importer", "secondary", self._import_project))
+        head.addWidget(make_button(tr("Importer"), "secondary", self._import_project))
         head.addWidget(make_button("＋ Nouveau projet", "primary", self._new_project))
         projects_box.addLayout(head)
 
@@ -16480,7 +16522,7 @@ class StoryForgeWindow(QMainWindow):
         self.project_manage_buttons = []
         for button in (
             make_button("Activer", "secondary", self._activate_project),
-            make_button("Dupliquer", "secondary", self._duplicate_project),
+            make_button(tr("Dupliquer"), "secondary", self._duplicate_project),
         ):
             button.setEnabled(False)
             self.project_manage_buttons.append(button)
@@ -16841,8 +16883,8 @@ class StoryForgeWindow(QMainWindow):
         box.addWidget(scroll, 1)
         actions = QHBoxLayout()
         actions.addStretch()
-        actions.addWidget(make_button("Annuler", "secondary", dialog.reject))
-        save = make_button("Enregistrer", "primary")
+        actions.addWidget(make_button(tr("Annuler"), "secondary", dialog.reject))
+        save = make_button(tr("Enregistrer"), "primary")
         actions.addWidget(save)
         box.addLayout(actions)
 
@@ -17081,6 +17123,11 @@ class StoryForgeWindow(QMainWindow):
                 json.dumps(metadata_payload, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
+            # Human-readable documents ship as paginated PDFs. Temporary Markdown
+            # is only an intermediate representation, never part of the archive.
+            for source in sorted(root.rglob("*.md")):
+                export_report_pdf(source.with_suffix(".pdf"), source.read_text(encoding="utf-8"), project["title"])
+                source.unlink()
             files_before_manifest = [
                 path for path in root.rglob("*") if path.is_file()
             ]
@@ -17568,8 +17615,8 @@ class StoryForgeWindow(QMainWindow):
         page_header_box = QVBoxLayout(page_header)
         page_header_box.setContentsMargins(0, 0, 0, 0)
         page_header_box.setSpacing(5)
-        page_header_box.addWidget(make_label("ÉCRIRE POUR L’ÉCRAN", "Kicker"))
-        page_header_box.addWidget(make_label("Éditeur de scripts", "PageTitle"))
+        page_header_box.addWidget(make_label(tr("ÉCRIRE POUR L’ÉCRAN"), "Kicker"))
+        page_header_box.addWidget(make_label(tr("Éditeur de scripts"), "PageTitle"))
         page_header_box.addWidget(
             make_label(
                 "Écris le premier jet tout en gardant les scènes et personnages du projet à portée de main.",
@@ -17625,10 +17672,10 @@ class StoryForgeWindow(QMainWindow):
         navigator_actions = QVBoxLayout()
         navigator_actions.setSpacing(6)
         navigator_actions.addWidget(
-            make_button("+ Nouvelle scène libre", "secondary", self._insert_script_scene)
+            make_button(tr("+ Nouvelle scène libre"), "secondary", self._insert_script_scene)
         )
         self.script_insert_prepared_button = make_button(
-            "Insérer la scène préparée", "primary", self._insert_selected_prepared_scene
+            tr("Insérer la scène préparée"), "primary", self._insert_selected_prepared_scene
         )
         self.script_insert_prepared_button.setEnabled(False)
         navigator_actions.addWidget(self.script_insert_prepared_button)
@@ -17645,11 +17692,11 @@ class StoryForgeWindow(QMainWindow):
         self.script_metrics = make_label("", "Muted")
         head.addWidget(self.script_metrics)
         self.script_context_toggle = make_button(
-            "Contexte", "secondary", self._toggle_script_context
+            tr("Contexte"), "secondary", self._toggle_script_context
         )
         head.addWidget(self.script_context_toggle)
         self.script_focus_button = make_button(
-            "Concentration", "tertiary", self._toggle_script_focus_mode
+            tr("Concentration"), "tertiary", self._toggle_script_focus_mode
         )
         self.script_focus_button.setToolTip("Masquer les panneaux · Ctrl+Maj+F")
         head.addWidget(self.script_focus_button)
@@ -17699,7 +17746,7 @@ class StoryForgeWindow(QMainWindow):
 
         element_row = QHBoxLayout()
         self.script_element_state = make_label(
-            "SCÈNE",
+            tr("SCÈNE"),
             "AccentPill",
         )
         self.script_element_state.setToolTip("Tab : type suivant · Maj + Tab : type précédent")
@@ -17721,7 +17768,7 @@ class StoryForgeWindow(QMainWindow):
             "Titre, auteur, version, contact et mentions du scénario"
         )
         element_row.addWidget(self.script_title_page_button)
-        element_row.addWidget(make_button("Importer FDX", "quiet", self._import_script_fdx))
+        element_row.addWidget(make_button(tr("Importer FDX"), "quiet", self._import_script_fdx))
         tools_box.addLayout(element_row)
         self.script_tools_panel = tools_panel
         editor_box.addWidget(tools_panel)
@@ -17781,11 +17828,11 @@ class StoryForgeWindow(QMainWindow):
         footer = QWidget()
         actions = QHBoxLayout(footer)
         actions.setContentsMargins(0, 0, 0, 0)
-        actions.addWidget(make_button("Enregistrer", "primary", self._save_script))
-        actions.addWidget(make_button("Créer une version", "secondary", self._snapshot_script))
+        actions.addWidget(make_button(tr("Enregistrer"), "primary", self._save_script))
+        actions.addWidget(make_button(tr("Créer une version"), "secondary", self._snapshot_script))
         actions.addStretch()
-        actions.addWidget(make_button("Exporter FDX", "secondary", self._export_script_fdx))
-        actions.addWidget(make_button("Exporter PDF", "primary", self._export_script_pdf))
+        actions.addWidget(make_button(tr("Exporter FDX"), "secondary", self._export_script_fdx))
+        actions.addWidget(make_button(tr("Exporter PDF"), "primary", self._export_script_pdf))
         self.script_footer_panel = footer
         editor_box.addWidget(footer)
         body.addWidget(editor_card, 1)
@@ -17895,7 +17942,7 @@ class StoryForgeWindow(QMainWindow):
         box.setSpacing(8)
 
         header = QHBoxLayout()
-        header.addWidget(make_label("CONTEXTE DE LA SCÈNE", "Caption"))
+        header.addWidget(make_label(tr("CONTEXTE DE LA SCÈNE"), "Caption"))
         header.addStretch()
         self.script_context_state = make_label("AUCUNE", "AccentPill")
         self.script_context_state.setSizePolicy(
@@ -17918,27 +17965,27 @@ class StoryForgeWindow(QMainWindow):
         content.addWidget(self.script_context_number)
         content.addWidget(self.script_context_title)
         content.addWidget(make_separator())
-        content.addWidget(make_label("OBJECTIF", "Caption"))
+        content.addWidget(make_label(tr("OBJECTIF"), "Caption"))
         self.script_context_objective = make_label(
             "La scène préparée indiquera ici ce qu’elle doit accomplir.",
             "Body",
             True,
         )
         content.addWidget(self.script_context_objective)
-        content.addWidget(make_label("PERSONNAGES", "Caption"))
+        content.addWidget(make_label(tr("PERSONNAGES"), "Caption"))
         self.script_context_characters = QWidget()
         self.script_context_characters_layout = QVBoxLayout(self.script_context_characters)
         self.script_context_characters_layout.setContentsMargins(0, 0, 0, 0)
         self.script_context_characters_layout.setSpacing(5)
         content.addWidget(self.script_context_characters)
-        content.addWidget(make_label("CONTEXTE", "Caption"))
+        content.addWidget(make_label(tr("CONTEXTE"), "Caption"))
         self.script_context_details = make_label(
             "Lieu, entrée, opposition et sortie apparaîtront ici.",
             "Muted",
             True,
         )
         content.addWidget(self.script_context_details)
-        content.addWidget(make_label("SCÈNES VOISINES", "Caption"))
+        content.addWidget(make_label(tr("SCÈNES VOISINES"), "Caption"))
         self.script_previous_scene_button = make_button(
             "← Aucune scène précédente", "tertiary", lambda: self._select_script_relative_scene(-1)
         )
@@ -17954,12 +18001,12 @@ class StoryForgeWindow(QMainWindow):
         box.addWidget(scroll, 1)
 
         self.script_context_insert_button = make_button(
-            "Insérer dans le scénario", "primary", self._insert_selected_prepared_scene
+            tr("Insérer dans le scénario"), "primary", self._insert_selected_prepared_scene
         )
         self.script_context_insert_button.setEnabled(False)
         box.addWidget(self.script_context_insert_button)
         self.script_context_open_button = make_button(
-            "Ouvrir dans Construction", "secondary", self._open_script_scene_in_construction
+            tr("Ouvrir dans Construction"), "secondary", self._open_script_scene_in_construction
         )
         self.script_context_open_button.setEnabled(False)
         box.addWidget(self.script_context_open_button)
@@ -18071,7 +18118,7 @@ class StoryForgeWindow(QMainWindow):
                 "Cette scène existe seulement dans le scénario pour le moment."
             )
             self.script_context_characters_layout.addWidget(
-                make_label("Aucun personnage préparé", "Muted", True)
+                make_label(tr("Aucun personnage préparé"), "Muted", True)
             )
             self.script_context_details.setText(
                 "Tu peux continuer à écrire librement ou préparer cette scène dans Construction."
@@ -18300,10 +18347,32 @@ class StoryForgeWindow(QMainWindow):
         if self._infer_script_element_from_cursor() != "scene":
             completer.popup().hide()
             return
-        prefix = editor.textCursor().block().text().strip().upper()
-        if len(prefix) < 3 or not prefix.startswith(("INT", "EXT", "I/E")):
+        cursor = editor.textCursor()
+        prefix = cursor.block().text().strip().upper()
+        if cursor.hasSelection() or not cursor.atBlockEnd() or not prefix:
             completer.popup().hide()
             return
+        options = []
+        if "." not in prefix:
+            options = [p for p in ("INT.", "EXT.", "INT./EXT.", "I/E.") if p.startswith(prefix)]
+        else:
+            match = re.match(r"^(INT\./EXT\.|EXT\./INT\.|INT\.|EXT\.|I/E\.)\s*(.*)$", prefix)
+            if match:
+                start, rest = match.groups()
+                if " -" in rest:
+                    place, moment = rest.rsplit(" -", 1)
+                    options = [f"{start} {place} - {time}" for time in
+                               ("JOUR", "NUIT", "AUBE", "CRÉPUSCULE", "CONTINU", "PLUS TARD")
+                               if time.startswith(moment.strip())]
+                else:
+                    places = set()
+                    for heading in self._script_scene_completion_candidates():
+                        found = re.match(r"^(?:INT\./EXT\.|EXT\./INT\.|INT\.|EXT\.|I/E\.)\s+(.+?)(?: - .*)?$", heading)
+                        if found:
+                            places.add(found.group(1))
+                    options = [f"{start} {place}" for place in sorted(places) if place.startswith(rest)]
+        options = [value for value in options if value != prefix]
+        self.script_scene_completer_model.setStringList(options)
         completer.setCompletionPrefix(prefix)
         if completer.completionCount() == 0:
             completer.popup().hide()
@@ -18532,7 +18601,19 @@ class StoryForgeWindow(QMainWindow):
         self.script_text.setFocus()
 
     def _insert_script_scene(self) -> None:
-        self._insert_script_element("scene")
+        cursor = self.script_text.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        cursor.beginEditBlock()
+        if cursor.block().text().strip():
+            cursor.insertBlock()
+        cursor.insertText("INT. LIEU - JOUR")
+        self.script_text.setTextCursor(cursor)
+        self._set_script_element_mode("scene")
+        self._apply_script_block_format("scene", cursor)
+        cursor.endEditBlock()
+        self._sync_script_document_from_editor()
+        self._refresh_script_structure()
+        self.script_text.setFocus()
 
     def _script_element_caption(self, element: str) -> str:
         return {
@@ -18592,7 +18673,7 @@ class StoryForgeWindow(QMainWindow):
         # Keep an in-progress scene prefix in the scene mode.  Without this
         # guard, a partial uppercase value such as ``INT`` is mistaken for a
         # character cue before the writer has typed the period.
-        if upper in {"INT", "EXT", "I/E"}:
+        if upper in {"I", "IN", "INT", "E", "EX", "EXT", "I/E"}:
             return "scene"
         if upper.startswith(("INT.", "EXT.", "INT./EXT.", "EXT./INT.", "I/E.")):
             return "scene"
@@ -18719,7 +18800,7 @@ class StoryForgeWindow(QMainWindow):
             return state_element
         line = block.text().strip()
         upper = line.upper()
-        if upper in {"INT", "EXT", "I/E"}:
+        if upper in {"I", "IN", "INT", "E", "EX", "EXT", "I/E"}:
             return "scene"
         if upper.startswith(("INT.", "EXT.", "INT./EXT.", "EXT./INT.", "I/E.")):
             return "scene"
@@ -18833,12 +18914,12 @@ class StoryForgeWindow(QMainWindow):
     def _edit_script_title_page(self) -> None:
         meta = self._script_meta()
         dialog = QDialog(self)
-        dialog.setWindowTitle("Page de garde")
+        dialog.setWindowTitle(tr("Page de garde"))
         dialog.resize(620, 650)
         box = QVBoxLayout(dialog)
         box.setContentsMargins(24, 22, 24, 22)
         box.setSpacing(8)
-        box.addWidget(make_label("PAGE DE TITRE", "Caption"))
+        box.addWidget(make_label(tr("PAGE DE TITRE"), "Caption"))
         box.addWidget(make_label("Page de garde du scénario", "SectionTitle"))
         box.addWidget(
             make_label(
@@ -18869,7 +18950,7 @@ class StoryForgeWindow(QMainWindow):
             box.addWidget(field)
         actions = QHBoxLayout()
         actions.addStretch()
-        actions.addWidget(make_button("Annuler", "secondary", dialog.reject))
+        actions.addWidget(make_button(tr("Annuler"), "secondary", dialog.reject))
         actions.addWidget(make_button("Enregistrer la page", "primary", dialog.accept))
         box.addLayout(actions)
         if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -18942,7 +19023,7 @@ class StoryForgeWindow(QMainWindow):
             self._update_continued_character_cue()
         target = {
             "scene": "action",
-            "action": "action",
+            "action": "character",
             "character": "dialogue",
             "dialogue": "action",
             "parenthetical": "dialogue",
@@ -19185,7 +19266,7 @@ class StoryForgeWindow(QMainWindow):
         nav.setFixedWidth(220)
         nav_box = QVBoxLayout(nav)
         nav_box.setContentsMargins(12, 14, 12, 14)
-        nav_box.addWidget(make_label("DOCUMENTS", "Caption"))
+        nav_box.addWidget(make_label(tr("DOCUMENTS"), "Caption"))
         nav_box.addSpacing(5)
         self.doc_type = self.db.setting(f"last_doc_{self.active_project}", "summary")
         if self.doc_type not in dict(DOC_TYPES):
@@ -19249,7 +19330,7 @@ class StoryForgeWindow(QMainWindow):
         actions = QHBoxLayout(action_bar)
         actions.setContentsMargins(0, 4, 0, 0)
         actions.setSpacing(8)
-        actions.addWidget(make_button("Enregistrer", "primary", self._save_doc))
+        actions.addWidget(make_button(tr("Enregistrer"), "primary", self._save_doc))
         actions.addWidget(make_button("Version" if self.width() < 1250 else "Créer une version", "secondary", self._snapshot))
         actions.addWidget(make_button("Diagnostic local" if self.width() >= 1250 else "Diagnostic", "secondary", self._diagnostic))
         actions.addStretch()
@@ -19301,8 +19382,8 @@ class StoryForgeWindow(QMainWindow):
         box.addStretch()
         actions = QHBoxLayout()
         actions.addStretch()
-        actions.addWidget(make_button("Annuler", "secondary", dialog.reject))
-        save_button = make_button("Enregistrer", "primary")
+        actions.addWidget(make_button(tr("Annuler"), "secondary", dialog.reject))
+        save_button = make_button(tr("Enregistrer"), "primary")
         actions.addWidget(save_button)
         box.addLayout(actions)
 
@@ -19444,8 +19525,8 @@ class StoryForgeWindow(QMainWindow):
         box.addStretch()
         actions = QHBoxLayout()
         actions.addStretch()
-        actions.addWidget(make_button("Annuler", "secondary", dialog.reject))
-        save_button = make_button("Enregistrer", "primary")
+        actions.addWidget(make_button(tr("Annuler"), "secondary", dialog.reject))
+        save_button = make_button(tr("Enregistrer"), "primary")
         actions.addWidget(save_button)
         box.addLayout(actions)
 
@@ -19643,7 +19724,7 @@ class StoryForgeWindow(QMainWindow):
         if not self._need_project():
             return
         page = self._begin_page("Réécriture", "rewrite")
-        self._page_header(page, "Comparer avant de corriger", "Réécriture", "Diagnostic d’abord. Macro avant micro. Garde une trace de ce qui change.")
+        self._page_header(page, "Comparer avant de corriger", tr("Réécriture"), "Diagnostic d’abord. Macro avant micro. Garde une trace de ce qui change.")
         body = QHBoxLayout()
         body.setSpacing(14)
         left = make_card()
@@ -20068,7 +20149,7 @@ class StoryForgeWindow(QMainWindow):
         self._page_header(
             page,
             "Outils du projet",
-            "Modèles de fiches",
+            tr("Modèles de fiches"),
             "Crée des champs réutilisables pour tes personnages, lieux, scènes ou éléments d’univers, sans remplacer les informations essentielles de StoryForge.",
         )
 
@@ -20132,10 +20213,10 @@ class StoryForgeWindow(QMainWindow):
         )
         library_actions = QHBoxLayout()
         duplicate_button = make_button(
-            "Dupliquer", "secondary", self._duplicate_form_template
+            tr("Dupliquer"), "secondary", self._duplicate_form_template
         )
         delete_button = make_button(
-            "Supprimer", "danger", self._delete_form_template
+            tr("Supprimer"), "danger", self._delete_form_template
         )
         duplicate_button.setEnabled(bool(selected))
         delete_button.setEnabled(bool(selected))
@@ -20739,13 +20820,13 @@ class StoryForgeWindow(QMainWindow):
         self._page_header(
             page,
             "Ressources",
-            "Banque de templates",
+            tr("Banque de templates"),
             "Des cartes de travail facultatives pour débloquer ou diagnostiquer une histoire — jamais des règles à remplir.",
         )
         mode_bar = make_card()
         mode_box = QHBoxLayout(mode_bar)
         mode_box.setContentsMargins(16, 10, 16, 10)
-        mode_box.addWidget(make_label("MODE D’AFFICHAGE", "Caption"))
+        mode_box.addWidget(make_label(tr("MODE D’AFFICHAGE"), "Caption"))
         mode_box.addStretch()
         self.template_view_selector = QComboBox()
         self.template_view_selector.addItem("Vue traditionnelle", "traditional")
@@ -20769,7 +20850,7 @@ class StoryForgeWindow(QMainWindow):
         navigation_box = QVBoxLayout(navigation)
         navigation_box.setContentsMargins(12, 14, 12, 14)
         navigation_box.setSpacing(7)
-        navigation_box.addWidget(make_label("CHOISIR UN OUTIL", "Caption"))
+        navigation_box.addWidget(make_label(tr("CHOISIR UN OUTIL"), "Caption"))
         navigation_box.addWidget(
             make_label("Les structures classiques et beat sheets restent optionnelles.", "Muted", True)
         )
@@ -20863,7 +20944,7 @@ class StoryForgeWindow(QMainWindow):
             actions.addWidget(make_label("Choisis un projet avant d’utiliser un template.", "Muted", True))
         actions.addStretch()
         apply_button = make_button(
-            "Ajouter au séquencier",
+            tr("Ajouter au séquencier"),
             "primary",
             lambda _checked=False, key=selected["key"]: self._apply_template_to_sequence(key),
         )
@@ -20878,57 +20959,8 @@ class StoryForgeWindow(QMainWindow):
         self.show_templates()
 
     def _build_template_visual_view(self, template: dict) -> QGraphicsView:
-        scene = QGraphicsScene(self)
-        view = QGraphicsView(scene)
-        view.setObjectName("TemplateVisualCanvas")
-        view.setRenderHint(QPainter.RenderHint.Antialiasing)
-        view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
-        node_width = 300.0
-        node_height = 118.0
-        gap_x = 80.0
-        gap_y = 54.0
-        columns = 2
-        positions: list[QPointF] = []
-        for index, (title, purpose, _events, consequence) in enumerate(template["steps"]):
-            row = index // columns
-            column = index % columns
-            if row % 2:
-                column = columns - 1 - column
-            x = 30.0 + column * (node_width + gap_x)
-            y = 30.0 + row * (node_height + gap_y)
-            positions.append(QPointF(x, y))
-            rect = scene.addRect(
-                x, y, node_width, node_height,
-                QPen(QColor(self.palette.accent), 1.5),
-                QBrush(QColor(self.palette.surface_raised)),
-            )
-            rect.setToolTip(f"{purpose}\n\nConséquence : {consequence}")
-            number = scene.addText(f"{index + 1:02d}")
-            number.setDefaultTextColor(QColor(self.palette.accent))
-            number.setPos(x + 12, y + 8)
-            title_item = scene.addText(title)
-            title_item.setDefaultTextColor(QColor(self.palette.text))
-            title_font = title_item.font()
-            title_font.setBold(True)
-            title_font.setPointSize(10)
-            title_item.setFont(title_font)
-            title_item.setTextWidth(node_width - 58)
-            title_item.setPos(x + 48, y + 7)
-            purpose_item = scene.addText(purpose)
-            purpose_item.setDefaultTextColor(QColor(self.palette.muted))
-            purpose_item.setTextWidth(node_width - 26)
-            purpose_item.setPos(x + 12, y + 43)
-        for source, target in pairwise(positions):
-            source_center = QPointF(source.x() + node_width / 2, source.y() + node_height / 2)
-            target_center = QPointF(target.x() + node_width / 2, target.y() + node_height / 2)
-            line = scene.addLine(
-                source_center.x(), source_center.y(), target_center.x(), target_center.y(),
-                QPen(QColor(self.palette.border_strong), 2.0),
-            )
-            line.setZValue(-1)
-        rows = math.ceil(len(template["steps"]) / columns)
-        scene.setSceneRect(0, 0, 2 * node_width + gap_x + 60, rows * (node_height + gap_y) + 30)
-        return view
+        return build_diagram(template, self.palette, self)
+
 
     def _template_tree_clicked(self, item: QTreeWidgetItem) -> None:
         key = item.data(0, Qt.ItemDataRole.UserRole)
@@ -20965,12 +20997,55 @@ class StoryForgeWindow(QMainWindow):
 
     # ---------- Glossary ----------
 
+    def show_genres(self) -> None:
+        page = self._begin_page("Genres", "genres")
+        self._page_header(page, "Bibliothèque", tr("Explorer les genres"),
+                          "Des repères, pas des cases : croise les genres, choisis ta promesse et détourne les conventions librement.")
+        search = QLineEdit()
+        search.setPlaceholderText("Rechercher un genre, une caractéristique, une distinction…")
+        page.addWidget(search)
+        page.addSpacing(12)
+        row = QHBoxLayout()
+        listing = QListWidget()
+        listing.setObjectName("GenreList")
+        listing.setMinimumWidth(260)
+        detail = make_editor(240)
+        detail.setReadOnly(True)
+        detail.setObjectName("Editor")
+        def populate(query=""):
+            listing.clear()
+            for index, entry in enumerate(GENRES):
+                if query.casefold() in " ".join(entry).casefold():
+                    item = QListWidgetItem(entry[0])
+                    item.setSizeHint(QSize(240, 46))
+                    item.setData(Qt.ItemDataRole.UserRole, index)
+                    listing.addItem(item)
+            if listing.count():
+                listing.setCurrentRow(0)
+            else:
+                detail.setPlainText("Aucun genre ne correspond à cette recherche.")
+        def select(current, previous=None):
+            if current is None:
+                return
+            title, definition, features, distinctions = GENRES[current.data(Qt.ItemDataRole.UserRole)]
+            detail.setHtml(f"<h1>{escape(title)}</h1><h2>Promesse et moteur</h2><p>{escape(definition)}</p>"
+                           f"<h2>Ce qui le caractérise</h2><p>{escape(features)}</p>"
+                           f"<h2>Distinctions et croisements</h2><p>{escape(distinctions)}</p>"
+                           "<h2>Pour ton histoire</h2><p>Quelle expérience veux-tu proposer ? Quelles conventions te servent, "
+                           "et lesquelles veux-tu déplacer ? Aucun choix de genre n’est obligatoire.</p>")
+        listing.currentItemChanged.connect(select)
+        search.textChanged.connect(populate)
+        row.addWidget(listing, 1)
+        row.addWidget(detail, 3)
+        page.addLayout(row, 1)
+        populate()
+
     def show_glossary(self) -> None:
         page = self._begin_page("Glossaire", "glossary")
         self._page_header(
             page,
             "Ressources",
-            "Glossaire d’écriture",
+            tr("Glossaire d’écriture"),
             "Des définitions courtes pour retrouver un terme sans transformer les outils en cours théorique.",
         )
         card = make_card()
@@ -20979,7 +21054,7 @@ class StoryForgeWindow(QMainWindow):
         box.setSpacing(10)
         filters = QHBoxLayout()
         self.glossary_search = QLineEdit()
-        self.glossary_search.setPlaceholderText("Rechercher un terme ou une définition…")
+        self.glossary_search.setPlaceholderText(tr("Rechercher un terme ou une définition…"))
         self.glossary_search.setClearButtonEnabled(True)
         filters.addWidget(self.glossary_search, 1)
         self.glossary_category = QComboBox()
@@ -21040,10 +21115,10 @@ class StoryForgeWindow(QMainWindow):
         appearance_box = QVBoxLayout(appearance)
         appearance_box.setContentsMargins(22, 19, 22, 21)
         appearance_box.setSpacing(7)
-        appearance_box.addWidget(make_label("APPARENCE", "Caption"))
+        appearance_box.addWidget(make_label(tr("APPARENCE"), "Caption"))
         appearance_box.addWidget(make_label("Lisibilité", "SectionTitle"))
         appearance_box.addWidget(make_label("Le mode système suit l’apparence choisie dans ton environnement Linux.", "Muted", True))
-        appearance_box.addWidget(make_label("Thème", "Muted"))
+        appearance_box.addWidget(make_label(tr("Thème"), "Muted"))
         self.settings_theme = QComboBox()
         self.settings_theme.addItem("Suivre le système", "system")
         self.settings_theme.addItem("Clair", "light")
@@ -21051,14 +21126,14 @@ class StoryForgeWindow(QMainWindow):
         theme_index = self.settings_theme.findData(self.mode)
         self.settings_theme.setCurrentIndex(max(0, theme_index))
         appearance_box.addWidget(self.settings_theme)
-        appearance_box.addWidget(make_label("Taille du texte d’écriture", "Muted"))
+        appearance_box.addWidget(make_label(tr("Taille du texte d’écriture"), "Muted"))
         self.settings_editor_size = QComboBox()
         for caption, value in (("Compacte · 14 px", 14), ("Confortable · 15 px", 15), ("Grande · 17 px", 17), ("Très grande · 19 px", 19)):
             self.settings_editor_size.addItem(caption, value)
         size_index = self.settings_editor_size.findData(self.editor_font_size)
         self.settings_editor_size.setCurrentIndex(max(0, size_index))
         appearance_box.addWidget(self.settings_editor_size)
-        appearance_box.addWidget(make_label("Langue", "Muted"))
+        appearance_box.addWidget(make_label(tr("Langue"), "Muted"))
         self.settings_language = QComboBox()
         self.settings_language.addItem("Français", "fr")
         self.settings_language.addItem("English", "en")
@@ -21073,8 +21148,8 @@ class StoryForgeWindow(QMainWindow):
         behavior_box = QVBoxLayout(behavior)
         behavior_box.setContentsMargins(22, 19, 22, 21)
         behavior_box.setSpacing(7)
-        behavior_box.addWidget(make_label("COMPORTEMENT", "Caption"))
-        behavior_box.addWidget(make_label("Concentration et sécurité", "SectionTitle"))
+        behavior_box.addWidget(make_label(tr("COMPORTEMENT"), "Caption"))
+        behavior_box.addWidget(make_label(tr("Concentration et sécurité"), "SectionTitle"))
         behavior_box.addWidget(
             make_label(
                 "L’enregistrement automatique concerne les Guides d’écriture, Construction et l’Éditeur de scripts.",
@@ -21082,14 +21157,14 @@ class StoryForgeWindow(QMainWindow):
                 True,
             )
         )
-        behavior_box.addWidget(make_label("Enregistrement automatique", "Muted"))
+        behavior_box.addWidget(make_label(tr("Enregistrement automatique"), "Muted"))
         self.settings_autosave = QComboBox()
         for caption, value in (("Désactivé", 0), ("Toutes les 30 secondes", 30), ("Toutes les minutes", 60), ("Toutes les 2 minutes", 120)):
             self.settings_autosave.addItem(caption, value)
         auto_index = self.settings_autosave.findData(self.autosave_seconds)
         self.settings_autosave.setCurrentIndex(max(0, auto_index))
         behavior_box.addWidget(self.settings_autosave)
-        behavior_box.addWidget(make_label("Au démarrage", "Muted"))
+        behavior_box.addWidget(make_label(tr("Au démarrage"), "Muted"))
         self.settings_startup = QComboBox()
         self.settings_startup.addItem("Ouvrir Aujourd’hui", "home")
         self.settings_startup.addItem("Reprendre le dernier espace", "last")
@@ -21105,15 +21180,15 @@ class StoryForgeWindow(QMainWindow):
         data_box = QVBoxLayout(data_card)
         data_box.setContentsMargins(22, 19, 22, 21)
         data_box.setSpacing(7)
-        data_box.addWidget(make_label("DONNÉES LOCALES", "Caption"))
-        data_box.addWidget(make_label("Sauvegardes", "SectionTitle"))
+        data_box.addWidget(make_label(tr("DONNÉES LOCALES"), "Caption"))
+        data_box.addWidget(make_label(tr("Sauvegardes"), "SectionTitle"))
         data_box.addWidget(make_label(f"Base active\n{self.db.path}", "Muted", True))
         data_box.addWidget(make_label("Une sauvegarde SQLite complète protège les idées, projets, versions, exercices et ta progression.", "Muted", True))
         data_actions = QHBoxLayout()
-        data_actions.addWidget(make_button("Sauvegarder maintenant", "primary", self._backup_now))
-        data_actions.addWidget(make_button("Choisir un emplacement", "secondary", self._export_backup))
+        data_actions.addWidget(make_button(tr("Sauvegarder maintenant"), "primary", self._backup_now))
+        data_actions.addWidget(make_button(tr("Choisir un emplacement"), "secondary", self._export_backup))
         data_box.addLayout(data_actions)
-        data_box.addWidget(make_button("Ouvrir le dossier StoryForge", "quiet", self._open_data_folder), 0, Qt.AlignmentFlag.AlignLeft)
+        data_box.addWidget(make_button(tr("Ouvrir le dossier StoryForge"), "quiet", self._open_data_folder), 0, Qt.AlignmentFlag.AlignLeft)
         self.backup_status = make_label("", "Muted", True)
         data_box.addWidget(self.backup_status)
         grid.addWidget(data_card, 2 if compact else 1, 0, 1, 1 if compact else 2)
@@ -21131,7 +21206,7 @@ class StoryForgeWindow(QMainWindow):
         version_copy.addWidget(make_label(f"StoryForge {APP_VERSION} · Linux", "CardTitle"))
         version_copy.addWidget(make_label("Application locale · données ouvertes · aucune synchronisation automatique", "Muted"))
         footer_box.addLayout(version_copy, 1)
-        footer_box.addWidget(make_button("Enregistrer les paramètres", "primary", self._save_settings))
+        footer_box.addWidget(make_button(tr("Enregistrer les paramètres"), "primary", self._save_settings))
         page.addWidget(footer)
         page.addStretch()
 
@@ -21142,6 +21217,11 @@ class StoryForgeWindow(QMainWindow):
         self.db.set_setting("theme", self.mode)
         self.db.set_setting("editor_font_size", self.editor_font_size)
         self.db.set_setting("interface_language", self.settings_language.currentData())
+        set_language(self.settings_language.currentData())
+        for button in self.nav_buttons.values():
+            button.nav_title_label.setText(tr(button.nav_title))
+            button.setToolTip(tr(button.nav_title))
+        self._sync_project_navigation()
         self.db.set_setting("autosave_seconds", self.autosave_seconds)
         self.db.set_setting("startup_view", self.settings_startup.currentData())
         self.db.set_setting("confirm_delete", "1" if self.settings_confirm_delete.isChecked() else "0")
@@ -21150,6 +21230,8 @@ class StoryForgeWindow(QMainWindow):
         self._configure_autosave()
         self.save_state.setText("Paramètres enregistrés")
         QTimer.singleShot(2400, lambda: self.save_state.setText(""))
+
+        self.show_settings()
 
     def _backup_now(self) -> None:
         stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")  # noqa: DTZ005 - local filename

@@ -1,4 +1,19 @@
-# StoryForge Desktop 0.30.1 — Export professionnel et autocomplétion
+# StoryForge Desktop 0.30.2 — Corrections éditeur et dossiers PDF
+
+## V0.30.2
+
+- `IN` + Tab → `INT.` ; `E` / `EX` + Tab → `EXT.`. Le lieu et le moment se complètent ensuite séparément.
+- Action + Entrée → Personnage ; Nouvelle scène libre crée bien une scène à chaque clic.
+- Surimpression des types supprimée ; aperçu scénario structuré dans la vue d’ensemble.
+- Export complet : PDF A4 paginés à la place des documents Markdown, sans changer la sauvegarde JSON.
+- Groupe Projets repliable, sélection des guides visible, titres et champs harmonisés.
+- Bibliothèque de 15 genres et premiers schémas sans rectangles pour les templates.
+- Anglais **partiel** : navigation, actions et certains onglets traduits. Les contenus longs et plusieurs formulaires restent en français.
+
+Pour exporter : **Projets → sélectionner un projet → Plus… → Exporter l’histoire terminée…**,
+ou le bouton d’export dans **Vue d’ensemble**. Le scénario seul s’exporte depuis l’Éditeur de scripts.
+
+Travaux encore nécessaires : [ROADMAP_REMAINING.md](ROADMAP_REMAINING.md).
 
 StoryForge est une application **Linux locale et gratuite** pour apprendre l’écriture de fiction cinématographique en écrivant.
 
