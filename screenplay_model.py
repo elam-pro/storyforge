@@ -208,6 +208,25 @@ class ScreenplayDocument:
             value = payload
         if not isinstance(value, Mapping) or not isinstance(value.get("blocks"), list):
             return None
+        version = value.get("schema_version", 1)
+        if type(version) is not int or version != cls.SCHEMA_VERSION:
+            return None
+        if not isinstance(value.get("metadata", {}), dict):
+            return None
+        if "document_id" in value and not isinstance(value["document_id"], str):
+            return None
+        ids = set()
+        for item in value["blocks"]:
+            if not isinstance(item, Mapping):
+                return None
+            if item.get("type") not in {kind.value for kind in BlockType}:
+                return None
+            if not isinstance(item.get("text", ""), str) or not isinstance(item.get("metadata", {}), dict):
+                return None
+            if "id" in item:
+                if not isinstance(item["id"], str) or not item["id"] or item["id"] in ids:
+                    return None
+                ids.add(item["id"])
         blocks = [
             ScreenplayBlock.from_dict(item)
             for item in value["blocks"]

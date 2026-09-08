@@ -67,6 +67,8 @@ def block_type(block, empty_type='action'):
 def load_document(stored_json, legacy_text, project_id):
     """Preserve the existing migration policy; do not discard edited legacy text."""
     document = ScreenplayDocument.from_json(stored_json)
+    if stored_json and document is None:
+        raise ValueError("Format de scénario invalide ou version non prise en charge. Données conservées.")
     legacy = str(legacy_text or '')
     if document is None or (legacy.strip() and document.to_plain_text().strip() != legacy.strip()):
         document = ScreenplayDocument.from_legacy_text(legacy, project_id=project_id)

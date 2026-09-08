@@ -77,6 +77,28 @@ def import_fdx(path: Path) -> str:
     return "".join(output).strip()
 
 
+def import_fdx_document(path: Path, project_id=None):
+    """Import supported paragraph kinds without guessing from their text.
+
+    Inline styling/revisions are not a lossless Final Draft round trip.
+    Unknown paragraph types are rejected rather than silently flattened.
+    """
+    from screenplay_model import BlockType, ScreenplayBlock, ScreenplayDocument
+    root = ET.parse(path).getroot()
+    if root.tag != 'FinalDraft':
+        raise ValueError('Document Final Draft attendu')
+    kinds = dict(zip(('Scene Heading', 'Action', 'Character', 'Dialogue', 'Parenthetical', 'Transition'),
+                    (BlockType.SCENE, BlockType.ACTION, BlockType.CHARACTER, BlockType.DIALOGUE, BlockType.PARENTHETICAL, BlockType.TRANSITION)))
+    blocks = []
+    for paragraph in root.findall('./Content/Paragraph'):
+        kind = paragraph.get('Type', 'Action')
+        if kind not in kinds:
+            raise ValueError(f'Type FDX non pris en charge : {kind}')
+        text = ''.join(''.join(node.itertext()) for node in paragraph.findall('Text'))
+        blocks.append(ScreenplayBlock(type=kinds[kind], text=text))
+    return ScreenplayDocument(metadata={'project_id': str(project_id)}, blocks=blocks)
+
+
 def export_fdx(
     path: Path,
     title: str,
@@ -140,7 +162,7 @@ def _screenplay_lines(element_type: str, value: str) -> list[str]:
     return wrap(
         normalized,
         width=widths.get(element_type, 60),
-        break_long_words=False,
+        break_long_words=True,
         break_on_hyphens=False,
         replace_whitespace=False,
     ) or [""]
@@ -342,6 +364,12 @@ def export_script_pdf(
     screenplay_elements = elements if elements is not None else parse_screenplay(text)
     pages = _layout_screenplay_pages(screenplay_elements)
     path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        '\n'.join([title, author, contact, draft_date, based_on, copyright_notice] + [value for _, value in screenplay_elements]).encode('cp1252')
+    except UnicodeEncodeError:
+        from unicode_script_pdf import render
+        render(path, pages, title, author, contact, draft_date, based_on, copyright_notice, include_title_page)
+        return
 
     objects: list[bytes] = []
 

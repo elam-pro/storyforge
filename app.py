@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import screenplay_adapter
+import screenplay_commands
 from learning_service import LearningService
 
 import csv
@@ -108,7 +109,7 @@ from PySide6.QtWidgets import (
 from db import NOW, Database
 from learning_content import load_session
 from pdf_export import export_manual_pdf
-from script_export import export_fdx, export_script_pdf, import_fdx, parse_screenplay
+from script_export import export_fdx, export_script_pdf, import_fdx, import_fdx_document, parse_screenplay
 from screenplay_model import BlockType, ScreenplayDocument
 from theme import DARK, LIGHT, Palette, stylesheet
 
@@ -17453,7 +17454,13 @@ class StoryForgeWindow(QMainWindow):
 
         project = self.db.one("SELECT title FROM projects WHERE id=?", (self.active_project,))
         document = self.db.ensure_doc(self.active_project, "script", "Scénario")
-        self.script_document = self._load_script_document(document["content"])
+        try:
+            self.script_document = self._load_script_document(document["content"])
+        except ValueError as error:
+            self.script_document = None
+            page.addWidget(make_label(str(error), "Muted", True))
+            page.addStretch()
+            return
         self._load_script_prepared_scenes()
         body = QHBoxLayout()
         body.setSpacing(14)
@@ -18483,42 +18490,8 @@ class StoryForgeWindow(QMainWindow):
         # Les retraits suivent la largeur réelle de la page. Sur un grand
         # écran, les dialogues et les noms restent centrés sans que tout le
         # scénario soit tassé dans la moitié gauche de l’éditeur.
-        usable_width = max(520.0, float(editor.viewport().width() - 36))
-        left, right, top, bottom, alignment = {
-            "scene": (0.0, usable_width * 0.02, 12.0, 6.0, Qt.AlignmentFlag.AlignLeft),
-            "action": (0.0, usable_width * 0.05, 3.0, 6.0, Qt.AlignmentFlag.AlignLeft),
-            "character": (
-                usable_width * 0.41,
-                usable_width * 0.17,
-                12.0,
-                1.0,
-                Qt.AlignmentFlag.AlignLeft,
-            ),
-            "dialogue": (
-                usable_width * 0.21,
-                usable_width * 0.21,
-                0.0,
-                5.0,
-                Qt.AlignmentFlag.AlignLeft,
-            ),
-            "parenthetical": (
-                usable_width * 0.29,
-                usable_width * 0.29,
-                0.0,
-                1.0,
-                Qt.AlignmentFlag.AlignLeft,
-            ),
-            "transition": (
-                usable_width * 0.48,
-                usable_width * 0.02,
-                12.0,
-                8.0,
-                Qt.AlignmentFlag.AlignRight,
-            ),
-        }.get(
-            element,
-            (0.0, usable_width * 0.05, 3.0, 6.0, Qt.AlignmentFlag.AlignLeft),
-        )
+        left, right, top, bottom = screenplay_commands.margins(element, editor.viewport().width())
+        alignment = Qt.AlignmentFlag.AlignRight if element == "transition" else Qt.AlignmentFlag.AlignLeft
         block_format = QTextBlockFormat(active_cursor.blockFormat())
         block_format.setLeftMargin(left)
         block_format.setRightMargin(right)
@@ -18541,9 +18514,7 @@ class StoryForgeWindow(QMainWindow):
         editor.blockSignals(False)
 
     def _reset_empty_script_element(self, previous: str) -> None:
-        order = ["scene", "action", "character", "dialogue", "parenthetical", "transition"]
-        current_index = order.index(previous) if previous in order else 1
-        fallback = order[max(0, current_index - 1)]
+        fallback = screenplay_commands.cycle(previous, reverse=True)
         self._set_script_element_mode(fallback)
         self._apply_script_block_format(fallback)
         self.script_text.ensureCursorVisible()
@@ -18745,8 +18716,9 @@ class StoryForgeWindow(QMainWindow):
         if not path:
             return
         try:
-            imported = import_fdx(Path(path))
-        except (OSError, ParseError) as error:
+            imported_document = import_fdx_document(Path(path), self.active_project)
+            imported = imported_document.to_plain_text()
+        except (OSError, ParseError, ValueError) as error:
             QMessageBox.warning(self, "Import impossible", f"Ce fichier FDX ne peut pas être lu.\n\n{error}")
             return
         if not imported:
@@ -18761,10 +18733,7 @@ class StoryForgeWindow(QMainWindow):
             return
         if current:
             self.db.snapshot(self.active_project, "script", self.script_text.toPlainText(), "Avant import FDX")
-        self.script_document = ScreenplayDocument.from_legacy_text(
-            imported,
-            project_id=self.active_project,
-        )
+        self.script_document = imported_document
         self._script_document_syncing = True
         self.script_text.setPlainText(self.script_document.to_plain_text())
         self._script_document_syncing = False
@@ -18774,24 +18743,14 @@ class StoryForgeWindow(QMainWindow):
         self.save_state.setText("Scénario FDX importé")
 
     def _cycle_script_element(self, reverse: bool = False) -> None:
-        order = ["scene", "action", "character", "dialogue", "parenthetical", "transition"]
         current = getattr(self, "script_element_mode", self._infer_script_element_from_cursor())
-        offset = -1 if reverse else 1
-        target_index = max(0, min(len(order) - 1, order.index(current) + offset))
-        target = order[target_index]
+        target = screenplay_commands.cycle(current, reverse)
         self._set_script_element(target)
 
     def _advance_script_element_after_return(self, previous: str) -> None:
         if previous == "character":
             self._update_continued_character_cue()
-        target = {
-            "scene": "action",
-            "action": "character",
-            "character": "dialogue",
-            "dialogue": "action",
-            "parenthetical": "dialogue",
-            "transition": "scene",
-        }.get(previous, "action")
+        target = screenplay_commands.after_return(previous)
         self._set_script_element_mode(target)
         self._apply_script_block_format(target)
 
