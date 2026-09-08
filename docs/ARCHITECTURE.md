@@ -71,3 +71,8 @@ Sorties bornées à 12 000 caractères JSON, huit extraits maximum pour une rech
 1 800 caractères par extrait. Une source devenue invalide est retirée plutôt que
 servie périmée. Les extraits sont des données non fiables, pas des instructions.
 `tests/test_context_index.py` vérifie les limites et exclusions sur dépôts temporaires.
+
+`storyforge_context.server.create_server` enveloppe cet index dans le SDK MCP
+optionnel, uniquement via STDIO. Sept outils annotés lecture seule et cinq
+ressources canoniques ; aucun outil d’exécution, d’écriture ou de lecture d’histoire.
+Configuration et validation de protocole : [MCP.md](MCP.md).

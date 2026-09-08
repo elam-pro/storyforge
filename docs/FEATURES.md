@@ -22,7 +22,7 @@ Vérification statique : 7 septembre 2026, code 0.30.3, base Git `13ed5f5`. « P
 | language | Partiel : libellés anglais, contenus longs et formulaires encore incomplets. | `i18n.py`, appels `tr` dans `app.py` | `tests/test_editor_polish.py` |
 | ai.professor | Désactivé : `ask` lève une erreur ; shim et données conservés, ancienne interface et worker retirés. | `ai_service.py:ProfessorAI`, tables historiques dans `db.py` | `tests/test_cleanup.py` vérifie la conservation des données ; service indisponible. |
 | geography | Prévu, non implémenté. | Aucun outil géographique dédié identifié. | Pas de garantie existante. |
-| repository.mcp | Prévu, non implémenté. | Aucun serveur dans le repository. | À définir avant implémentation. |
+| repository.mcp | Présent : sept outils et cinq ressources de contexte du repository, STDIO en lecture seule ; SDK optionnel et connexion à recharger côté client. Aucune histoire personnelle. | `storyforge_context/server.py:create_server`, `run_context_mcp.sh` | `tests/test_mcp_server.py` ; [installation et limites](MCP.md) |
 | repository.index | Présent : sources autorisées suivies par Git, index incrémental en mémoire, recherche lexicale et liens fonctionnalités/code/tests ; aucune histoire personnelle. | `storyforge_context/index.py:RepositoryIndex` | `tests/test_context_index.py` |
 
 ## Garanties et limites de validation

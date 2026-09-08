@@ -1,6 +1,6 @@
 # Roadmap canonique
 
-Mise à jour : 7 septembre 2026. Ce document décrit le travail futur, pas des fonctions livrées. L’état actuel est dans [FEATURES.md](FEATURES.md).
+Mise à jour : 8 septembre 2026. Ce document sépare les chantiers de consolidation achevés du travail futur. L’état actuel est dans [FEATURES.md](FEATURES.md).
 
 ## Consolidation issue de l’audit
 
@@ -10,12 +10,12 @@ Mise à jour : 7 septembre 2026. Ce document décrit le travail futur, pas des f
 | 2 | Sécurité des données — réalisée | Import validé et atomique ; sauvegarde scénario cohérente ; versions structurées. Tests d’échec, ancienne table de versions et restauration sur bases temporaires. |
 | 3 | Hygiène ciblée — réalisée | Manuel généré hors sources et ancien fichier local dé-suivi ; script ponctuel archivé en texte ; interface IA désactivée et rail masqué retirés. Shim, données, sauvegardes et historique Git conservés. Contenu privé éventuel de l’ancien historique non audité ni purgé. |
 | 4 | Frontière apprentissage — extraction réalisée | Réponses, progression, applications et maîtrise explicite extraites dans LearningService, testées sans Qt et avec les outils existants. Le choix des cibles/navigation reste dans l’interface. Une évolution vers plusieurs preuves contextualisées reste une décision produit distincte ; les règles actuelles sont conservées. |
-| 5 | Frontière scénario — première extraction réalisée | Lecture Qt et résolution texte/JSON isolées dans screenplay_adapter, sans récursion sur longs dialogues. Restent la validation du format structuré, les commandes/mises en forme et la fidélité PDF/FDX avant intégration d’un éditeur avancé. |
-| 6 | Interface et performances | Mesurer changements de vue et images ; extraire uniquement les vues utiles, conserver les garanties d’autosauvegarde. |
-| 7 | Index ciblé | Relier fonctionnalités/code/tests et indexer incrémentalement les sources autorisées ; provenance et exclusion des données personnelles. |
-| 8 | MCP | Serveur de contexte du repository en lecture seule, sorties limitées ; aucun accès implicite aux histoires. |
+| 5 | Frontière scénario — consolidation réalisée | Validation JSON/version/IDs ; règles de commande et retraits isolés ; FDX typé et PDF Unicode testés. Fidélité limitée au périmètre documenté, pas de Final Draft sans perte ni nouvel éditeur. |
+| 6 | Interface et performances — réalisée | Mesures sur fixtures, caches bornés et décodage réduit ; tests de navigation et sauvegarde conservés. Aucun remaniement global des vues non justifié par les mesures. |
+| 7 | Index ciblé — réalisé | Sources autorisées et suivies par Git, reparsing incrémental en mémoire, liens fonctionnalités/code/tests, provenance et limites testées. |
+| 8 | MCP — implémenté et testé | Sept outils et cinq ressources STDIO en lecture seule ; configuration locale préparée. Chargement dans Codex en attente de l’autorisation du projet par l’utilisateur ; voir MCP.md. |
 
-Chaque chantier doit rester un changement borné avec tests et retour arrière. Une migration SQLite exige une sauvegarde restaurable : revenir au code précédent seul peut ne pas suffire. Les phases 2 à 4 sont réalisées, la phase 5 est en cours ; les étapes 6 à 8 ne sont pas engagées automatiquement.
+Chaque chantier reste un changement borné avec tests et commit local. Les phases 5 à 8 ont été explicitement demandées, sans migration SQLite supplémentaire. Une future migration exige une sauvegarde restaurable : revenir au code précédent seul peut ne pas suffire. L’autorisation de confiance Codex n’est pas modifiée automatiquement.
 
 ## Fonctionnalités restantes : numéros d’origine conservés
 

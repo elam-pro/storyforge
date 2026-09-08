@@ -1,4 +1,6 @@
 .venv/
+.venv-mcp/
+.codex/config.toml
 __pycache__/
 *.py[cod]
 .pytest_cache/

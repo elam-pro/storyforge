@@ -1,0 +1,2 @@
+# Optional repository-context server; not required to run StoryForge.
+mcp==2.2.0

@@ -39,6 +39,8 @@ Pytest doit être disponible dans l’environnement de développement ; il n’e
 | État, code et tests | [Fonctionnalités](docs/FEATURES.md) |
 | Décisions | [Décisions](docs/DECISIONS.md) |
 | Prochaines étapes | [Roadmap](docs/ROADMAP.md) |
+| Mesures de performances | [Fixtures et résultats](docs/PERFORMANCE.md) |
+| MCP local optionnel | [Installation et périmètre](docs/MCP.md) |
 | Historique | [Release notes](RELEASE_NOTES.md) |
 
 Le code décrit l’implémentation ; les tests les garanties vérifiées ; la roadmap le futur. Les [archives](docs/archive/README.md) ne sont pas des sources actuelles.

@@ -206,7 +206,16 @@ class RepositoryIndex:
                     if score:
                         ranked.append((score, segment))
             ranked.sort(key=lambda pair: (-pair[0], pair[1]['path'], pair[1]['start_line']))
-            return self._response([segment for _, segment in ranked[:limit]])
+            chosen, seen = [], set()
+            for _, segment in ranked:
+                key = (segment['path'], segment['symbol'])
+                if key in seen:
+                    continue
+                seen.add(key)
+                chosen.append(segment)
+                if len(chosen) == limit:
+                    break
+            return self._response(chosen)
 
     def document(self, name):
         if name not in DOCS:
