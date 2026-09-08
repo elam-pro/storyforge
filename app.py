@@ -4,6 +4,7 @@ import sqlite3
 import screenplay_adapter
 import screenplay_commands
 from learning_service import LearningService
+from image_previews import PixmapCache, decode_preview
 
 import csv
 import base64
@@ -2956,8 +2957,8 @@ class StoryForgeWindow(QMainWindow):
         self.current_view = "home"
         self._project_refresh_generation = 0
         self._story_map_drag_item: StoryMapCardItem | None = None
-        self._location_pixmap_cache: dict[int, QPixmap] = {}
-        self._location_thumbnail_cache: dict[int, QPixmap] = {}
+        self._location_pixmap_cache = PixmapCache()
+        self._location_thumbnail_cache = PixmapCache(2 * 1024 * 1024)
         self._location_image_refresh_generation = 0
         self.story_map_pan_timer = QTimer(self)
         self.story_map_pan_timer.setInterval(24)
@@ -12366,13 +12367,7 @@ class StoryForgeWindow(QMainWindow):
         )
         pixmap = QPixmap()
         if row:
-            pixmap.loadFromData(bytes(row["image_data"]))
-            if pixmap.width() > 1800 or pixmap.height() > 1400:
-                pixmap = pixmap.scaled(
-                    QSize(1800, 1400),
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
+            pixmap = decode_preview(bytes(row["image_data"]))
         self._location_pixmap_cache[image_id] = pixmap
         return pixmap
 
@@ -12636,7 +12631,7 @@ class StoryForgeWindow(QMainWindow):
         # Keep decoded artwork available while moving through the roster.
         # Large portraits and moodboards must not be decoded again on every
         # selection change.
-        self._character_portrait_cache: dict[int, QPixmap] = {}
+        self._character_portrait_cache = PixmapCache()
         self._character_reference_icon_cache: dict[int, QIcon] = {}
 
         # The combo remains as a small internal selection model so the

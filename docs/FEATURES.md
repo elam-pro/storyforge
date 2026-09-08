@@ -26,6 +26,9 @@ Vérification statique : 7 septembre 2026, code 0.30.3, base Git `13ed5f5`. « P
 
 ## Garanties et limites de validation
 
+Les caches d’aperçus personnages/lieux sont bornés via `image_previews.py`.
+Mesures reproductibles et limites : [PERFORMANCE.md](PERFORMANCE.md).
+
 `screenplay_adapter.py` sépare la projection Qt et le chargement compatible. Le JSON invalide, les types inconnus, les IDs dupliqués et les versions futures sont refusés sans remplacement par le texte. `screenplay_commands.py` isole transitions et retraits. L’import FDX structuré conserve les six types éditables, y compris les paragraphes vides ; styles, révisions et extensions Final Draft ne sont pas garantis. Le PDF Unicode utilise les polices incorporées de Qt, le chemin WinAnsi historique reste conservé. Les alphabets disponibles dépendent des polices installées ; pas de garantie universelle pour tous les glyphes. `tests/test_screenplay_consolidation.py` et `tests/test_screenplay_adapter.py` couvrent ces frontières, les IDs et 2 000 paragraphes. Rendu contrôlé sur couverture, réplique longue, MORE/CONT'D et caractères vietnamiens, polonais et cyrilliques.
 
 La sauvegarde, la progression, les applications et les changements explicites de maîtrise passent par `learning_service.py:LearningService`. `tests/test_learning_service.py` vérifie sans Qt les miroirs historiques, la maîtrise, la fin/réouverture, l’isolation des réponses, les preuves et l’annulation sur erreur. La sélection des cibles et la navigation restent dans l’interface ; `tests/test_v027_connected_learning.py` protège leur intégration.
