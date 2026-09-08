@@ -25,10 +25,18 @@ CONFLICT_GUIDE_FIELDS = {
     'outcome': ('outcome', 'Issue possible'),
 }
 
+OUTLINE_GUIDE_FIELDS = {
+    'unit_title': ('title', 'Titre'),
+    'unit_function': ('function_note', 'Fonction / objectif'),
+    'unit_content': ('summary', 'Contenu / opposition'),
+    'unit_consequence': ('consequence', 'Conséquence / changement'),
+}
+
 # Fixed destinations only; neither table nor field names come from user text.
 FIELD_GUIDES = {
     'build_character': ('characters', 'character', 'name', 'Personnage', CHARACTER_GUIDE_FIELDS),
     'build_conflict': ('conflicts', 'conflict', 'title', 'Conflit', CONFLICT_GUIDE_FIELDS),
+    'build_outline': ('outline_items', 'outline_item', 'title', 'Élément du plan', OUTLINE_GUIDE_FIELDS),
 }
 
 SYNOPSIS_GUIDE_STEPS = {
@@ -131,7 +139,38 @@ class LearningService:
                 proposed = current + '\n\n' + proposed
             self.db.run(f'UPDATE {table} SET {field}=?,updated_at=? WHERE id=? AND project_id=?',
                         (proposed, NOW(), target_id, run['project_id']))
+            if target_type == 'outline_item':
+                self._sync_outline_source(target, field, proposed, int(run['project_id']))
             self.apply_to_tool(run_id, session, index, draft, target_type, target_id, field)
+
+    def _sync_outline_source(self, target, field: str, proposed: str, project_id: int) -> None:
+        """Keep a linked sequence or scene aligned with its outline projection."""
+        sequence_id = int(target['source_sequence_id'] or 0)
+        scene_id = int(target['source_scene_id'] or 0)
+        if sequence_id:
+            sequence_fields = {
+                'title': 'title',
+                'summary': 'events',
+                'function_note': 'purpose',
+                'consequence': 'consequence',
+            }
+            self.db.run(
+                f'UPDATE sequence_blocks SET {sequence_fields[field]}=?,updated_at=? '
+                'WHERE id=? AND project_id=?',
+                (proposed, NOW(), sequence_id, project_id),
+            )
+        if scene_id:
+            scene_fields = {
+                'title': 'title',
+                'summary': 'opposition',
+                'function_note': 'objective',
+                'consequence': 'change_note',
+            }
+            self.db.run(
+                f'UPDATE scene_rows SET {scene_fields[field]}=?,updated_at=? '
+                'WHERE id=? AND project_id=?',
+                (proposed, NOW(), scene_id, project_id),
+            )
 
     def skip_step(self, run_id, session, index, draft=''):
         with self.db.transaction():

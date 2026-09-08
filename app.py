@@ -7,6 +7,7 @@ from learning_service import (
     CHARACTER_GUIDE_FIELDS,
     CONFLICT_GUIDE_FIELDS,
     FIELD_GUIDES,
+    OUTLINE_GUIDE_FIELDS,
     SYNOPSIS_GUIDE_STEPS,
     LearningService,
 )
@@ -135,10 +136,11 @@ GUIDE_SESSIONS = {
     "build_character": load_session(BASE_DIR / "content" / "sessions" / "guide_build_character.json"),
     "build_conflict": load_session(BASE_DIR / "content" / "sessions" / "guide_build_conflict.json"),
     "build_synopsis": load_session(BASE_DIR / "content" / "sessions" / "guide_build_synopsis.json"),
+    "build_outline": load_session(BASE_DIR / "content" / "sessions" / "guide_build_outline.json"),
 }
 GUIDE_ORDER = (
     "seed", "strengthen_idea", "find_ending", "prepare_scene",
-    "build_character", "build_conflict", "build_synopsis",
+    "build_character", "build_conflict", "build_synopsis", "build_outline",
 )
 GUIDE_LEVELS = {
     "discovery": "Découverte",
@@ -151,6 +153,27 @@ GUIDE_LEVELS = {
 # copy an answer into several documents: the guide remains the reasoning trace
 # and the project tool remains the source of truth.
 LEARNING_TOOL_LINKS = {
+    "build_outline": {
+        "useful_scale": (
+            "development", "outline", "Construction · Plan global", "project", "",
+            "Observe le niveau de détail qui t’aide maintenant, sans créer de structure obligatoire.",
+        ),
+        **{
+            key: (
+                "development", "outline", f"Plan global · {label}", "outline_item", field,
+                "Choisis un élément existant. L’aperçu modifie seulement ce champ après confirmation.",
+            )
+            for key, (field, label) in OUTLINE_GUIDE_FIELDS.items()
+        },
+        "causal_reading": (
+            "development", "outline", "Construction · Plan global", "project", "",
+            "Relis l’ordre du plan et vérifie ce que chaque unité rend possible ou impossible ensuite.",
+        ),
+        "right_detail": (
+            "development", "outline", "Construction · Plan global", "project", "",
+            "Ajuste librement le niveau de détail ; un plan peut rester incomplet et évoluer avec le texte.",
+        ),
+    },
     "build_synopsis": {
         key: (
             "development", "synopsis", f"Synopsis · {label}", "project", key,
@@ -4207,6 +4230,7 @@ class StoryForgeWindow(QMainWindow):
                 "build_character": "CharacterGuideScroll",
                 "build_conflict": "ConflictGuideScroll",
                 "build_synopsis": "SynopsisGuideScroll",
+                "build_outline": "OutlineGuideScroll",
             }
             scroll.setObjectName(scroll_names[run["guide_key"]])
             scroll.setWidgetResizable(True)
@@ -4238,6 +4262,10 @@ class StoryForgeWindow(QMainWindow):
                 "SELECT id,title,nature FROM conflicts WHERE project_id=? ORDER BY position,id",
                 lambda row: f"{row['title'] or 'Conflit sans titre'} · {CONFLICT_NATURE_LABELS.get(row['nature'], 'nature à préciser')}",
             ),
+            "outline_item": (
+                "SELECT id,item_type,title FROM outline_items WHERE project_id=? ORDER BY parent_id,position,id",
+                lambda row: f"{OUTLINE_TYPES.get(row['item_type'], row['item_type'].upper())} · {row['title'] or 'Élément sans titre'}",
+            ),
             "promise": (
                 "SELECT id,title,promise_type FROM story_promises WHERE project_id=? ORDER BY position,id",
                 lambda row: f"{row['title'] or 'Promesse sans titre'} · {row['promise_type'] or 'concept'}",
@@ -4265,6 +4293,7 @@ class StoryForgeWindow(QMainWindow):
         card = make_card()
         card.setObjectName("LearningConnection")
         field_guide = run["guide_key"] in FIELD_GUIDES
+        applicable_field = field_guide and step.key in FIELD_GUIDES[run["guide_key"]][4]
         synopsis_guide = run["guide_key"] == "build_synopsis"
         connected_guide = field_guide or synopsis_guide
         box = QVBoxLayout(card) if connected_guide else QHBoxLayout(card)
@@ -4302,14 +4331,19 @@ class StoryForgeWindow(QMainWindow):
             target_combo = QComboBox()
             target_combo.setObjectName("LearningTargetCombo")
             target_combo.setMinimumWidth(190)
-            prompt = "Choisir un personnage…" if target_type == "character" else "Choisir un conflit…"
+            prompts = {
+                "character": "Choisir un personnage…",
+                "conflict": "Choisir un conflit…",
+                "outline_item": "Choisir un élément du plan…",
+            }
+            prompt = prompts.get(target_type, "Choisir un élément…")
             target_combo.addItem(prompt if field_guide else "Tout l’outil", 0)
             for target_id, label in target_rows:
                 target_combo.addItem(label, target_id)
             if application:
                 index = target_combo.findData(int(application["target_id"] or 0))
                 target_combo.setCurrentIndex(max(0, index))
-            elif field_guide:
+            elif applicable_field:
                 previous = self.db.one(
                     "SELECT target_id FROM guided_applications WHERE run_id=? AND target_type=? AND target_id>0 ORDER BY updated_at DESC,rowid DESC LIMIT 1",
                     (run["id"], target_type))
@@ -4319,7 +4353,7 @@ class StoryForgeWindow(QMainWindow):
             box.addWidget(target_combo, 0, Qt.AlignmentFlag.AlignVCenter)
 
         if project_id:
-            if field_guide:
+            if applicable_field:
                 apply_button = make_button("Prévisualiser la réponse", "primary", self._preview_field_answer)
                 apply_button.setEnabled(bool(target_combo.currentData()))
                 target_combo.currentIndexChanged.connect(lambda: apply_button.setEnabled(bool(target_combo.currentData())))
@@ -4425,17 +4459,26 @@ class StoryForgeWindow(QMainWindow):
         if not run or run["guide_key"] not in FIELD_GUIDES:
             return
         table, _target_type, title_field, target_label, fields = FIELD_GUIDES[run["guide_key"]]
-        target_id = int(self.learning_target_combo.currentData() or 0)
+        step = self._guide_session.steps[self._learning_idx]
+        target_combo = getattr(self, "learning_target_combo", None)
+        if step.key not in fields or not isinstance(target_combo, QComboBox):
+            return
+        target_id = int(target_combo.currentData() or 0)
         target = self.db.one(f"SELECT * FROM {table} WHERE id=? AND project_id=?",
                              (target_id, run["project_id"]))
         draft = self.learning_draft.toPlainText().strip()
         if not target or not draft:
             QMessageBox.information(self, f"Application · {target_label}", "Choisis une fiche et écris une réponse avant d’ouvrir l’aperçu.")
             return
-        field, label = fields[self._guide_session.steps[self._learning_idx].key]
+        field, label = fields[step.key]
         current = target[field] or ""
         dialog = QDialog(self)
-        prefix = "CharacterGuide" if run["guide_key"] == "build_character" else "ConflictGuide"
+        prefixes = {
+            "build_character": "CharacterGuide",
+            "build_conflict": "ConflictGuide",
+            "build_outline": "OutlineGuide",
+        }
+        prefix = prefixes[run["guide_key"]]
         dialog.setObjectName(f"{prefix}Preview")
         dialog.setWindowTitle(f"Appliquer · {target_label}")
         dialog.resize(760, 620)
@@ -4444,8 +4487,11 @@ class StoryForgeWindow(QMainWindow):
         box.addWidget(make_label("Seul ce champ sera modifié, après confirmation. Annuler laisse la fiche intacte.", "Muted", True))
         mode = QComboBox()
         mode.setObjectName(f"{prefix}ApplyMode")
-        mode.addItem("Ajouter à la suite du texte existant", "append")
-        mode.addItem("Remplacer le texte de ce champ", "replace")
+        if field == "title":
+            mode.addItem("Remplacer ce titre", "replace")
+        else:
+            mode.addItem("Ajouter à la suite du texte existant", "append")
+            mode.addItem("Remplacer le texte de ce champ", "replace")
         box.addWidget(mode)
         preview = make_editor(350)
         preview.setReadOnly(True)
@@ -4469,6 +4515,8 @@ class StoryForgeWindow(QMainWindow):
         actions.addWidget(make_button("Confirmer l’application", "primary", confirm))
         box.addLayout(actions)
         if dialog.exec() == QDialog.DialogCode.Accepted:
+            if run["guide_key"] == "build_outline":
+                self._save_outline_document_copy(int(run["project_id"]))
             self.save_state.setText(f"Réponse appliquée · {target_label}")
             self.show_learning(run_id=run["id"])
 
@@ -4512,6 +4560,8 @@ class StoryForgeWindow(QMainWindow):
     ) -> None:
         if view == "development":
             self.db.set_setting(f"last_development_doc_{self.active_project}", document)
+            if document == "outline":
+                self.db.set_setting(f"outline_mode_{self.active_project}", "global")
             if document == "synopsis" and target_field in SYNOPSIS_GUIDE_STEPS:
                 synopsis_index = list(SYNOPSIS_GUIDE_STEPS).index(target_field)
                 self.db.set_setting(f"synopsis_step_{self.active_project}", synopsis_index)
@@ -4519,6 +4569,11 @@ class StoryForgeWindow(QMainWindow):
             if target_type == "scene" and target_id:
                 self._pending_scene_focus = target_id
             self.show_development()
+            if document == "outline" and target_type == "outline_item" and target_id:
+                item = getattr(self, "outline_item_widgets", {}).get(target_id)
+                if item:
+                    self.outline_tree.setCurrentItem(item)
+                    self.outline_tree.scrollToItem(item)
         elif view == "characters":
             if target_id:
                 self.db.set_setting(f"last_character_{self.active_project}", target_id)
@@ -4577,6 +4632,13 @@ class StoryForgeWindow(QMainWindow):
                 field.setFocus()
             elif target_field == "title" and hasattr(self, "scene_table"):
                 self.scene_table.setFocus()
+        elif view == "development" and getattr(self, "development_doc_type", "") == "outline":
+            item = self.outline_tree.currentItem() if hasattr(self, "outline_tree") else None
+            columns = {"title": 1, "summary": 2, "function_note": 3, "consequence": 4}
+            if item and target_field in columns:
+                self.outline_tree.setCurrentItem(item, columns[target_field])
+            if hasattr(self, "outline_tree"):
+                self.outline_tree.setFocus()
         elif view == "development":
             editor = getattr(self, "development_text", None)
             if isinstance(editor, QTextEdit):
@@ -6055,10 +6117,14 @@ class StoryForgeWindow(QMainWindow):
         suffix = f"\n\n… et {len(issues) - 14} autre(s)." if len(issues) > 14 else ""
         QMessageBox.information(self, "Diagnostic du plan", shown + suffix)
 
-    def _save_outline_document_copy(self) -> None:
-        if not self.active_project:
+    def _save_outline_document_copy(self, project_id: int | None = None) -> None:
+        project_id = int(project_id or self.active_project or 0)
+        if not project_id:
             return
-        rows = self._outline_rows()
+        rows = self.db.q(
+            "SELECT * FROM outline_items WHERE project_id=? ORDER BY parent_id,position,id",
+            (project_id,),
+        )
         row_by_id = {int(row["id"]): row for row in rows}
         children = {}
         for row in rows:
@@ -6079,9 +6145,9 @@ class StoryForgeWindow(QMainWindow):
 
         for row in children.get(None, []):
             write(row)
-        self.db.ensure_doc(self.active_project, "outline", "Plan global")
-        self.db.save_doc(self.active_project, "outline", "\n".join(lines))
-        self.db.run("UPDATE projects SET current_document='outline' WHERE id=?", (self.active_project,))
+        self.db.ensure_doc(project_id, "outline", "Plan global")
+        self.db.save_doc(project_id, "outline", "\n".join(lines))
+        self.db.run("UPDATE projects SET current_document='outline' WHERE id=?", (project_id,))
 
     def _set_outline_mode(self, mode: str) -> None:
         self.db.set_setting(f"outline_mode_{self.active_project}", mode)

@@ -2538,6 +2538,7 @@ class Database:
             "conflict": imported_conflicts,
             "story_node": imported_nodes,
             "promise": imported_story_promises,
+            "outline_item": imported_outline,
         }
         for application in data.get("guided_applications", []):
             imported_run_id = imported_runs.get(application.get("run_id"))

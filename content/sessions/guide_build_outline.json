@@ -1,0 +1,103 @@
+{
+  "key": "build_outline",
+  "cycle": "Guide ciblé",
+  "title": "Construire un plan détaillé",
+  "subtitle": "Donner une forme lisible à l’histoire sans enfermer l’écriture dans un modèle.",
+  "description": "Sept étapes facultatives pour choisir un niveau de détail, préciser les unités utiles et vérifier leur enchaînement. Sections, séquences, beats et scènes sont des échelles possibles, jamais une hiérarchie obligatoire.",
+  "deliverable": "Un Plan global provisoire, assez précis pour soutenir l’écriture et assez souple pour être réorganisé.",
+  "requires_project": true,
+  "apply_label": "Revoir le plan et ses unités",
+  "steps": [
+    {
+      "key": "useful_scale",
+      "title": "Choisir l’échelle utile",
+      "concept_key": "outline_useful_scale",
+      "concept_label": "Échelle du plan",
+      "question": "De quoi as-tu besoin pour avancer maintenant : une vue d’ensemble, quelques mouvements, ou des scènes précises ?",
+      "why": "Un plan sert un problème d’écriture présent. Une section peut regrouper librement des éléments, une séquence peut suivre un mouvement, un beat peut noter un petit changement, et une scène peut décrire une unité concrète. Tu peux rester sur une liste plate ou mélanger ces niveaux.",
+      "example": "Pour voir la trajectoire générale, Mina commence par trois unités : accepter la commande, perdre l’accès à l’atelier, livrer malgré le conflit.",
+      "placeholder": "J’ai besoin de voir… Je n’ai pas encore besoin de détailler… Le niveau qui m’aiderait est…",
+      "tips": ["Pars du niveau le plus simple qui répond à ta question.", "Aucun nombre d’unités ni aucune structure en actes n’est requis."],
+      "review": "Relis : le niveau choisi t’aide-t-il à décider quoi écrire ensuite, ou ajoute-t-il seulement du travail ?",
+      "optional": true
+    },
+    {
+      "key": "unit_title",
+      "title": "Nommer une unité",
+      "concept_key": "outline_unit_title",
+      "concept_label": "Repère reconnaissable",
+      "question": "Quel titre te permettra de reconnaître immédiatement ce que cette unité fait avancer ?",
+      "why": "Un titre de travail n’a pas besoin d’être littéraire. Il sert à retrouver, déplacer et comparer une unité sans devoir relire tout son contenu.",
+      "example": "Mina accepte la commande impossible",
+      "placeholder": "Un titre court fondé sur l’action, la décision, la découverte ou le changement…",
+      "tips": ["Préfère un repère spécifique à un titre comme « Partie 2 ».", "Le titre peut rester provisoire."],
+      "review": "Relis : distinguerais-tu cette unité des autres en ne voyant que son titre ?",
+      "optional": true
+    },
+    {
+      "key": "unit_function",
+      "title": "Préciser la fonction",
+      "concept_key": "outline_unit_function",
+      "concept_label": "Fonction narrative",
+      "question": "Pourquoi cette unité est-elle utile à cette version de l’histoire ?",
+      "why": "La fonction décrit le travail accompli dans le récit : provoquer une décision, révéler une information, transformer une relation, déplacer un objectif ou préparer une conséquence. Elle ne dicte pas une fonction universelle.",
+      "example": "Obliger Mina à prendre seule une responsabilité que son frère contrôlait jusque-là.",
+      "placeholder": "Cette unité est utile parce qu’elle…",
+      "tips": ["Formule un effet sur le récit, pas seulement un thème.", "Plusieurs unités peuvent partager une fonction si leur progression reste claire."],
+      "review": "Relis : si cette unité disparaissait, saurais-tu ce qui manquerait ou changerait ?",
+      "optional": true
+    },
+    {
+      "key": "unit_content",
+      "title": "Décrire le mouvement",
+      "concept_key": "outline_unit_content",
+      "concept_label": "Contenu et opposition",
+      "question": "Que se passe-t-il dans cette unité, et qu’est-ce qui empêche le mouvement d’être immédiat ?",
+      "why": "Une note de plan devient exploitable quand elle contient une action, une résistance ou une incertitude. Elle peut rester très courte et ne remplace pas l’écriture de la scène.",
+      "example": "Mina accepte la commande sans consulter son frère, mais découvre que la pièce principale n’est plus en stock.",
+      "placeholder": "Quelqu’un tente… Une personne, une règle, une limite ou une information résiste…",
+      "tips": ["Décris des faits observables quand c’est possible.", "L’opposition peut être extérieure, relationnelle ou intérieure."],
+      "review": "Relis : cette note montre-t-elle un mouvement, ou seulement une situation immobile ?",
+      "optional": true
+    },
+    {
+      "key": "unit_consequence",
+      "title": "Noter la conséquence",
+      "concept_key": "outline_unit_consequence",
+      "concept_label": "Changement produit",
+      "question": "À la fin de cette unité, qu’est-ce qui n’est plus possible, plus difficile, découvert ou décidé ?",
+      "why": "La conséquence permet de vérifier qu’une unité transforme la suite. Le changement peut être discret : une information connue, une confiance diminuée, une option fermée ou une nouvelle question.",
+      "example": "Mina engage les économies du loyer ; elle ne peut plus abandonner la commande sans mettre l’atelier en danger.",
+      "placeholder": "À cause de cette unité… La suite doit désormais tenir compte de…",
+      "tips": ["Distingue la fin de l’action de son effet sur la suite.", "Une absence de changement peut signaler une pause volontaire, pas forcément une erreur."],
+      "review": "Relis : l’unité suivante devrait-elle être différente si cette conséquence est réelle ?",
+      "optional": true
+    },
+    {
+      "key": "causal_reading",
+      "title": "Relire l’enchaînement",
+      "concept_key": "outline_causal_reading",
+      "concept_label": "Continuité causale",
+      "question": "Dans ton plan actuel, quelles unités provoquent réellement la suivante et lesquelles sont seulement juxtaposées ?",
+      "why": "Un plan lisible ne demande pas que tout soit causal, mais il rend visibles les liens importants : « donc », « mais », « pendant ce temps » ou « parce que ». Cette relecture aide à déplacer, fusionner ou laisser ouvertes certaines unités.",
+      "example": "La pièce manque, donc Mina utilise l’argent du loyer ; son frère l’apprend, mais il bloque l’atelier au lieu de l’aider.",
+      "placeholder": "Cette unité provoque… Celle-ci contraste avec… Entre ces deux unités, il manque peut-être…",
+      "tips": ["Teste l’ordre en déplaçant mentalement deux unités.", "Une ellipse ou une intrigue parallèle n’a pas besoin d’un lien causal immédiat."],
+      "review": "Relis : les liens décisifs sont-ils compréhensibles sans ajouter une explication extérieure au plan ?",
+      "optional": true
+    },
+    {
+      "key": "right_detail",
+      "title": "Garder le bon niveau de détail",
+      "concept_key": "outline_right_detail",
+      "concept_label": "Plan de travail souple",
+      "question": "Quelles parties méritent d’être détaillées maintenant, et lesquelles peuvent rester ouvertes ?",
+      "why": "Le plan n’est pas un contrat. Certaines zones gagnent à être précises avant l’écriture ; d’autres doivent rester disponibles pour la découverte. L’objectif est de réduire l’incertitude qui bloque, pas de supprimer toute surprise.",
+      "example": "Mina sait comment la commande commence et se termine, mais garde trois variantes pour la confrontation avec son frère.",
+      "placeholder": "Je détaille maintenant… Je garde ouvert… Je reviendrai sur… quand…",
+      "tips": ["Conserve les alternatives dans tes notes au lieu de choisir trop tôt.", "Réduis le détail si maintenir le plan coûte plus que ce qu’il apporte."],
+      "review": "Relis : ton plan te donne-t-il un prochain pas concret tout en laissant une marge de réécriture ?",
+      "optional": true
+    }
+  ]
+}
