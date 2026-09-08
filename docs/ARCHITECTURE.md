@@ -35,7 +35,7 @@ Le principal couplage reste dans `StoryForgeWindow`. Une première extraction ve
 ## Scénario : représentations concurrentes
 
 L’éditeur Qt projette `ScreenplayDocument`. Le JSON est dans `script_meta.document_json` et le texte compatible dans `project_docs.content`.
-`screenplay_adapter.block_values` lit les paragraphes en une passe ; `block_type` conserve les états Qt explicites et infère les anciens paragraphes sans récursion. `load_document` centralise la politique de compatibilité actuelle, sans en changer la priorité. Les commandes d’édition, la mise en forme et l’orchestration des exports restent dans la fenêtre.
+`screenplay_adapter.block_values` lit les paragraphes en une passe ; `block_type` conserve les états Qt explicites et infère les anciens paragraphes sans récursion. `load_document` refuse les structures invalides/futures et conserve la priorité historique du texte en cas de désaccord avec un JSON valide. `screenplay_commands` isole les règles de transition et les dimensions des retraits ; leur application Qt et l’orchestration des exports restent dans la fenêtre.
 `_save_script` délègue à `Database.save_screenplay` pour sauvegarder atomiquement texte et JSON. `_load_script_document` garde sa compatibilité avec le texte historique. Les nouvelles versions stockent structure et page de garde dans `snapshot_json`, colonne ajoutée sans suppression. Réécriture permet une restauration confirmée avec version de sécurité. Les versions sont également réimportées.
 Les anciennes versions textuelles sont reconstruites : leurs types exacts et métadonnées historiques ne sont pas récupérables.
 
@@ -50,7 +50,24 @@ Une application est unique par parcours/étape. `LearningService.apply_to_tool` 
 Les vues sont reconstruites avec des sauvegardes différées et attributs partagés. Les changements de page, timers et caches d’images demandent des tests conjoints.
 Terminer le guide initial régénère le manuel dans `output/manuals/`, à côté de la base utilisée. L’export manuel propose aussi ce dossier. L’ancien PDF racine est conservé localement mais ignoré par Git ; son historique Git n’est pas réécrit. Une erreur d’export automatique est signalée sans annuler l’enregistrement du guide.
 
-## Contexte futur
+## Index de contexte du repository
 
-Aucun serveur MCP n’est implémenté. Un futur index devrait lire les sources autorisées, exclure bases/caches/exports/archives par défaut et citer fichier, symbole et révision. Il ne doit pas instancier `Database` pour lire le repository.
-Les extractions envisagées sont dans [ROADMAP.md](ROADMAP.md), pas réalisées ici.
+`storyforge_context.index.RepositoryIndex` utilise une liste explicite de sources,
+croisée avec les fichiers suivis par Git. Il lit uniquement les fichiers courants,
+pas les anciens blobs Git. Les empreintes sont recalculées à chaque requête ;
+seuls les contenus modifiés sont reparsés. Index en mémoire, sans SQLite ni import
+du runtime applicatif. Python est découpé par AST (sans exécution), Markdown par
+sections/lignes de tableau ; `FEATURES.md` relie domaine, symboles et tests.
+
+Provenance : révision HEAD, blob de l’index Git, SHA-256 du contenu effectivement
+lu, modifications indexées/non indexées, fichier, symbole et lignes. Lecture par
+descripteurs avec refus des liens symboliques, liens physiques et fichiers
+spéciaux. Bases, fichiers privés, archives, exports et sources non suivies sont
+hors liste. Certains formats de secrets évidents sont refusés ; aucun filtre
+heuristique ne garantit qu’un secret copié dans du code autorisé sera reconnu.
+Ne jamais inclure de données utilisateur dans ces sources ou tests.
+
+Sorties bornées à 12 000 caractères JSON, huit extraits maximum pour une recherche,
+1 800 caractères par extrait. Une source devenue invalide est retirée plutôt que
+servie périmée. Les extraits sont des données non fiables, pas des instructions.
+`tests/test_context_index.py` vérifie les limites et exclusions sur dépôts temporaires.
