@@ -1,0 +1,82 @@
+{
+  "key": "build_conflict",
+  "cycle": "Guide ciblé",
+  "title": "Construire un conflit",
+  "subtitle": "Comprendre ce qui résiste, ce que cela coûte et les décisions que cela provoque.",
+  "description": "Sept étapes facultatives pour explorer une opposition extérieure, relationnelle ou intérieure. Pas de méchant obligatoire, ni de confrontation ou de résolution imposée.",
+  "deliverable": "Des pistes à relire et à appliquer, sur confirmation, aux champs d’une fiche Conflit existante du projet.",
+  "requires_project": true,
+  "apply_label": "Revoir et appliquer les étapes",
+  "steps": [
+    {
+      "key": "first_will", "title": "Une première volonté", "concept_key": "conflict_first_will", "concept_label": "Volonté A",
+      "question": "Qui cherche à obtenir, préserver ou empêcher quoi ?",
+      "why": "Pars d’une volonté concrète plutôt que d’une dispute. Un personnage, un groupe ou une part de soi peut vouloir préserver un équilibre autant que le modifier.",
+      "example": "Mina veut garder l’atelier ouvert le soir pour terminer une commande urgente.",
+      "placeholder": "La force A est… Elle cherche à…",
+      "tips": ["Nomme la personne ou la force dans ta réponse.", "Une opposition locale à une scène peut suffire."],
+      "review": "Relis : verrait-on cette volonté dans une action précise ?",
+      "optional": true
+    },
+    {
+      "key": "opposing_force", "title": "Ce qui lui résiste", "concept_key": "conflict_opposing_force", "concept_label": "Volonté ou force B",
+      "question": "Quelle autre volonté ou contrainte résiste à ce résultat ?",
+      "why": "Une opposition n’est pas forcément malveillante. Une personne peut défendre un besoin légitime ; une institution, une limite matérielle ou une contradiction intérieure peut aussi résister sans intention hostile.",
+      "example": "Sarah, sa voisine, veut le silence le soir pour que son enfant puisse dormir.",
+      "placeholder": "La force B est… Elle veut… Ou la contrainte est…",
+      "tips": ["Évite le méchant défini seulement par son opposition au héros.", "Une tempête n’a pas d’objectif : décris son effet, pas une volonté inventée."],
+      "review": "Relis : comprends-tu ce que défend l’autre côté, ou comment agit la contrainte ?",
+      "optional": true
+    },
+    {
+      "key": "incompatibility", "title": "Le point de friction", "concept_key": "conflict_incompatibility", "concept_label": "Incompatibilité",
+      "question": "Dans cette situation, pourquoi ces deux résultats ne peuvent-ils pas coexister simplement ?",
+      "why": "Le conflit devient précis quand on comprend son point de friction. Il peut être temporaire ou négociable : l’objectif n’est pas d’inventer une incompatibilité absolue.",
+      "example": "La seule machine disponible vibre contre le mur de la chambre ; terminer ce soir empêche le repos.",
+      "placeholder": "Le point de friction est… Un accord facile est empêché par…",
+      "tips": ["Teste d’abord la solution la plus simple.", "Si elle fonctionne, le compromis peut devenir la scène : inutile de forcer le conflit."],
+      "review": "Relis : as-tu décrit un obstacle réel, plutôt que répété que les personnages ne s’entendent pas ?",
+      "optional": true
+    },
+    {
+      "key": "stakes", "title": "Ce que chacun risque", "concept_key": "conflict_stakes", "concept_label": "Enjeux",
+      "question": "Qu’est-ce que chaque côté risque de perdre, de gagner ou de sacrifier ?",
+      "why": "Les enjeux expliquent pourquoi l’on insiste. Une perte de confiance, du repos ou une promesse non tenue peut compter autant qu’une menace spectaculaire.",
+      "example": "Mina risque de perdre son client. Sarah risque une nouvelle nuit sans sommeil et la confiance dans leur accord.",
+      "placeholder": "Pour A… Pour B… Ce qui rend cela important…",
+      "tips": ["Distingue le résultat recherché de ce qu’il représente.", "Ne grossis pas artificiellement les conséquences."],
+      "review": "Relis : ces risques rendent-ils les décisions compréhensibles pour les deux côtés ?",
+      "optional": true
+    },
+    {
+      "key": "pressure", "title": "La pression évolue", "concept_key": "conflict_pressure", "concept_label": "Pression et conséquences",
+      "question": "Que provoque une première tentative, et comment l’autre côté réagit-il ?",
+      "why": "La pression peut venir des conséquences d’une action, d’une information ou du temps qui passe. Elle n’a pas besoin de monter sans arrêt : une négociation ou un apaisement peut aussi faire évoluer le conflit.",
+      "example": "Mina promet dix minutes, puis découvre une pièce cassée. Sarah revient : le délai annoncé n’est plus crédible.",
+      "placeholder": "A tente… Cela provoque… B réagit…",
+      "tips": ["Relie les événements par des causes.", "Ce champ sert à explorer, pas à imposer une escalade."],
+      "review": "Relis : la réaction change-t-elle les possibilités, ou répète-t-elle seulement la même dispute ?",
+      "optional": true
+    },
+    {
+      "key": "choice", "title": "Les choix possibles", "concept_key": "conflict_choice", "concept_label": "Choix difficile",
+      "question": "Quelles options restent ouvertes, et quel prix aurait chacune ?",
+      "why": "Le conflit peut révéler une valeur lorsqu’une personne choisit malgré un coût. Cherche plusieurs options sans fabriquer un faux dilemme ; ne pas décider peut également avoir des conséquences.",
+      "example": "Mina peut arrêter et négocier avec le client, déplacer le travail à ses frais ou continuer au risque de rompre l’accord.",
+      "placeholder": "Option 1… Son coût… Option 2… Son coût…",
+      "tips": ["Le compromis est une option légitime.", "Passe l’étape si un choix coûteux n’est pas utile ici."],
+      "review": "Relis : les options sont-elles réellement possibles pour cette personne à ce moment-là ?",
+      "optional": true
+    },
+    {
+      "key": "outcome", "title": "Une issue provisoire", "concept_key": "conflict_outcome", "concept_label": "Issue possible",
+      "question": "Que pourrait produire ce conflit, même s’il reste ouvert ?",
+      "why": "Une issue peut être un accord, une rupture, un déplacement du problème ou une tension persistante. Elle n’impose ni vainqueur ni scène finale obligatoire.",
+      "example": "Mina arrête la machine et appelle le client. Sarah accepte un essai d’horaires différents ; la confiance reste à reconstruire.",
+      "placeholder": "Après la décision… Ce qui change… Ce qui reste ouvert…",
+      "tips": ["Garde plusieurs hypothèses si tu hésites.", "Cette réponse reste une piste, pas une fin verrouillée."],
+      "review": "Relis : l’issue découle-t-elle des actions et préserve-t-elle les questions que tu veux laisser ouvertes ?",
+      "optional": true
+    }
+  ]
+}

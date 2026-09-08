@@ -15,6 +15,22 @@ CHARACTER_GUIDE_FIELDS = {
     'evolution': ('arc', 'Arc et transformation'),
 }
 
+CONFLICT_GUIDE_FIELDS = {
+    'first_will': ('side_a_goal', 'Volonté A'),
+    'opposing_force': ('side_b_goal', 'Volonté ou force B'),
+    'incompatibility': ('incompatibility', 'Incompatibilité'),
+    'stakes': ('stakes', 'Enjeux'),
+    'pressure': ('escalation', 'Montée de la pression'),
+    'choice': ('difficult_choice', 'Choix difficile'),
+    'outcome': ('outcome', 'Issue possible'),
+}
+
+# Fixed destinations only; neither table nor field names come from user text.
+FIELD_GUIDES = {
+    'build_character': ('characters', 'character', 'name', 'Personnage', CHARACTER_GUIDE_FIELDS),
+    'build_conflict': ('conflicts', 'conflict', 'title', 'Conflit', CONFLICT_GUIDE_FIELDS),
+}
+
 
 class LearningService:
     def __init__(self, db: Database):
@@ -78,28 +94,35 @@ class LearningService:
 
     def apply_character_answer(self, run_id, session, index, draft, character_id,
                                expected_text, mode='append'):
+        if session.key != 'build_character':
+            raise ValueError('Cette application est réservée au guide Personnage.')
+        return self.apply_field_answer(run_id, session, index, draft, character_id, expected_text, mode)
+
+    def apply_field_answer(self, run_id, session, index, draft, target_id,
+                           expected_text, mode='append'):
         """Apply an explicitly previewed answer, scoped to this run's project."""
         with self.db.transaction():
             run, step = self._step(run_id, session, index)
-            if (run['guide_key'] != 'build_character' or session.key != 'build_character'
-                    or step.key not in CHARACTER_GUIDE_FIELDS):
-                raise ValueError('Cette application est réservée au guide Personnage.')
+            spec = FIELD_GUIDES.get(run['guide_key'])
+            if not spec or session.key != run['guide_key'] or step.key not in spec[4]:
+                raise ValueError('Ce guide ne peut pas appliquer cette réponse à une fiche.')
+            table, target_type, _title_field, _label, fields = spec
             if not draft.strip() or mode not in {'append', 'replace'}:
                 raise ValueError('Une réponse et un mode d’application valides sont nécessaires.')
-            field, _label = CHARACTER_GUIDE_FIELDS[step.key]
-            character = self.db.one('SELECT * FROM characters WHERE id=? AND project_id=?',
-                                    (character_id, run['project_id']))
-            if not character:
-                raise ValueError('Choisis un personnage de ce projet.')
-            current = character[field] or ''
+            field, _label = fields[step.key]
+            target = self.db.one(f'SELECT * FROM {table} WHERE id=? AND project_id=?',
+                                (target_id, run['project_id']))
+            if not target:
+                raise ValueError('Choisis une fiche de ce projet.')
+            current = target[field] or ''
             if current != expected_text:
                 raise ValueError('La fiche a changé. Rouvre l’aperçu avant de confirmer.')
             proposed = draft.strip()
             if mode == 'append' and current.strip():
                 proposed = current + '\n\n' + proposed
-            self.db.run(f'UPDATE characters SET {field}=?,updated_at=? WHERE id=? AND project_id=?',
-                        (proposed, NOW(), character_id, run['project_id']))
-            self.apply_to_tool(run_id, session, index, draft, 'character', character_id, field)
+            self.db.run(f'UPDATE {table} SET {field}=?,updated_at=? WHERE id=? AND project_id=?',
+                        (proposed, NOW(), target_id, run['project_id']))
+            self.apply_to_tool(run_id, session, index, draft, target_type, target_id, field)
 
     def skip_step(self, run_id, session, index, draft=''):
         with self.db.transaction():

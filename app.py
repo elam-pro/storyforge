@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 import screenplay_adapter
 import screenplay_commands
-from learning_service import CHARACTER_GUIDE_FIELDS, LearningService
+from learning_service import CHARACTER_GUIDE_FIELDS, CONFLICT_GUIDE_FIELDS, FIELD_GUIDES, LearningService
 from image_previews import PixmapCache, decode_preview
 
 import csv
@@ -127,8 +127,9 @@ GUIDE_SESSIONS = {
     "find_ending": load_session(BASE_DIR / "content" / "sessions" / "guide_find_ending.json"),
     "prepare_scene": load_session(BASE_DIR / "content" / "sessions" / "guide_prepare_scene.json"),
     "build_character": load_session(BASE_DIR / "content" / "sessions" / "guide_build_character.json"),
+    "build_conflict": load_session(BASE_DIR / "content" / "sessions" / "guide_build_conflict.json"),
 }
-GUIDE_ORDER = ("seed", "strengthen_idea", "find_ending", "prepare_scene", "build_character")
+GUIDE_ORDER = ("seed", "strengthen_idea", "find_ending", "prepare_scene", "build_character", "build_conflict")
 GUIDE_LEVELS = {
     "discovery": "Découverte",
     "guided": "Guidé",
@@ -140,6 +141,11 @@ GUIDE_LEVELS = {
 # copy an answer into several documents: the guide remains the reasoning trace
 # and the project tool remains the source of truth.
 LEARNING_TOOL_LINKS = {
+    "build_conflict": {
+        key: ("conflicts", "", f"Conflit · {label}", "conflict", field,
+              "Choisis un conflit. L’aperçu permet d’ajouter ou de remplacer ce seul champ.")
+        for key, (field, label) in CONFLICT_GUIDE_FIELDS.items()
+    },
     "build_character": {
         key: ("characters", "", f"Personnage · {label}", "character", field,
               "Choisis un personnage. L’aperçu permet d’ajouter ou de remplacer ce seul champ.")
@@ -4164,7 +4170,7 @@ class StoryForgeWindow(QMainWindow):
                 next_text = "Créer le projet →"
                 next_action = self._create_project_from_learning
             else:
-                next_text = "Revoir les étapes →" if run["guide_key"] == "build_character" else "Prévisualiser →"
+                next_text = "Revoir les étapes →" if run["guide_key"] in FIELD_GUIDES else "Prévisualiser →"
                 next_action = self._preview_apply_guide
         elif idx == len(session.steps) - 1:
             next_text = "Terminer" if self.width() < 1250 else "Terminer le guide"
@@ -4173,10 +4179,10 @@ class StoryForgeWindow(QMainWindow):
             next_text = "Terminer →" if self.width() < 1250 else "Terminer et continuer →"
             next_action = self._complete_learning_step
         actions.addWidget(make_button(next_text, "primary", next_action))
-        if run["guide_key"] == "build_character":
+        if run["guide_key"] in FIELD_GUIDES:
             right.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
             scroll = QScrollArea()
-            scroll.setObjectName("CharacterGuideScroll")
+            scroll.setObjectName("CharacterGuideScroll" if run["guide_key"] == "build_character" else "ConflictGuideScroll")
             scroll.setWidgetResizable(True)
             scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             scroll.setWidget(right_widget)
@@ -4204,7 +4210,7 @@ class StoryForgeWindow(QMainWindow):
             ),
             "conflict": (
                 "SELECT id,title,nature FROM conflicts WHERE project_id=? ORDER BY position,id",
-                lambda row: f"{row['title'] or 'Conflit sans titre'} · {row['nature'] or 'nature à préciser'}",
+                lambda row: f"{row['title'] or 'Conflit sans titre'} · {CONFLICT_NATURE_LABELS.get(row['nature'], 'nature à préciser')}",
             ),
             "promise": (
                 "SELECT id,title,promise_type FROM story_promises WHERE project_id=? ORDER BY position,id",
@@ -4232,7 +4238,8 @@ class StoryForgeWindow(QMainWindow):
 
         card = make_card()
         card.setObjectName("LearningConnection")
-        box = QVBoxLayout(card) if run["guide_key"] == "build_character" else QHBoxLayout(card)
+        field_guide = run["guide_key"] in FIELD_GUIDES
+        box = QVBoxLayout(card) if field_guide else QHBoxLayout(card)
         box.setContentsMargins(16, 10, 14, 10)
         box.setSpacing(12)
         copy = QVBoxLayout()
@@ -4256,7 +4263,7 @@ class StoryForgeWindow(QMainWindow):
                 )
             )
         box.addLayout(copy, 1)
-        if run["guide_key"] == "build_character":
+        if field_guide:
             controls = QHBoxLayout()
             box.addLayout(controls)
             box = controls
@@ -4267,30 +4274,30 @@ class StoryForgeWindow(QMainWindow):
             target_combo = QComboBox()
             target_combo.setObjectName("LearningTargetCombo")
             target_combo.setMinimumWidth(190)
-            character_guide = run["guide_key"] == "build_character"
-            target_combo.addItem("Choisir un personnage…" if character_guide else "Tout l’outil", 0)
+            prompt = "Choisir un personnage…" if target_type == "character" else "Choisir un conflit…"
+            target_combo.addItem(prompt if field_guide else "Tout l’outil", 0)
             for target_id, label in target_rows:
                 target_combo.addItem(label, target_id)
             if application:
                 index = target_combo.findData(int(application["target_id"] or 0))
                 target_combo.setCurrentIndex(max(0, index))
-            elif character_guide:
+            elif field_guide:
                 previous = self.db.one(
-                    "SELECT target_id FROM guided_applications WHERE run_id=? AND target_type='character' AND target_id>0 ORDER BY updated_at DESC,rowid DESC LIMIT 1",
-                    (run["id"],))
+                    "SELECT target_id FROM guided_applications WHERE run_id=? AND target_type=? AND target_id>0 ORDER BY updated_at DESC,rowid DESC LIMIT 1",
+                    (run["id"], target_type))
                 if previous:
                     target_combo.setCurrentIndex(max(0, target_combo.findData(previous["target_id"])))
             self.learning_target_combo = target_combo
             box.addWidget(target_combo, 0, Qt.AlignmentFlag.AlignVCenter)
 
         if project_id:
-            if run["guide_key"] == "build_character":
-                apply_button = make_button("Prévisualiser la réponse", "primary", self._preview_character_answer)
+            if field_guide:
+                apply_button = make_button("Prévisualiser la réponse", "primary", self._preview_field_answer)
                 apply_button.setEnabled(bool(target_combo.currentData()))
                 target_combo.currentIndexChanged.connect(lambda: apply_button.setEnabled(bool(target_combo.currentData())))
                 box.addWidget(apply_button)
             open_button = make_button(
-                "Ouvrir l’outil →", "secondary" if run["guide_key"] == "build_character" else "primary", self._open_learning_tool
+                "Ouvrir l’outil →", "secondary" if field_guide else "primary", self._open_learning_tool
             )
             box.addWidget(open_button, 0, Qt.AlignmentFlag.AlignVCenter)
             if application:
@@ -4314,27 +4321,32 @@ class StoryForgeWindow(QMainWindow):
         layout.addWidget(card)
 
     def _preview_character_answer(self) -> None:
+        self._preview_field_answer()
+
+    def _preview_field_answer(self) -> None:
         run = self.db.guided_run(self._guide_run_id)
-        if not run or run["guide_key"] != "build_character":
+        if not run or run["guide_key"] not in FIELD_GUIDES:
             return
-        character_id = int(self.learning_target_combo.currentData() or 0)
-        character = self.db.one("SELECT * FROM characters WHERE id=? AND project_id=?",
-                                (character_id, run["project_id"]))
+        table, _target_type, title_field, target_label, fields = FIELD_GUIDES[run["guide_key"]]
+        target_id = int(self.learning_target_combo.currentData() or 0)
+        target = self.db.one(f"SELECT * FROM {table} WHERE id=? AND project_id=?",
+                             (target_id, run["project_id"]))
         draft = self.learning_draft.toPlainText().strip()
-        if not character or not draft:
-            QMessageBox.information(self, "Application au personnage", "Choisis un personnage et écris une réponse avant d’ouvrir l’aperçu.")
+        if not target or not draft:
+            QMessageBox.information(self, f"Application · {target_label}", "Choisis une fiche et écris une réponse avant d’ouvrir l’aperçu.")
             return
-        field, label = CHARACTER_GUIDE_FIELDS[self._guide_session.steps[self._learning_idx].key]
-        current = character[field] or ""
+        field, label = fields[self._guide_session.steps[self._learning_idx].key]
+        current = target[field] or ""
         dialog = QDialog(self)
-        dialog.setObjectName("CharacterGuidePreview")
-        dialog.setWindowTitle("Appliquer au personnage")
+        prefix = "CharacterGuide" if run["guide_key"] == "build_character" else "ConflictGuide"
+        dialog.setObjectName(f"{prefix}Preview")
+        dialog.setWindowTitle(f"Appliquer · {target_label}")
         dialog.resize(760, 620)
         box = QVBoxLayout(dialog)
-        box.addWidget(make_label(f"{character['name']} · {label}", "SectionTitle", True))
+        box.addWidget(make_label(f"{target[title_field] or target_label} · {label}", "SectionTitle", True))
         box.addWidget(make_label("Seul ce champ sera modifié, après confirmation. Annuler laisse la fiche intacte.", "Muted", True))
         mode = QComboBox()
-        mode.setObjectName("CharacterGuideApplyMode")
+        mode.setObjectName(f"{prefix}ApplyMode")
         mode.addItem("Ajouter à la suite du texte existant", "append")
         mode.addItem("Remplacer le texte de ce champ", "replace")
         box.addWidget(mode)
@@ -4351,8 +4363,8 @@ class StoryForgeWindow(QMainWindow):
         actions.addStretch()
         def confirm():
             try:
-                self.learning_service.apply_character_answer(run["id"], self._guide_session,
-                    self._learning_idx, draft, character_id, current, str(mode.currentData()))
+                self.learning_service.apply_field_answer(run["id"], self._guide_session,
+                    self._learning_idx, draft, target_id, current, str(mode.currentData()))
             except ValueError as exc:
                 QMessageBox.information(dialog, "Application impossible", str(exc))
                 return
@@ -4360,7 +4372,7 @@ class StoryForgeWindow(QMainWindow):
         actions.addWidget(make_button("Confirmer l’application", "primary", confirm))
         box.addLayout(actions)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.save_state.setText("Réponse appliquée à la fiche du personnage")
+            self.save_state.setText(f"Réponse appliquée · {target_label}")
             self.show_learning(run_id=run["id"])
 
     def _set_learning_mastery(self, status: str) -> None:
@@ -4438,9 +4450,17 @@ class StoryForgeWindow(QMainWindow):
             if field:
                 field.setFocus()
         elif view == "conflicts" and hasattr(self, "conflict_fields"):
+            if target_field in {"side_a_goal", "side_b_goal", "incompatibility", "stakes"}:
+                self.conflict_tabs.setCurrentIndex(0)
+            elif target_field in {"escalation", "difficult_choice", "outcome"}:
+                self.conflict_tabs.setCurrentIndex(2)
             field = self.conflict_fields.get(target_field)
             if field:
                 field.setFocus()
+                tab = self.conflict_tabs.currentWidget()
+                scroll = tab if isinstance(tab, QScrollArea) else tab.findChild(QScrollArea)
+                if scroll:
+                    scroll.ensureWidgetVisible(field)
         elif view == "promises" and hasattr(self, "story_promise_fields"):
             self.promise_tabs.setCurrentIndex(1)
             field = self.story_promise_fields.get(target_field)
@@ -4609,7 +4629,7 @@ class StoryForgeWindow(QMainWindow):
             return
         answers = self._guide_answers(run["id"])
         guide_key = run["guide_key"]
-        if guide_key == "build_character":
+        if guide_key in FIELD_GUIDES:
             self._move_learning(0)
             return
         if guide_key == "strengthen_idea":

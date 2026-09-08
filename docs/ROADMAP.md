@@ -1,6 +1,6 @@
 # Roadmap canonique
 
-Mise à jour : 8 septembre 2026. Ce document sépare les chantiers de consolidation achevés du travail futur. L’état actuel est dans [FEATURES.md](FEATURES.md).
+Mise à jour : 9 septembre 2026. Ce document sépare les chantiers de consolidation achevés du travail futur. L’état actuel est dans [FEATURES.md](FEATURES.md).
 
 ## Consolidation issue de l’audit
 
@@ -19,7 +19,7 @@ Chaque chantier reste un changement borné avec tests et commit local. Les phase
 
 ## Fonctionnalités restantes : numéros d’origine conservés
 
-- Ensemble 2 : guides conflit, synopsis et outline ; niveaux de guidage à approfondir. Le guide Personnage est livré, voir FEATURES.md.
+- Ensemble 2 : guides synopsis et outline ; niveaux de guidage à approfondir. Les guides Personnage et Conflit sont livrés, voir FEATURES.md.
 - Ensemble 9 : cartes géographiques, fonds, repères liés aux lieux et terrains. Reporté, pas ajouté implicitement.
 - Ensemble 18 : vue géographique après l’ensemble 9 ; cohérence des vues à renforcer.
 - Ensemble 19 : IA reportée à la demande de l’utilisateur. L’ancien professeur est désactivé ; toute réactivation exige une décision explicite, contrôle des données envoyées et accord de l’auteur sur les propositions.
