@@ -31,6 +31,15 @@ FIELD_GUIDES = {
     'build_conflict': ('conflicts', 'conflict', 'title', 'Conflit', CONFLICT_GUIDE_FIELDS),
 }
 
+SYNOPSIS_GUIDE_STEPS = {
+    'opening_situation': 'Point de départ',
+    'disruption_direction': 'Dérèglement et direction',
+    'first_chain': 'Premières actions et conséquences',
+    'escalation_choice': 'Aggravation et choix',
+    'decisive_confrontation': 'Confrontation décisive',
+    'outcome_change': 'Résultat et changement',
+}
+
 
 class LearningService:
     def __init__(self, db: Database):
@@ -136,6 +145,31 @@ class LearningService:
                                       status='completed' if finish else 'ongoing')
             self.mirror_progress(run_id, target, 'terminée' if finish else 'en cours')
             return finish
+
+    def apply_synopsis_answer(self, run_id, session, index, draft,
+                              expected_text, mode='append'):
+        """Apply one confirmed guide response to the matching synopsis passage."""
+        with self.db.transaction():
+            run, step = self._step(run_id, session, index)
+            if (run['guide_key'] != 'build_synopsis' or session.key != 'build_synopsis'
+                    or step.key not in SYNOPSIS_GUIDE_STEPS):
+                raise ValueError('Cette application est réservée au guide Synopsis.')
+            if not run['project_id']:
+                raise ValueError('Ce parcours n’est relié à aucun projet.')
+            if not draft.strip() or mode not in {'append', 'replace'}:
+                raise ValueError('Une réponse et un mode d’application valides sont nécessaires.')
+            saved = self.db.one(
+                'SELECT answer FROM synopsis_answers WHERE project_id=? AND step_key=?',
+                (run['project_id'], step.key),
+            )
+            current = saved['answer'] if saved else ''
+            if current != expected_text:
+                raise ValueError('Le passage a changé. Rouvre l’aperçu avant de confirmer.')
+            proposed = draft.strip()
+            if mode == 'append' and current.strip():
+                proposed = current + '\n\n' + proposed
+            self.db.save_synopsis_answer(run['project_id'], step.key, proposed)
+            self.apply_to_tool(run_id, session, index, draft, 'project', 0, step.key)
 
     def mirror_progress(self, run_id, index, status):
         run = self.db.guided_run(run_id)

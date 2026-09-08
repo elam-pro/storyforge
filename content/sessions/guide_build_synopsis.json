@@ -1,0 +1,72 @@
+{
+  "key": "build_synopsis",
+  "cycle": "Guide ciblé",
+  "title": "Construire un synopsis",
+  "subtitle": "Raconter l’histoire entière en suivant les actions, les décisions et leurs conséquences.",
+  "description": "Six passages facultatifs pour obtenir un récit continu et provisoire. Les parties Début, Développement et Fin servent à se repérer ; elles n’imposent ni actes, ni modèle narratif.",
+  "deliverable": "Six passages reliés au Synopsis guidé de Construction, que tu peux ensuite assembler et réécrire librement.",
+  "requires_project": true,
+  "apply_label": "Revoir et appliquer les passages",
+  "steps": [
+    {
+      "key": "opening_situation", "title": "Le point de départ", "concept_key": "synopsis_opening", "concept_label": "Situation de départ",
+      "question": "Dans quelle situation concrète rencontrons-nous la personne que l’histoire suit ?",
+      "why": "Le début du synopsis donne assez de contexte pour comprendre qui agit et quelle tension existe déjà. Une biographie complète ou une description du monde n’est pas nécessaire.",
+      "example": "Mina répare des vélos dans l’atelier familial, où son frère valide encore chaque dépense importante.",
+      "placeholder": "Au début, qui suivons-nous, que fait cette personne et dans quelle situation se trouve-t-elle ?",
+      "tips": ["Écris au présent.", "Garde seulement les détails qui préparent ce qui va suivre."],
+      "review": "Relis : le lecteur peut-il entrer dans l’histoire sans recevoir une longue explication préalable ?",
+      "optional": true
+    },
+    {
+      "key": "disruption_direction", "title": "Le dérèglement et la direction", "concept_key": "synopsis_disruption", "concept_label": "Bascule et objectif",
+      "question": "Qu’est-ce qui dérègle cette situation, et vers quoi cela pousse-t-il la personne ?",
+      "why": "Le synopsis devient lisible quand un événement produit une réaction puis une direction. Cette direction peut rester provisoire ou évoluer ensuite.",
+      "example": "Un client propose une commande qui sauverait l’atelier, à condition qu’elle soit terminée avant l’aube. Mina l’accepte sans consulter son frère.",
+      "placeholder": "Ceci arrive… Cela compte parce que… La personne décide alors de…",
+      "tips": ["Relie l’événement à une décision.", "Un incident spectaculaire n’est pas obligatoire."],
+      "review": "Relis : comprend-on pourquoi ce fait change la trajectoire plutôt que rester une simple information ?",
+      "optional": true
+    },
+    {
+      "key": "first_chain", "title": "Les premières actions", "concept_key": "synopsis_first_chain", "concept_label": "Actions et conséquences",
+      "question": "Que tente d’abord la personne, qu’est-ce qui résiste et que provoque cette tentative ?",
+      "why": "Une chaîne d’actions et de conséquences évite l’impression de liste. Le protagoniste peut aussi subir, mais sa réaction doit modifier ce qui devient possible ensuite.",
+      "example": "Mina lance la production de nuit. Le bruit réveille le voisinage ; Sarah coupe l’alimentation de l’atelier et endommage une pièce en cours.",
+      "placeholder": "Elle tente… Mais… Par conséquent… Elle réagit en…",
+      "tips": ["Sélectionne les mouvements importants, pas chaque détail.", "Utilise donc, mais, par conséquent seulement quand le lien est réel."],
+      "review": "Relis : chaque événement change-t-il la suite ou pourrait-on le déplacer sans conséquence ?",
+      "optional": true
+    },
+    {
+      "key": "escalation_choice", "title": "La pression et le choix", "concept_key": "synopsis_escalation_choice", "concept_label": "Pression et choix",
+      "question": "Comment les conséquences réduisent-elles les options jusqu’à provoquer une décision importante ?",
+      "why": "Le développement progresse lorsque ce qui précède change le prix des décisions. La pression peut augmenter, se déplacer ou ouvrir un compromis ; elle ne doit pas forcément devenir spectaculaire.",
+      "example": "Sans la pièce, Mina doit choisir entre annuler la commande ou utiliser les économies destinées au loyer pour en acheter une autre.",
+      "placeholder": "À cause de… les options deviennent… La personne choisit… et accepte de…",
+      "tips": ["Évite les obstacles interchangeables.", "Un compromis coûteux est aussi un choix dramatique."],
+      "review": "Relis : cette décision vient-elle vraiment des conséquences déjà racontées ?",
+      "optional": true
+    },
+    {
+      "key": "decisive_confrontation", "title": "Le moment décisif", "concept_key": "synopsis_decisive_action", "concept_label": "Action décisive",
+      "question": "Quelle action ou décision confronte directement le principal problème ?",
+      "why": "Le synopsis doit montrer comment l’issue se décide. Une confrontation peut être physique, relationnelle, intérieure ou très calme ; elle n’impose ni duel ni victoire.",
+      "example": "Quand son frère veut reprendre les commandes, Mina refuse de lui céder la signature et expose devant le client les risques qu’elle a pris.",
+      "placeholder": "Au moment décisif… La résistance est… La personne choisit de…",
+      "tips": ["Raconte ce qui se passe concrètement.", "L’échec ou le refus d’agir peuvent aussi décider de l’issue."],
+      "review": "Relis : l’issue dépend-elle d’une action ou d’un choix, plutôt que d’une solution arrivée de l’extérieur ?",
+      "optional": true
+    },
+    {
+      "key": "outcome_change", "title": "Le résultat et l’après", "concept_key": "synopsis_outcome", "concept_label": "Résultat et changement",
+      "question": "Quel résultat concret obtient-on, et qu’est-ce qui diffère de la situation de départ ?",
+      "why": "Raconter la fin permet de vérifier le mouvement global. Un personnage peut changer, tenir bon, échouer à changer ou rester secondaire : seule la conséquence du récit compte ici.",
+      "example": "La commande est livrée en retard mais le client reste. Mina devient officiellement associée ; sa relation avec son frère reste fragile.",
+      "placeholder": "Finalement… L’objectif devient… Par rapport au début… Ce qui reste ouvert…",
+      "tips": ["Distingue le résultat extérieur de l’évolution personnelle.", "Tu peux conserver plusieurs fins provisoires dans ta réponse."],
+      "review": "Relis : la fin découle-t-elle du parcours raconté et répond-elle à la question principale de cette version ?",
+      "optional": true
+    }
+  ]
+}

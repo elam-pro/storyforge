@@ -3,7 +3,13 @@ from __future__ import annotations
 import sqlite3
 import screenplay_adapter
 import screenplay_commands
-from learning_service import CHARACTER_GUIDE_FIELDS, CONFLICT_GUIDE_FIELDS, FIELD_GUIDES, LearningService
+from learning_service import (
+    CHARACTER_GUIDE_FIELDS,
+    CONFLICT_GUIDE_FIELDS,
+    FIELD_GUIDES,
+    SYNOPSIS_GUIDE_STEPS,
+    LearningService,
+)
 from image_previews import PixmapCache, decode_preview
 
 import csv
@@ -128,8 +134,12 @@ GUIDE_SESSIONS = {
     "prepare_scene": load_session(BASE_DIR / "content" / "sessions" / "guide_prepare_scene.json"),
     "build_character": load_session(BASE_DIR / "content" / "sessions" / "guide_build_character.json"),
     "build_conflict": load_session(BASE_DIR / "content" / "sessions" / "guide_build_conflict.json"),
+    "build_synopsis": load_session(BASE_DIR / "content" / "sessions" / "guide_build_synopsis.json"),
 }
-GUIDE_ORDER = ("seed", "strengthen_idea", "find_ending", "prepare_scene", "build_character", "build_conflict")
+GUIDE_ORDER = (
+    "seed", "strengthen_idea", "find_ending", "prepare_scene",
+    "build_character", "build_conflict", "build_synopsis",
+)
 GUIDE_LEVELS = {
     "discovery": "Découverte",
     "guided": "Guidé",
@@ -141,6 +151,13 @@ GUIDE_LEVELS = {
 # copy an answer into several documents: the guide remains the reasoning trace
 # and the project tool remains the source of truth.
 LEARNING_TOOL_LINKS = {
+    "build_synopsis": {
+        key: (
+            "development", "synopsis", f"Synopsis · {label}", "project", key,
+            "Prévisualise ce passage avant de l’envoyer vers le Synopsis guidé de Construction.",
+        )
+        for key, label in SYNOPSIS_GUIDE_STEPS.items()
+    },
     "build_conflict": {
         key: ("conflicts", "", f"Conflit · {label}", "conflict", field,
               "Choisis un conflit. L’aperçu permet d’ajouter ou de remplacer ce seul champ.")
@@ -4170,7 +4187,11 @@ class StoryForgeWindow(QMainWindow):
                 next_text = "Créer le projet →"
                 next_action = self._create_project_from_learning
             else:
-                next_text = "Revoir les étapes →" if run["guide_key"] in FIELD_GUIDES else "Prévisualiser →"
+                next_text = (
+                    "Revoir les étapes →"
+                    if run["guide_key"] in FIELD_GUIDES or run["guide_key"] == "build_synopsis"
+                    else "Prévisualiser →"
+                )
                 next_action = self._preview_apply_guide
         elif idx == len(session.steps) - 1:
             next_text = "Terminer" if self.width() < 1250 else "Terminer le guide"
@@ -4179,10 +4200,15 @@ class StoryForgeWindow(QMainWindow):
             next_text = "Terminer →" if self.width() < 1250 else "Terminer et continuer →"
             next_action = self._complete_learning_step
         actions.addWidget(make_button(next_text, "primary", next_action))
-        if run["guide_key"] in FIELD_GUIDES:
+        if run["guide_key"] in FIELD_GUIDES or run["guide_key"] == "build_synopsis":
             right.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
             scroll = QScrollArea()
-            scroll.setObjectName("CharacterGuideScroll" if run["guide_key"] == "build_character" else "ConflictGuideScroll")
+            scroll_names = {
+                "build_character": "CharacterGuideScroll",
+                "build_conflict": "ConflictGuideScroll",
+                "build_synopsis": "SynopsisGuideScroll",
+            }
+            scroll.setObjectName(scroll_names[run["guide_key"]])
             scroll.setWidgetResizable(True)
             scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             scroll.setWidget(right_widget)
@@ -4239,7 +4265,9 @@ class StoryForgeWindow(QMainWindow):
         card = make_card()
         card.setObjectName("LearningConnection")
         field_guide = run["guide_key"] in FIELD_GUIDES
-        box = QVBoxLayout(card) if field_guide else QHBoxLayout(card)
+        synopsis_guide = run["guide_key"] == "build_synopsis"
+        connected_guide = field_guide or synopsis_guide
+        box = QVBoxLayout(card) if connected_guide else QHBoxLayout(card)
         box.setContentsMargins(16, 10, 14, 10)
         box.setSpacing(12)
         copy = QVBoxLayout()
@@ -4263,7 +4291,7 @@ class StoryForgeWindow(QMainWindow):
                 )
             )
         box.addLayout(copy, 1)
-        if field_guide:
+        if connected_guide:
             controls = QHBoxLayout()
             box.addLayout(controls)
             box = controls
@@ -4296,8 +4324,10 @@ class StoryForgeWindow(QMainWindow):
                 apply_button.setEnabled(bool(target_combo.currentData()))
                 target_combo.currentIndexChanged.connect(lambda: apply_button.setEnabled(bool(target_combo.currentData())))
                 box.addWidget(apply_button)
+            elif synopsis_guide:
+                box.addWidget(make_button("Prévisualiser le passage", "primary", self._preview_synopsis_answer))
             open_button = make_button(
-                "Ouvrir l’outil →", "secondary" if field_guide else "primary", self._open_learning_tool
+                "Ouvrir l’outil →", "secondary" if connected_guide else "primary", self._open_learning_tool
             )
             box.addWidget(open_button, 0, Qt.AlignmentFlag.AlignVCenter)
             if application:
@@ -4322,6 +4352,73 @@ class StoryForgeWindow(QMainWindow):
 
     def _preview_character_answer(self) -> None:
         self._preview_field_answer()
+
+    def _preview_synopsis_answer(self) -> None:
+        run = self.db.guided_run(self._guide_run_id)
+        if not run or run["guide_key"] != "build_synopsis":
+            return
+        step = self._guide_session.steps[self._learning_idx]
+        saved = self.db.one(
+            "SELECT answer FROM synopsis_answers WHERE project_id=? AND step_key=?",
+            (run["project_id"], step.key),
+        )
+        current = saved["answer"] if saved else ""
+        draft = self.learning_draft.toPlainText().strip()
+        if not draft:
+            QMessageBox.information(
+                self, "Application · Synopsis",
+                "Écris une réponse avant d’ouvrir l’aperçu.",
+            )
+            return
+        dialog = QDialog(self)
+        dialog.setObjectName("SynopsisGuidePreview")
+        dialog.setWindowTitle("Appliquer au synopsis guidé")
+        dialog.resize(760, 620)
+        box = QVBoxLayout(dialog)
+        box.addWidget(make_label(
+            f"Synopsis · {SYNOPSIS_GUIDE_STEPS[step.key]}", "SectionTitle", True,
+        ))
+        box.addWidget(make_label(
+            "Seul ce passage guidé sera modifié. Le synopsis final ne sera réassemblé que depuis Construction, sur ton action.",
+            "Muted", True,
+        ))
+        mode = QComboBox()
+        mode.setObjectName("SynopsisGuideApplyMode")
+        mode.addItem("Ajouter à la suite du passage existant", "append")
+        mode.addItem("Remplacer ce passage", "replace")
+        box.addWidget(mode)
+        preview = make_editor(350)
+        preview.setReadOnly(True)
+
+        def refresh():
+            proposed = current + "\n\n" + draft if mode.currentData() == "append" and current.strip() else draft
+            preview.setPlainText(
+                f"ACTUEL\n{current or '— vide —'}\n\nAPRÈS CONFIRMATION\n{proposed}"
+            )
+
+        mode.currentIndexChanged.connect(refresh)
+        refresh()
+        box.addWidget(preview, 1)
+        actions = QHBoxLayout()
+        actions.addWidget(make_button("Annuler", "secondary", dialog.reject))
+        actions.addStretch()
+
+        def confirm():
+            try:
+                self.learning_service.apply_synopsis_answer(
+                    run["id"], self._guide_session, self._learning_idx,
+                    draft, current, str(mode.currentData()),
+                )
+            except ValueError as exc:
+                QMessageBox.information(dialog, "Application impossible", str(exc))
+                return
+            dialog.accept()
+
+        actions.addWidget(make_button("Confirmer le passage", "primary", confirm))
+        box.addLayout(actions)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.save_state.setText("Passage appliqué au Synopsis guidé")
+            self.show_learning(run_id=run["id"])
 
     def _preview_field_answer(self) -> None:
         run = self.db.guided_run(self._guide_run_id)
@@ -4415,6 +4512,10 @@ class StoryForgeWindow(QMainWindow):
     ) -> None:
         if view == "development":
             self.db.set_setting(f"last_development_doc_{self.active_project}", document)
+            if document == "synopsis" and target_field in SYNOPSIS_GUIDE_STEPS:
+                synopsis_index = list(SYNOPSIS_GUIDE_STEPS).index(target_field)
+                self.db.set_setting(f"synopsis_step_{self.active_project}", synopsis_index)
+                self.db.set_setting(f"synopsis_mode_{self.active_project}", "guide")
             if target_type == "scene" and target_id:
                 self._pending_scene_focus = target_id
             self.show_development()
@@ -4466,6 +4567,10 @@ class StoryForgeWindow(QMainWindow):
             field = self.story_promise_fields.get(target_field)
             if field:
                 field.setFocus()
+        elif view == "development" and getattr(self, "development_doc_type", "") == "synopsis":
+            editor = getattr(self, "synopsis_answer_text", None)
+            if isinstance(editor, QTextEdit):
+                editor.setFocus()
         elif view == "development" and getattr(self, "development_doc_type", "") == "scenes":
             field = getattr(self, "scene_detail_fields", {}).get(target_field)
             if field:
@@ -4629,7 +4734,7 @@ class StoryForgeWindow(QMainWindow):
             return
         answers = self._guide_answers(run["id"])
         guide_key = run["guide_key"]
-        if guide_key in FIELD_GUIDES:
+        if guide_key in FIELD_GUIDES or guide_key == "build_synopsis":
             self._move_learning(0)
             return
         if guide_key == "strengthen_idea":
