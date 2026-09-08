@@ -6,6 +6,15 @@ Application target selection and navigation remain in the UI.
 from db import NOW, Database
 from learning_content import LearningSession
 
+CHARACTER_GUIDE_FIELDS = {
+    'situation': ('start_situation', 'Situation initiale'),
+    'objective': ('objective', 'Objectif'),
+    'motivation': ('desire', 'Désir et motivation'),
+    'contradiction': ('contradictions', 'Contradictions'),
+    'test': ('notes', 'Notes · idée de scène'),
+    'evolution': ('arc', 'Arc et transformation'),
+}
+
 
 class LearningService:
     def __init__(self, db: Database):
@@ -24,7 +33,7 @@ class LearningService:
             draft = draft.strip()
             saved = self.db.ensure_guided_answer(run_id, step.key, index)
             requested = {'terminé': 'complete', 'brouillon': 'draft'}.get(status or '', status)
-            inferred = requested or ('complete' if saved['status'] == 'complete' else 'draft')
+            inferred = requested or (saved['status'] if saved['status'] in {'complete', 'skipped'} else 'draft')
             self.db.save_guided_answer(run_id, step.key, index, draft, inferred)
             mastery = self.db.one('SELECT status,evidence FROM concept_mastery WHERE concept_key=?', (step.concept_key,))
             state = ('acquis' if mastery and mastery['status'] == 'acquis' and mastery['evidence'] == draft
@@ -66,6 +75,44 @@ class LearningService:
                 self.db.save_guided_application(run_id, step.key, int(application['project_id']),
                                                application['target_type'], int(application['target_id'] or 0),
                                                application['target_field'], status, evidence)
+
+    def apply_character_answer(self, run_id, session, index, draft, character_id,
+                               expected_text, mode='append'):
+        """Apply an explicitly previewed answer, scoped to this run's project."""
+        with self.db.transaction():
+            run, step = self._step(run_id, session, index)
+            if (run['guide_key'] != 'build_character' or session.key != 'build_character'
+                    or step.key not in CHARACTER_GUIDE_FIELDS):
+                raise ValueError('Cette application est réservée au guide Personnage.')
+            if not draft.strip() or mode not in {'append', 'replace'}:
+                raise ValueError('Une réponse et un mode d’application valides sont nécessaires.')
+            field, _label = CHARACTER_GUIDE_FIELDS[step.key]
+            character = self.db.one('SELECT * FROM characters WHERE id=? AND project_id=?',
+                                    (character_id, run['project_id']))
+            if not character:
+                raise ValueError('Choisis un personnage de ce projet.')
+            current = character[field] or ''
+            if current != expected_text:
+                raise ValueError('La fiche a changé. Rouvre l’aperçu avant de confirmer.')
+            proposed = draft.strip()
+            if mode == 'append' and current.strip():
+                proposed = current + '\n\n' + proposed
+            self.db.run(f'UPDATE characters SET {field}=?,updated_at=? WHERE id=? AND project_id=?',
+                        (proposed, NOW(), character_id, run['project_id']))
+            self.apply_to_tool(run_id, session, index, draft, 'character', character_id, field)
+
+    def skip_step(self, run_id, session, index, draft=''):
+        with self.db.transaction():
+            _run, step = self._step(run_id, session, index)
+            if not step.optional:
+                raise ValueError('Cette étape demande une réponse.')
+            self.save_answer(run_id, session, index, draft, 'skipped')
+            finish = index == len(session.steps) - 1
+            target = index if finish else index + 1
+            self.db.update_guided_run(run_id, current_step=target,
+                                      status='completed' if finish else 'ongoing')
+            self.mirror_progress(run_id, target, 'terminée' if finish else 'en cours')
+            return finish
 
     def mirror_progress(self, run_id, index, status):
         run = self.db.guided_run(run_id)

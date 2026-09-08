@@ -16,6 +16,8 @@ class LearningStep:
     example: str
     placeholder: str
     tips: tuple[str, ...]
+    review: str = ""
+    optional: bool = False
 
 
 @dataclass(frozen=True)
@@ -60,6 +62,8 @@ def load_session(path: Path) -> LearningSession:
                 example=str(raw["example"]),
                 placeholder=str(raw["placeholder"]),
                 tips=tuple(str(item) for item in raw["tips"]),
+                review=str(raw.get("review", "")),
+                optional=bool(raw.get("optional", False)),
             )
         )
     if not steps:

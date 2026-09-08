@@ -19,12 +19,12 @@ Chaque chantier reste un changement borné avec tests et commit local. Les phase
 
 ## Fonctionnalités restantes : numéros d’origine conservés
 
-- Ensemble 2 : guides personnage, conflit, synopsis et outline ; niveaux de guidage à approfondir.
+- Ensemble 2 : guides conflit, synopsis et outline ; niveaux de guidage à approfondir. Le guide Personnage est livré, voir FEATURES.md.
 - Ensemble 9 : cartes géographiques, fonds, repères liés aux lieux et terrains. Reporté, pas ajouté implicitement.
 - Ensemble 18 : vue géographique après l’ensemble 9 ; cohérence des vues à renforcer.
-- Ensemble 19 : éventuelle IA contextualisée à redéfinir. L’ancien professeur est désactivé ; toute réactivation exige une décision explicite, contrôle des données envoyées et accord de l’auteur sur les propositions.
+- Ensemble 19 : IA reportée à la demande de l’utilisateur. L’ancien professeur est désactivé ; toute réactivation exige une décision explicite, contrôle des données envoyées et accord de l’auteur sur les propositions.
 - Ensemble 20 : étendre l’apprentissage connecté existant, pas le réimplémenter.
-- Anglais intégral : contenus pédagogiques, formulaires et libellés dynamiques ; préserver les textes utilisateur.
+- Anglais intégral : reporté à la demande de l’utilisateur ; contenus pédagogiques, formulaires et libellés dynamiques à compléter plus tard, sans traduire les textes utilisateur.
 - Templates : illustrations pédagogiques distinctes par modèle ; la personnalisation existe, les schémas restent parfois génériques.
 - Qualité : longs projets, images volumineuses, petites fenêtres, navigation avec modifications en attente et deux langues.
 

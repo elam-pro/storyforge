@@ -1,0 +1,72 @@
+{
+  "key": "build_character",
+  "cycle": "Guide ciblé",
+  "title": "Construire un personnage",
+  "subtitle": "Trouver ce qui fait agir une personne, puis le confronter à l’histoire.",
+  "description": "Six étapes facultatives pour un protagoniste ou un personnage secondaire. Ni biographie obligatoire, ni traumatisme imposé : travaille seulement ce qui sert ton récit.",
+  "deliverable": "Des réponses à relire puis à appliquer, une par une et sur confirmation, à la fiche d’un personnage du projet.",
+  "requires_project": true,
+  "apply_label": "Revoir et appliquer les étapes",
+  "steps": [
+    {
+      "key": "situation", "title": "Sa situation initiale", "concept_key": "character_situation", "concept_label": "Situation initiale",
+      "question": "Comment vit cette personne au début de ton histoire ?",
+      "why": "Une situation concrète donne une prise au récit. Un métier, une relation ou une habitude peut suffire ; tu n’as pas besoin de raconter toute une enfance.",
+      "example": "Mina répare des vélos et laisse son frère décider des dépenses de leur atelier.",
+      "placeholder": "Au début, cette personne…",
+      "tips": ["Pars du présent de l’histoire.", "Pour un rôle secondaire, une phrase peut suffire."],
+      "review": "Relis : peut-on imaginer une action quotidienne, plutôt qu’une liste d’adjectifs ?",
+      "optional": true
+    },
+    {
+      "key": "objective", "title": "Ce qu’elle veut obtenir", "concept_key": "objective", "concept_label": "Objectif concret",
+      "question": "Que cherche-t-elle à obtenir, empêcher ou préserver ?",
+      "why": "Un objectif donne une direction à ses décisions. Il peut être modeste ou provisoire et changer en cours de récit.",
+      "example": "Mina veut obtenir une commande de vingt vélos avant la fermeture de l’atelier.",
+      "placeholder": "Elle veut… On saura qu’elle a réussi si…",
+      "tips": ["Choisis un résultat observable.", "Ne confonds pas forcément cet objectif avec celui de toute l’histoire."],
+      "review": "Relis : comment verrait-on sa réussite ou son échec dans une scène ?",
+      "optional": true
+    },
+    {
+      "key": "motivation", "title": "Pourquoi cela compte", "concept_key": "desire", "concept_label": "Désir et motivation",
+      "question": "Pourquoi cet objectif compte-t-il personnellement ? Que risque-t-elle de perdre ?",
+      "why": "La motivation relie l’objectif à une valeur, une relation ou un désir. L’enjeu n’a pas besoin d’être spectaculaire pour peser dans une décision.",
+      "example": "Mina veut que son frère la traite en associée. Perdre la commande renforcerait sa dépendance.",
+      "placeholder": "Cela compte parce que… Si elle échoue…",
+      "tips": ["La fierté, le plaisir ou la loyauté sont aussi des moteurs.", "Aucun traumatisme n’est nécessaire."],
+      "review": "Relis : cette motivation explique-t-elle un choix précis de cette personne ?",
+      "optional": true
+    },
+    {
+      "key": "contradiction", "title": "Ce qui la divise", "concept_key": "character_contradiction", "concept_label": "Contradiction",
+      "question": "Une peur, une croyance ou une contradiction complique-t-elle ses choix ?",
+      "why": "Un décalage entre ce qu’une personne affirme et ce qu’elle fait peut créer de la nuance. Ce n’est ni une obligation ni un diagnostic psychologique.",
+      "example": "Mina réclame de l’autonomie, mais demande l’accord de son frère avant chaque dépense.",
+      "placeholder": "Elle affirme… Pourtant, lorsque…",
+      "tips": ["Observe un comportement plutôt que de coller une étiquette.", "Passe cette étape si elle n’apporte rien à ce personnage."],
+      "review": "Relis : la contradiction pourrait-elle apparaître dans une décision, sans être expliquée ?",
+      "optional": true
+    },
+    {
+      "key": "test", "title": "Une épreuve révélatrice", "concept_key": "character_test", "concept_label": "Personnage en action",
+      "question": "Quelle petite scène mettrait ses choix à l’épreuve ?",
+      "why": "Une scène permet de tester une fiche : place la personne face à une résistance et regarde ce qu’elle fait. Cette piste restera dans ses notes ; aucune scène n’est créée automatiquement.",
+      "example": "Un client offre un acompte, mais exige une signature immédiate. Son frère est injoignable : Mina signe-t-elle ?",
+      "placeholder": "Face à… elle choisit de… Cela entraîne…",
+      "tips": ["Un geste concret peut en dire plus qu’un monologue.", "Une idée de scène suffit ; elle n’a pas à entrer dans la version finale."],
+      "review": "Relis : le choix révèle-t-il quelque chose que la fiche seule ne montre pas ?",
+      "optional": true
+    },
+    {
+      "key": "evolution", "title": "Évoluer ou tenir bon", "concept_key": "change", "concept_label": "Évolution facultative",
+      "question": "À la fin, qu’est-ce qui change chez elle — ou qu’est-ce qu’elle choisit de maintenir ?",
+      "why": "Un personnage peut changer, échouer à changer, rester fidèle à ses valeurs ou ne pas avoir d’arc particulier. Le guide n’impose aucune de ces voies.",
+      "example": "Mina décide enfin seule. Autre possibilité : elle maintient sa prudence et trouve une façon de l’assumer.",
+      "placeholder": "Au début… À la fin… Ou : elle reste…",
+      "tips": ["Compare des décisions, pas seulement des adjectifs.", "Un personnage secondaire peut rester stable."],
+      "review": "Relis : cette trajectoire vient-elle de l’histoire, ou l’ajoutes-tu seulement pour remplir un champ ?",
+      "optional": true
+    }
+  ]
+}

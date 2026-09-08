@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 import screenplay_adapter
 import screenplay_commands
-from learning_service import LearningService
+from learning_service import CHARACTER_GUIDE_FIELDS, LearningService
 from image_previews import PixmapCache, decode_preview
 
 import csv
@@ -65,6 +65,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QLayout,
     QButtonGroup,
     QCheckBox,
     QColorDialog,
@@ -125,8 +126,9 @@ GUIDE_SESSIONS = {
     "strengthen_idea": load_session(BASE_DIR / "content" / "sessions" / "guide_strengthen_idea.json"),
     "find_ending": load_session(BASE_DIR / "content" / "sessions" / "guide_find_ending.json"),
     "prepare_scene": load_session(BASE_DIR / "content" / "sessions" / "guide_prepare_scene.json"),
+    "build_character": load_session(BASE_DIR / "content" / "sessions" / "guide_build_character.json"),
 }
-GUIDE_ORDER = ("seed", "strengthen_idea", "find_ending", "prepare_scene")
+GUIDE_ORDER = ("seed", "strengthen_idea", "find_ending", "prepare_scene", "build_character")
 GUIDE_LEVELS = {
     "discovery": "Découverte",
     "guided": "Guidé",
@@ -138,6 +140,11 @@ GUIDE_LEVELS = {
 # copy an answer into several documents: the guide remains the reasoning trace
 # and the project tool remains the source of truth.
 LEARNING_TOOL_LINKS = {
+    "build_character": {
+        key: ("characters", "", f"Personnage · {label}", "character", field,
+              "Choisis un personnage. L’aperçu permet d’ajouter ou de remplacer ce seul champ.")
+        for key, (field, label) in CHARACTER_GUIDE_FIELDS.items()
+    },
     "seed": {
         "idea": ("development", "premise", "Construction · Prémisse", "project", "", "Clarifie ce que l’histoire explore."),
         "interest": ("development", "premise", "Construction · Prémisse", "project", "", "Vérifie que ton intention reste visible dans la prémisse."),
@@ -4023,6 +4030,8 @@ class StoryForgeWindow(QMainWindow):
                 (run_id, lesson_step.key),
             )
             mark = "✓" if saved and saved["status"] == "complete" else ("●" if number == idx else "○")
+            if saved and saved["status"] == "skipped":
+                mark = "↷"
             button = QPushButton(f"{mark}   {number + 1}. {lesson_step.title}")
             button.setProperty("segment", True)
             button.setCheckable(True)
@@ -4126,6 +4135,10 @@ class StoryForgeWindow(QMainWindow):
         self.learning_draft.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.learning_draft.setPlainText(answer)
         right.addWidget(self.learning_draft, 1)
+        if step.review:
+            right.addWidget(make_label(step.review, "Muted", True))
+        if step.optional:
+            right.addWidget(make_label("Étape facultative · tu peux la passer et y revenir ensuite.", "Muted", True))
 
         self._add_learning_application_card(right, run, step)
 
@@ -4143,13 +4156,15 @@ class StoryForgeWindow(QMainWindow):
             make_button("Pas terminé", "secondary", self._mark_learning_incomplete)
         )
         actions.addStretch()
+        if step.optional:
+            actions.addWidget(make_button("Passer cette étape", "secondary", self._skip_learning_step))
         learning_complete = run["status"] == "completed"
         if idx == len(session.steps) - 1 and learning_complete:
             if run["guide_key"] == "seed":
                 next_text = "Créer le projet →"
                 next_action = self._create_project_from_learning
             else:
-                next_text = "Prévisualiser →"
+                next_text = "Revoir les étapes →" if run["guide_key"] == "build_character" else "Prévisualiser →"
                 next_action = self._preview_apply_guide
         elif idx == len(session.steps) - 1:
             next_text = "Terminer" if self.width() < 1250 else "Terminer le guide"
@@ -4158,8 +4173,20 @@ class StoryForgeWindow(QMainWindow):
             next_text = "Terminer →" if self.width() < 1250 else "Terminer et continuer →"
             next_action = self._complete_learning_step
         actions.addWidget(make_button(next_text, "primary", next_action))
-        right.addWidget(action_bar)
-        body.addWidget(right_widget, 1)
+        if run["guide_key"] == "build_character":
+            right.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+            scroll = QScrollArea()
+            scroll.setObjectName("CharacterGuideScroll")
+            scroll.setWidgetResizable(True)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            scroll.setWidget(right_widget)
+            shell = QVBoxLayout()
+            shell.addWidget(scroll, 1)
+            shell.addWidget(action_bar)
+            body.addLayout(shell, 1)
+        else:
+            right.addWidget(action_bar)
+            body.addWidget(right_widget, 1)
         page.addLayout(body, 1)
 
     def _learning_tool_link(self, run, step):
@@ -4205,7 +4232,7 @@ class StoryForgeWindow(QMainWindow):
 
         card = make_card()
         card.setObjectName("LearningConnection")
-        box = QHBoxLayout(card)
+        box = QVBoxLayout(card) if run["guide_key"] == "build_character" else QHBoxLayout(card)
         box.setContentsMargins(16, 10, 14, 10)
         box.setSpacing(12)
         copy = QVBoxLayout()
@@ -4229,6 +4256,10 @@ class StoryForgeWindow(QMainWindow):
                 )
             )
         box.addLayout(copy, 1)
+        if run["guide_key"] == "build_character":
+            controls = QHBoxLayout()
+            box.addLayout(controls)
+            box = controls
 
         self.learning_target_combo = None
         target_rows = self._learning_target_rows(project_id, target_type) if project_id else []
@@ -4236,18 +4267,30 @@ class StoryForgeWindow(QMainWindow):
             target_combo = QComboBox()
             target_combo.setObjectName("LearningTargetCombo")
             target_combo.setMinimumWidth(190)
-            target_combo.addItem("Tout l’outil", 0)
+            character_guide = run["guide_key"] == "build_character"
+            target_combo.addItem("Choisir un personnage…" if character_guide else "Tout l’outil", 0)
             for target_id, label in target_rows:
                 target_combo.addItem(label, target_id)
             if application:
                 index = target_combo.findData(int(application["target_id"] or 0))
                 target_combo.setCurrentIndex(max(0, index))
+            elif character_guide:
+                previous = self.db.one(
+                    "SELECT target_id FROM guided_applications WHERE run_id=? AND target_type='character' AND target_id>0 ORDER BY updated_at DESC,rowid DESC LIMIT 1",
+                    (run["id"],))
+                if previous:
+                    target_combo.setCurrentIndex(max(0, target_combo.findData(previous["target_id"])))
             self.learning_target_combo = target_combo
             box.addWidget(target_combo, 0, Qt.AlignmentFlag.AlignVCenter)
 
         if project_id:
+            if run["guide_key"] == "build_character":
+                apply_button = make_button("Prévisualiser la réponse", "primary", self._preview_character_answer)
+                apply_button.setEnabled(bool(target_combo.currentData()))
+                target_combo.currentIndexChanged.connect(lambda: apply_button.setEnabled(bool(target_combo.currentData())))
+                box.addWidget(apply_button)
             open_button = make_button(
-                "Ouvrir l’outil →", "primary", self._open_learning_tool
+                "Ouvrir l’outil →", "secondary" if run["guide_key"] == "build_character" else "primary", self._open_learning_tool
             )
             box.addWidget(open_button, 0, Qt.AlignmentFlag.AlignVCenter)
             if application:
@@ -4269,6 +4312,56 @@ class StoryForgeWindow(QMainWindow):
                 )
                 box.addLayout(mastery_actions)
         layout.addWidget(card)
+
+    def _preview_character_answer(self) -> None:
+        run = self.db.guided_run(self._guide_run_id)
+        if not run or run["guide_key"] != "build_character":
+            return
+        character_id = int(self.learning_target_combo.currentData() or 0)
+        character = self.db.one("SELECT * FROM characters WHERE id=? AND project_id=?",
+                                (character_id, run["project_id"]))
+        draft = self.learning_draft.toPlainText().strip()
+        if not character or not draft:
+            QMessageBox.information(self, "Application au personnage", "Choisis un personnage et écris une réponse avant d’ouvrir l’aperçu.")
+            return
+        field, label = CHARACTER_GUIDE_FIELDS[self._guide_session.steps[self._learning_idx].key]
+        current = character[field] or ""
+        dialog = QDialog(self)
+        dialog.setObjectName("CharacterGuidePreview")
+        dialog.setWindowTitle("Appliquer au personnage")
+        dialog.resize(760, 620)
+        box = QVBoxLayout(dialog)
+        box.addWidget(make_label(f"{character['name']} · {label}", "SectionTitle", True))
+        box.addWidget(make_label("Seul ce champ sera modifié, après confirmation. Annuler laisse la fiche intacte.", "Muted", True))
+        mode = QComboBox()
+        mode.setObjectName("CharacterGuideApplyMode")
+        mode.addItem("Ajouter à la suite du texte existant", "append")
+        mode.addItem("Remplacer le texte de ce champ", "replace")
+        box.addWidget(mode)
+        preview = make_editor(350)
+        preview.setReadOnly(True)
+        def refresh():
+            proposed = current + "\n\n" + draft if mode.currentData() == "append" and current.strip() else draft
+            preview.setPlainText(f"ACTUEL\n{current or '— vide —'}\n\nAPRÈS CONFIRMATION\n{proposed}")
+        mode.currentIndexChanged.connect(refresh)
+        refresh()
+        box.addWidget(preview, 1)
+        actions = QHBoxLayout()
+        actions.addWidget(make_button("Annuler", "secondary", dialog.reject))
+        actions.addStretch()
+        def confirm():
+            try:
+                self.learning_service.apply_character_answer(run["id"], self._guide_session,
+                    self._learning_idx, draft, character_id, current, str(mode.currentData()))
+            except ValueError as exc:
+                QMessageBox.information(dialog, "Application impossible", str(exc))
+                return
+            dialog.accept()
+        actions.addWidget(make_button("Confirmer l’application", "primary", confirm))
+        box.addLayout(actions)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.save_state.setText("Réponse appliquée à la fiche du personnage")
+            self.show_learning(run_id=run["id"])
 
     def _set_learning_mastery(self, status: str) -> None:
         if not self.db.guided_run(self._guide_run_id):
@@ -4335,10 +4428,12 @@ class StoryForgeWindow(QMainWindow):
 
     def _focus_learning_destination(self, view: str, target_field: str) -> None:
         if view == "characters" and hasattr(self, "character_fields"):
-            if target_field in {"desire", "objective", "need", "fear", "conflict"}:
+            if target_field in {"desire", "objective", "need", "fear", "conflict", "contradictions"}:
                 self.character_tabs.setCurrentIndex(1)
             elif target_field in {"arc", "start_situation", "end_situation"}:
                 self.character_tabs.setCurrentIndex(2)
+            elif target_field == "notes":
+                self.character_tabs.setCurrentIndex(3)
             field = self.character_fields.get(target_field)
             if field:
                 field.setFocus()
@@ -4386,6 +4481,13 @@ class StoryForgeWindow(QMainWindow):
             self.learning_draft.toPlainText())
         self.save_state.setText("Étape enregistrée comme non terminée")
         self.show_learning(run_id=self._guide_run_id)
+
+    def _skip_learning_step(self) -> None:
+        finish = self.learning_service.skip_step(self._guide_run_id, self._guide_session,
+            self._learning_idx, self.learning_draft.toPlainText())
+        self.show_learning(run_id=self._guide_run_id)
+        if finish:
+            QTimer.singleShot(0, self._show_learning_summary)
 
     def _complete_learning_step(self) -> None:
         if not self.learning_draft.toPlainText().strip():
@@ -4507,6 +4609,9 @@ class StoryForgeWindow(QMainWindow):
             return
         answers = self._guide_answers(run["id"])
         guide_key = run["guide_key"]
+        if guide_key == "build_character":
+            self._move_learning(0)
+            return
         if guide_key == "strengthen_idea":
             document = self.db.ensure_doc(run["project_id"], "premise", "Prémisse / Concept")
             destination = "Construction · Prémisse / Concept"

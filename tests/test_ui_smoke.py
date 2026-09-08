@@ -440,7 +440,7 @@ def test_guides_keep_runs_isolated_and_apply_to_existing_project(tmp_path: Path)
     assert window.guide_run_count_badge.height() <= window.guide_run_count_badge.sizeHint().height() + 2
     window.show_guides()
     app.processEvents()
-    assert window.guide_catalog_tree.topLevelItemCount() == 4
+    assert window.guide_catalog_tree.topLevelItemCount() == 5
     window.autosave_timer.stop()
     window.db.conn.close()
     window.deleteLater()
