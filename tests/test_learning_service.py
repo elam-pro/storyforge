@@ -92,6 +92,9 @@ def test_application_and_explicit_mastery(learning):
     assert db.setting('learning_return_run') == str(run)
     assert db.setting('learning_return_step') == '0'
     assert db.setting('active_project') == str(pid)
+    assert [(row['event_kind'], row['status']) for row in db.guided_application_history(
+        run, session.steps[0].key
+    )] == [('applied', 'en pratique')]
     service.set_mastery(run, session, 0, 'Preuve affinée', 'acquis')
     application = db.guided_application(run, session.steps[0].key)
     assert application['status'] == 'acquis'
@@ -100,6 +103,28 @@ def test_application_and_explicit_mastery(learning):
     assert db.one('SELECT status FROM concept_mastery')[0] == 'acquis'
     service.set_mastery(run, session, 0, 'Preuve affinée', 'à revoir')
     assert db.guided_application(run, session.steps[0].key)['status'] == 'à revoir'
+    assert [(row['event_kind'], row['status']) for row in db.guided_application_history(
+        run, session.steps[0].key
+    )] == [
+        ('applied', 'en pratique'),
+        ('mastery', 'acquis'),
+        ('mastery', 'à revoir'),
+    ]
+
+
+def test_reapplying_a_step_keeps_each_contextual_trace(learning):
+    db, service, session, run = learning
+    attach_project(db, run)
+    service.apply_to_tool(run, session, 0, 'Première confrontation', 'character', 12, 'desire')
+    service.apply_to_tool(run, session, 0, 'Deuxième confrontation', 'scene', 34, 'objective')
+
+    current = db.guided_application(run, session.steps[0].key)
+    history = db.guided_application_history(run, session.steps[0].key)
+    assert (current['target_type'], current['target_id']) == ('scene', 34)
+    assert [(row['target_type'], row['target_id'], row['evidence']) for row in history] == [
+        ('character', 12, 'Première confrontation'),
+        ('scene', 34, 'Deuxième confrontation'),
+    ]
 
 
 def test_mastery_requires_application_and_application_requires_project(learning):

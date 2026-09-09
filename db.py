@@ -15,13 +15,29 @@ class Database:
         self.conn.row_factory = sqlite3.Row
         self._transaction_depth = 0
         self.conn.execute("PRAGMA foreign_keys=ON")
-        # Back up an existing schema before the additive version migration.
+        # Back up an existing schema before additive migrations. One restorable
+        # copy is enough when an older database needs several additions at once.
+        migration_labels = []
         columns = {row[1] for row in self.conn.execute('PRAGMA table_info(doc_versions)')}
         if columns and 'snapshot_json' not in columns:
+            migration_labels.append('structured_versions')
+        tables = {
+            row[0] for row in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        if (
+            tables
+            and 'guided_applications' in tables
+            and 'guided_application_history' not in tables
+        ):
+            migration_labels.append('connected_learning_history')
+        if migration_labels:
             backup_dir = Path(path).parent / 'backups'
             backup_dir.mkdir(parents=True, exist_ok=True)
             stamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
-            backup_path = backup_dir / f'{Path(path).stem}_before_structured_versions_{stamp}.db'
+            label = '_'.join(migration_labels)
+            backup_path = backup_dir / f'{Path(path).stem}_before_{label}_{stamp}.db'
             destination = sqlite3.connect(backup_path)
             try:
                 self.conn.backup(destination)
@@ -98,6 +114,16 @@ class Database:
             status TEXT NOT NULL DEFAULT 'en pratique', evidence TEXT NOT NULL DEFAULT '',
             applied_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL,
             PRIMARY KEY(run_id, step_key),
+            FOREIGN KEY(run_id) REFERENCES guided_runs(id) ON DELETE CASCADE,
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE);
+        CREATE TABLE IF NOT EXISTS guided_application_history(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER NOT NULL, step_key TEXT NOT NULL,
+            project_id INTEGER NOT NULL, target_type TEXT NOT NULL DEFAULT '',
+            target_id INTEGER NOT NULL DEFAULT 0, target_field TEXT NOT NULL DEFAULT '',
+            event_kind TEXT NOT NULL DEFAULT 'applied',
+            status TEXT NOT NULL DEFAULT 'en pratique', evidence TEXT NOT NULL DEFAULT '',
+            occurred_at TEXT NOT NULL, updated_at TEXT NOT NULL,
             FOREIGN KEY(run_id) REFERENCES guided_runs(id) ON DELETE CASCADE,
             FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE);
         CREATE TABLE IF NOT EXISTS project_questions(
@@ -896,6 +922,19 @@ class Database:
             )
         if 'snapshot_json' not in {row[1] for row in self.conn.execute('PRAGMA table_info(doc_versions)')}:
             self.conn.execute("ALTER TABLE doc_versions ADD COLUMN snapshot_json TEXT NOT NULL DEFAULT ''")
+        self.conn.execute(
+            """INSERT INTO guided_application_history(
+            run_id,step_key,project_id,target_type,target_id,target_field,
+            event_kind,status,evidence,occurred_at,updated_at)
+            SELECT current.run_id,current.step_key,current.project_id,current.target_type,
+            current.target_id,current.target_field,'legacy',current.status,current.evidence,
+            current.applied_at,current.updated_at
+            FROM guided_applications current
+            WHERE NOT EXISTS(
+                SELECT 1 FROM guided_application_history history
+                WHERE history.run_id=current.run_id AND history.step_key=current.step_key
+            )"""
+        )
         self.conn.commit()
 
     def q(self, sql, params=()): return self.conn.execute(sql, params).fetchall()
@@ -1101,6 +1140,45 @@ class Database:
         return self.one(
             "SELECT * FROM guided_applications WHERE run_id=? AND step_key=?",
             (run_id, step_key),
+        )
+    def guided_application_history(self, run_id, step_key):
+        return self.q(
+            """SELECT * FROM guided_application_history
+            WHERE run_id=? AND step_key=? ORDER BY id""",
+            (run_id, step_key),
+        )
+    def record_guided_application_event(
+        self,
+        run_id,
+        step_key,
+        project_id,
+        target_type="",
+        target_id=0,
+        target_field="",
+        event_kind="applied",
+        status="en pratique",
+        evidence="",
+        occurred_at="",
+    ):
+        now = NOW()
+        self.run(
+            """INSERT INTO guided_application_history(
+            run_id,step_key,project_id,target_type,target_id,target_field,
+            event_kind,status,evidence,occurred_at,updated_at)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                run_id,
+                step_key,
+                project_id,
+                target_type,
+                int(target_id or 0),
+                target_field,
+                event_kind,
+                status,
+                evidence,
+                occurred_at or now,
+                now,
+            ),
         )
     def save_guided_application(
         self,
@@ -1587,6 +1665,7 @@ class Database:
         )]
         guided_answers=[]
         guided_applications=[]
+        guided_application_history=[]
         for run in guided_runs:
             guided_answers.extend(
                 dict(row) for row in self.q(
@@ -1600,6 +1679,13 @@ class Database:
                     (run["id"],),
                 )
             )
+            guided_application_history.extend(
+                dict(row) for row in self.q(
+                    """SELECT * FROM guided_application_history
+                    WHERE run_id=? ORDER BY id""",
+                    (run["id"],),
+                )
+            )
         for image in images:
             image["image_data"] = bytes(image["image_data"]).hex()
         for character in characters:
@@ -1607,7 +1693,7 @@ class Database:
             character["portrait_data"] = bytes(portrait_data).hex() if portrait_data else ""
         for reference in character_references:
             reference["image_data"] = bytes(reference["image_data"]).hex()
-        path.write_text(json.dumps({"format":"storyforge-project-v1","project":p,"docs":docs,"questions":qs,"story_map":story_map,"synopsis_answers":synopsis_answers,"story_map_nodes":map_nodes,"story_map_links":map_links,"sequence_blocks":sequence_blocks,"scene_rows":scene_rows,"outline_items":outline_items,"development_status":development_status,"characters":characters,"world_profile":world_profile,"world_rules":world_rules,"world_terms":world_terms,"theme_profile":theme_profile,"theme_positions":theme_positions,"theme_position_characters":theme_position_characters,"theme_motifs":theme_motifs,"theme_motif_locations":theme_motif_locations,"theme_motif_events":theme_motif_events,"theme_motif_images":theme_motif_images,"conflicts":conflicts,"conflict_characters":conflict_characters,"conflict_groups":conflict_groups,"conflict_scenes":conflict_scenes,"conflict_story_nodes":conflict_story_nodes,"conflict_events":conflict_events,"conflict_theme_positions":conflict_theme_positions,"character_arcs":character_arcs,"character_arc_scenes":character_arc_scenes,"character_arc_story_nodes":character_arc_story_nodes,"character_arc_events":character_arc_events,"character_arc_conflicts":character_arc_conflicts,"hook_profile":hook_profile,"story_promises":story_promises,"story_promise_story_nodes":story_promise_story_nodes,"story_promise_scenes":story_promise_scenes,"story_moments":story_moments,"story_moment_story_nodes":story_moment_story_nodes,"story_moment_sequences":story_moment_sequences,"story_moment_scenes":story_moment_scenes,"story_moment_events":story_moment_events,"story_moment_conflicts":story_moment_conflicts,"world_rule_characters":world_rule_characters,"world_rule_groups":world_rule_groups,"world_rule_events":world_rule_events,"world_rule_images":world_rule_images,"relationship_maps":relationship_maps,"relationship_map_nodes":relationship_map_nodes,"character_relationships":relationships,"character_groups":character_groups,"character_group_members":character_group_members,"character_references":character_references,"character_custom_fields":character_custom_fields,"form_templates":form_templates,"form_template_sections":form_template_sections,"form_template_fields":form_template_fields,"project_form_templates":project_form_templates,"form_field_values":form_field_values,"tags":tags,"entity_tags":entity_tags,"scene_characters":scene_characters,"scene_events":scene_events,"scene_story_nodes":scene_story_nodes,"scene_theme_positions":scene_theme_positions,"scene_theme_motifs":scene_theme_motifs,"story_map_node_characters":map_characters,"timeline_tracks":timeline_tracks,"timeline_events":timeline_events,"timeline_event_characters":timeline_event_characters,"script_meta":script_meta,"images":images,"locations":locations,"location_characters":location_characters,"location_events":location_events,"location_scenes":location_scenes,"location_images":location_images,"versions":versions,"guided_runs":guided_runs,"guided_answers":guided_answers,"guided_applications":guided_applications},ensure_ascii=False,indent=2),encoding="utf-8")
+        path.write_text(json.dumps({"format":"storyforge-project-v1","project":p,"docs":docs,"questions":qs,"story_map":story_map,"synopsis_answers":synopsis_answers,"story_map_nodes":map_nodes,"story_map_links":map_links,"sequence_blocks":sequence_blocks,"scene_rows":scene_rows,"outline_items":outline_items,"development_status":development_status,"characters":characters,"world_profile":world_profile,"world_rules":world_rules,"world_terms":world_terms,"theme_profile":theme_profile,"theme_positions":theme_positions,"theme_position_characters":theme_position_characters,"theme_motifs":theme_motifs,"theme_motif_locations":theme_motif_locations,"theme_motif_events":theme_motif_events,"theme_motif_images":theme_motif_images,"conflicts":conflicts,"conflict_characters":conflict_characters,"conflict_groups":conflict_groups,"conflict_scenes":conflict_scenes,"conflict_story_nodes":conflict_story_nodes,"conflict_events":conflict_events,"conflict_theme_positions":conflict_theme_positions,"character_arcs":character_arcs,"character_arc_scenes":character_arc_scenes,"character_arc_story_nodes":character_arc_story_nodes,"character_arc_events":character_arc_events,"character_arc_conflicts":character_arc_conflicts,"hook_profile":hook_profile,"story_promises":story_promises,"story_promise_story_nodes":story_promise_story_nodes,"story_promise_scenes":story_promise_scenes,"story_moments":story_moments,"story_moment_story_nodes":story_moment_story_nodes,"story_moment_sequences":story_moment_sequences,"story_moment_scenes":story_moment_scenes,"story_moment_events":story_moment_events,"story_moment_conflicts":story_moment_conflicts,"world_rule_characters":world_rule_characters,"world_rule_groups":world_rule_groups,"world_rule_events":world_rule_events,"world_rule_images":world_rule_images,"relationship_maps":relationship_maps,"relationship_map_nodes":relationship_map_nodes,"character_relationships":relationships,"character_groups":character_groups,"character_group_members":character_group_members,"character_references":character_references,"character_custom_fields":character_custom_fields,"form_templates":form_templates,"form_template_sections":form_template_sections,"form_template_fields":form_template_fields,"project_form_templates":project_form_templates,"form_field_values":form_field_values,"tags":tags,"entity_tags":entity_tags,"scene_characters":scene_characters,"scene_events":scene_events,"scene_story_nodes":scene_story_nodes,"scene_theme_positions":scene_theme_positions,"scene_theme_motifs":scene_theme_motifs,"story_map_node_characters":map_characters,"timeline_tracks":timeline_tracks,"timeline_events":timeline_events,"timeline_event_characters":timeline_event_characters,"script_meta":script_meta,"images":images,"locations":locations,"location_characters":location_characters,"location_events":location_events,"location_scenes":location_scenes,"location_images":location_images,"versions":versions,"guided_runs":guided_runs,"guided_answers":guided_answers,"guided_applications":guided_applications,"guided_application_history":guided_application_history},ensure_ascii=False,indent=2),encoding="utf-8")
     def import_project(self,path:Path):
         data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict) or not isinstance(data.get('project'), dict):
@@ -2556,6 +2642,25 @@ class Database:
                 application.get("target_field", ""),
                 application.get("status", "en pratique"),
                 application.get("evidence", ""),
+            )
+        for event in data.get("guided_application_history", []):
+            imported_run_id = imported_runs.get(event.get("run_id"))
+            if not imported_run_id:
+                continue
+            target_type = event.get("target_type", "")
+            old_target_id = event.get("target_id", 0)
+            target_id = application_target_maps.get(target_type, {}).get(old_target_id, 0)
+            self.record_guided_application_event(
+                imported_run_id,
+                event.get("step_key", ""),
+                pid,
+                target_type,
+                target_id,
+                event.get("target_field", ""),
+                event.get("event_kind", "legacy"),
+                event.get("status", "en pratique"),
+                event.get("evidence", ""),
+                event.get("occurred_at", ""),
             )
         imported_statuses = data.get("development_status", [])
         for state in imported_statuses:

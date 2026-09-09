@@ -3,7 +3,7 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QLabel
 
 from app import StoryForgeWindow
 from db import NOW, Database
@@ -66,11 +66,13 @@ def test_a_learning_step_opens_its_project_tool_and_returns_to_the_guide(
     assert window.current_view == "learning"
     assert window._learning_idx == 2
     assert not window.guide_return_button.isVisible()
+    assert window.findChild(QLabel, "LearningApplicationHistoryCount").text().startswith("1 trace")
     window._set_learning_mastery("acquis")
     assert window.db.one(
         "SELECT status FROM concept_mastery WHERE concept_key='protagoniste'"
     )["status"] == "acquis"
     assert window.db.guided_application(run_id, "protagonist")["status"] == "acquis"
+    assert window.findChild(QLabel, "LearningApplicationHistoryCount").text().startswith("2 traces")
     window.close()
 
 
@@ -96,6 +98,14 @@ def test_guided_applications_follow_a_project_export_and_import(tmp_path: Path) 
         "acquis",
         "Une gardienne",
     )
+    db.record_guided_application_event(
+        run_id, "protagonist", project_id, "character", character_id,
+        "description", "applied", "en pratique", "Première version",
+    )
+    db.record_guided_application_event(
+        run_id, "protagonist", project_id, "character", character_id,
+        "description", "mastery", "acquis", "Une gardienne",
+    )
     exported = tmp_path / "project.storyforge.json"
     db.export_project(project_id, exported)
 
@@ -110,4 +120,7 @@ def test_guided_applications_follow_a_project_export_and_import(tmp_path: Path) 
     )
     assert imported_application["target_id"] == imported_character["id"]
     assert imported_application["status"] == "acquis"
+    imported_history = db.guided_application_history(imported_run["id"], "protagonist")
+    assert [row["event_kind"] for row in imported_history] == ["applied", "mastery"]
+    assert all(row["target_id"] == imported_character["id"] for row in imported_history)
     db.conn.close()

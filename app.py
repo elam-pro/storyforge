@@ -4360,6 +4360,7 @@ class StoryForgeWindow(QMainWindow):
         view, document, destination, target_type, target_field, instruction = link
         project_id = int(run["project_id"] or 0)
         application = self.db.guided_application(run["id"], step.key)
+        application_history = self.db.guided_application_history(run["id"], step.key)
         mastery = self.db.one(
             "SELECT status FROM concept_mastery WHERE concept_key=?",
             (step.concept_key,),
@@ -4382,6 +4383,14 @@ class StoryForgeWindow(QMainWindow):
         state = make_label(status.upper(), "AccentPill" if status == "acquis" else "Muted")
         state.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         head.addWidget(state)
+        if application_history:
+            total = len(application_history)
+            trace_label = make_label(
+                f"{total} trace{'s' if total > 1 else ''} conservée{'s' if total > 1 else ''}",
+                "Muted",
+            )
+            trace_label.setObjectName("LearningApplicationHistoryCount")
+            head.addWidget(trace_label)
         head.addStretch()
         copy.addLayout(head)
         copy.addWidget(make_label(destination, "CardTitle"))

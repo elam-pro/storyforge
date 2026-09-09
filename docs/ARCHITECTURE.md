@@ -41,9 +41,11 @@ Les anciennes versions textuelles sont reconstruites : leurs types exacts et mé
 
 ## Apprentissage
 
-Les guides chargés alimentent `guided_runs`, `guided_answers` et `guided_applications`. La maîtrise globale est dans `concept_mastery` ; des tables historiques restent maintenues pour compatibilité.
-Une application est unique par parcours/étape. `LearningService.apply_to_tool` enregistre la preuve, la maîtrise et le contexte de retour dans une transaction. `set_mastery` exige une application pour marquer acquis et synchronise réponse, preuve et état. `StoryForgeWindow` conserve le choix des cibles, les messages et la navigation effective. Ne pas créer un système parallèle sans examiner ces liens.
-`LearningService` reçoit la session, le parcours, l’indice et le texte explicitement : aucun widget ni état de fenêtre. Réponses, maîtrise et miroir historique sont sauvegardés ensemble ; terminer une étape inclut la progression dans la même transaction. Les règles existantes sont conservées : acquis reste acquis si la preuve est inchangée, sinon une réponse non vide revient à en pratique. La maîtrise reste globale ; cette extraction ne crée pas de nouvelles preuves par projet.
+Les guides chargés alimentent `guided_runs`, `guided_answers`, `guided_applications` et `guided_application_history`. La maîtrise globale est dans `concept_mastery` ; des tables historiques restent maintenues pour compatibilité.
+`guided_applications` conserve l’état courant unique par parcours/étape. Chaque ouverture d’un outil ou changement explicite de maîtrise ajoute aussi une trace contextuelle dans `guided_application_history` ; une nouvelle application ne détruit donc plus les précédentes. `LearningService.apply_to_tool` enregistre preuve, historique, maîtrise et contexte de retour dans une transaction. `set_mastery` exige une application pour marquer acquis et synchronise réponse, preuve et état. `StoryForgeWindow` conserve le choix des cibles, les messages et la navigation effective. Ne pas créer un système parallèle sans examiner ces liens.
+`LearningService` reçoit la session, le parcours, l’indice et le texte explicitement : aucun widget ni état de fenêtre. Réponses, maîtrise et miroir historique sont sauvegardés ensemble ; terminer une étape inclut la progression dans la même transaction. Les règles existantes sont conservées : acquis reste acquis si la preuve est inchangée, sinon une réponse non vide revient à en pratique. La maîtrise reste globale, tandis que les preuves sont contextualisées par parcours, projet, cible et champ.
+
+L’ajout de l’historique est une migration additive : une base existante reçoit une sauvegarde restaurable `backups/*before_connected_learning_history*.db` avant création et ses applications courantes sont reprises comme traces `legacy`. Revenir à un code antérieur impose de fermer l’application puis de restaurer cette copie si l’on veut retrouver exactement le schéma précédent.
 
 ## Navigation et effets de bord
 

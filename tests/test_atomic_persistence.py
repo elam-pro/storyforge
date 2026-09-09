@@ -117,3 +117,31 @@ def test_legacy_version_and_additive_migration(tmp_path):
     assert db.one('SELECT content FROM project_docs')[0] == 'INT. HALL - JOUR'
     assert db.one('SELECT snapshot_json FROM doc_versions WHERE id=?', (version,))[0] == ''
     db.conn.close()
+
+
+def test_connected_learning_history_migration_is_backed_up_and_restorable(tmp_path):
+    path = tmp_path / 'learning.db'
+    db = Database(path)
+    pid = project(db)
+    run_id = db.create_guided_run('seed', 'Guide', project_id=pid)
+    db.save_guided_application(
+        run_id, 'idea', pid, 'project', 0, 'premise', 'en pratique', 'Une piste'
+    )
+    db.run('DROP TABLE guided_application_history')
+    db.conn.close()
+
+    migrated = Database(path)
+    backups = list((tmp_path / 'backups').glob('*before_connected_learning_history*.db'))
+    assert len(backups) == 1
+    original = sqlite3.connect(backups[0])
+    assert 'guided_application_history' not in {
+        row[0] for row in original.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+    original.close()
+    history = migrated.guided_application_history(run_id, 'idea')
+    assert len(history) == 1
+    assert history[0]['event_kind'] == 'legacy'
+    assert history[0]['evidence'] == 'Une piste'
+    migrated.conn.close()

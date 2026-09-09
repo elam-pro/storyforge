@@ -23,7 +23,7 @@ Chaque chantier reste un changement borné avec tests et commit local. Les phase
 - Ensemble 9 : cartes géographiques, fonds, repères liés aux lieux et terrains. Reporté, pas ajouté implicitement.
 - Ensemble 18 : vue géographique après l’ensemble 9 ; cohérence des vues à renforcer.
 - Ensemble 19 : IA reportée à la demande de l’utilisateur. L’ancien professeur est désactivé ; toute réactivation exige une décision explicite, contrôle des données envoyées et accord de l’auteur sur les propositions.
-- Ensemble 20 : étendre l’apprentissage connecté existant, pas le réimplémenter.
+- Ensemble 20 : apprentissage connecté étendu. Les transitions guide-outil conservent le contexte de retour, l’état courant reste compatible et un historique contextualisé garde chaque application et relecture ; voir FEATURES.md.
 - Anglais intégral : reporté à la demande de l’utilisateur ; contenus pédagogiques, formulaires et libellés dynamiques à compléter plus tard, sans traduire les textes utilisateur.
 - Templates : illustrations pédagogiques distinctes par modèle ; la personnalisation existe, les schémas restent parfois génériques.
 - Qualité : longs projets, images volumineuses, petites fenêtres, navigation avec modifications en attente et deux langues.

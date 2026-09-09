@@ -14,6 +14,7 @@ Consolidées le 7 septembre 2026 à partir du contexte existant et de l’audit 
 | D08 | Pas de traduction des œuvres | L’internationalisation vise l’interface, jamais les noms ou textes saisis. |
 | D09 | Sources documentaires séparées | Produit = intention ; fonctionnalités = état ; architecture = fonctionnement ; roadmap = futur ; releases = passé. |
 | D10 | Éditeur existant conservé pendant consolidation | Le modèle structuré est le point d’appui ; pas de second stockage indépendant. |
+| D11 | Applications pédagogiques traçables | Garder un état courant par parcours/étape pour la compatibilité et un historique contextuel append-only pour ne plus effacer les applications et relectures précédentes. |
 
 ## Compatibilités historiques
 

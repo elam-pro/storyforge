@@ -89,6 +89,10 @@ class LearningService:
             project_id = int(run['project_id'])
             self.db.save_guided_application(run_id, step.key, project_id, target_type,
                                            target_id, target_field, 'en pratique', evidence)
+            self.db.record_guided_application_event(
+                run_id, step.key, project_id, target_type, target_id, target_field,
+                'applied', 'en pratique', evidence,
+            )
             self.db.set_concept_mastery(step.concept_key, step.concept_label, 'en pratique', evidence)
             self.db.set_setting('learning_return_run', str(run_id))
             self.db.set_setting('learning_return_step', str(index))
@@ -108,6 +112,11 @@ class LearningService:
                 self.db.save_guided_application(run_id, step.key, int(application['project_id']),
                                                application['target_type'], int(application['target_id'] or 0),
                                                application['target_field'], status, evidence)
+                self.db.record_guided_application_event(
+                    run_id, step.key, int(application['project_id']),
+                    application['target_type'], int(application['target_id'] or 0),
+                    application['target_field'], 'mastery', status, evidence,
+                )
 
     def apply_character_answer(self, run_id, session, index, draft, character_id,
                                expected_text, mode='append'):
