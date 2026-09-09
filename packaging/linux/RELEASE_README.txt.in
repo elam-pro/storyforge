@@ -1,0 +1,28 @@
+StoryForge @VERSION@ pour Linux
+================================
+
+Installation
+------------
+
+1. Ouvrir un terminal dans ce dossier.
+2. Fermer StoryForge s’il est déjà lancé.
+3. Exécuter : ./install.sh (les checksums sont vérifiés automatiquement)
+4. Lancer StoryForge depuis le menu des applications ou avec la commande
+   ~/.local/bin/storyforge
+
+Une mise à jour remplace uniquement l’application. Les histoires et sauvegardes
+restent dans ~/.local/share/storyforge et ne sont jamais supprimées.
+
+Désinstallation
+---------------
+
+Exécuter : ./uninstall.sh
+
+La désinstallation conserve également toutes les histoires et sauvegardes.
+
+Vérification
+------------
+
+Le fichier SHA256SUMS contient l’empreinte de chaque fichier distribué. Le script
+d’installation le vérifie avant toute copie. Contrôle manuel possible depuis ce
+dossier : sha256sum -c SHA256SUMS

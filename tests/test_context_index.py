@@ -66,6 +66,8 @@ def test_allowlist_rejects_private_paths(path):
     'install_linux.sh',
     'scripts/build_linux.sh',
     'packaging/linux/install_application.py',
+    'packaging/linux/build_release.py',
+    'scripts/package_linux_release.sh',
     'tools/organize_workspace.py',
 ])
 def test_allowlist_accepts_static_geography_and_guide_sources(path):

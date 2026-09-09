@@ -41,7 +41,7 @@ def test_every_main_view_opens_without_mutating_user_data(tmp_path: Path) -> Non
     window.show()
     app.processEvents()
 
-    assert APP_VERSION == "0.30.3"
+    assert APP_VERSION == "0.31.0"
     assert len(LEARNING_SESSION.steps) == 14
     assert [key for key, _title in DEVELOPMENT_DOCUMENTS] == [
         "premise",

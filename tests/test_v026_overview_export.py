@@ -8,7 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication
 
 from storyforge.app import StoryForgeWindow, TimelineView
-from storyforge.db import NOW
+from storyforge.db import NOW, Database
 
 
 def test_overview_timeline_uses_readable_relative_units() -> None:
@@ -216,7 +216,7 @@ def test_overview_reuses_project_data_and_final_export_is_portable(tmp_path: Pat
         assert metadata["project"]["title"] == "Les Veilleurs"
         final_manifest = json.loads(archive.read("00_manifest.json").decode("utf-8"))
         assert final_manifest["format"] == "storyforge-final-v2"
-        assert final_manifest["application_version"] == "0.30.3"
+        assert final_manifest["application_version"] == "0.31.0"
         assert final_manifest["counts"]["story_map_nodes"] == 2
         assert final_manifest["counts"]["story_map_links"] == 1
         assert final_manifest["counts"]["geography_maps"] == 1
@@ -234,7 +234,36 @@ def test_overview_reuses_project_data_and_final_export_is_portable(tmp_path: Pat
         exported = json.loads(
             archive.read("08_Sauvegarde/projet.storyforge.json").decode("utf-8")
         )
+        portable_backup = tmp_path / "portable.storyforge.json"
+        portable_backup.write_bytes(archive.read("08_Sauvegarde/projet.storyforge.json"))
         assert exported["project"]["title"] == "Les Veilleurs"
         assert exported["characters"][0]["name"] == "Mina"
         assert archive.read("04_Chronologie/chronologie.pdf").startswith(b"%PDF")
+
+    restored = Database(tmp_path / "restored.db")
+    restored_project = restored.import_project(portable_backup)
+    assert restored.one(
+        "SELECT title FROM projects WHERE id=?", (restored_project,)
+    )[0] == "Les Veilleurs"
+    assert restored.one(
+        "SELECT COUNT(*) FROM characters WHERE project_id=?", (restored_project,)
+    )[0] == 2
+    assert restored.one(
+        "SELECT COUNT(*) FROM character_relationships WHERE project_id=?", (restored_project,)
+    )[0] == 1
+    assert restored.one(
+        "SELECT COUNT(*) FROM timeline_events WHERE project_id=?", (restored_project,)
+    )[0] == 1
+    assert restored.one(
+        "SELECT COUNT(*) FROM story_map_links WHERE project_id=?", (restored_project,)
+    )[0] == 1
+    restored_marker = restored.one(
+        """SELECT marker.label,location.name FROM geography_markers marker
+        JOIN locations location ON location.id=marker.location_id
+        WHERE marker.project_id=?""",
+        (restored_project,),
+    )
+    assert restored_marker["label"] == "Musée"
+    assert restored_marker["name"] == "Musée"
+    restored.conn.close()
     window.close()

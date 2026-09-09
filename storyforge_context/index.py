@@ -32,9 +32,9 @@ PACKAGE_FILES = frozenset(
 DOCS = frozenset('PRODUCT ARCHITECTURE DECISIONS FEATURES ROADMAP PERFORMANCE MCP'.split())
 CONTEXT_FILES = frozenset(('__init__.py', 'index.py', 'server.py'))
 LINUX_PACKAGING_FILES = frozenset(
-    ('install_application.py', 'uninstall_application.py', 'storyforge.desktop.in')
+    ('build_release.py', 'install_application.py', 'uninstall_application.py', 'storyforge.desktop.in')
 )
-SCRIPT_FILES = frozenset(('bootstrap_dev.sh', 'build_linux.sh'))
+SCRIPT_FILES = frozenset(('bootstrap_dev.sh', 'build_linux.sh', 'package_linux_release.sh'))
 SESSION_FILES = frozenset((
     'guide_build_character.json',
     'guide_build_conflict.json',

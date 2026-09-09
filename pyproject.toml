@@ -23,4 +23,6 @@ files = [
   "storyforge/theme.py",
   "storyforge/unicode_script_pdf.py",
   "storyforge/version.py",
+  "packaging/linux/RELEASE_README.txt.in",
+  "packaging/linux/build_release.py",
 ]

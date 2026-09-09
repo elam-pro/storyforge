@@ -1,4 +1,4 @@
-# Travail postérieur à StoryForge 0.30.3 — Consolidation
+# StoryForge 0.31.0 — Application Linux et consolidation
 
 - audit canonique du produit, de l’architecture, des décisions, des fonctionnalités et de la roadmap ;
 - douze guides locaux reliés aux outils, avec nouveaux parcours Univers, Relation, Thème et Réécriture, niveaux d’aide explicites et historique des applications/relectures ;
@@ -11,7 +11,9 @@
 - code applicatif regroupé dans le package `storyforge`, sans réécriture métier ;
 - données, sauvegardes, cache et exports sortis du dépôt vers les emplacements Linux de l’utilisateur, avec migration SQLite vérifiée et copie de retour arrière ;
 - exécutable Linux autonome, entrée de menu, icône, commande `storyforge` et désinstallation conservant toutes les histoires ;
-- 173 tests automatisés réussis ; anglais intégral et IA volontairement reportés.
+- archive Linux versionnée installable sans reconstruire le projet, inventaire SHA-256 interne et checksum de l’archive ;
+- mise à jour atomique testée sans remplacement de la base existante ;
+- 176 tests automatisés réussis ; anglais intégral et IA volontairement reportés.
 
 # StoryForge 0.30.3 — Correctifs d’affichage ciblés
 

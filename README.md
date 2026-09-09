@@ -19,7 +19,9 @@ supprimer les histoires, sauvegardes ou exports.
 
 Pour le développement, `./run_linux.sh` prépare `.venv` au besoin et lance le
 package directement. `./scripts/build_linux.sh` reconstruit seulement
-`dist/StoryForge`. La version canonique est dans
+`dist/StoryForge`. `./scripts/package_linux_release.sh` crée ensuite une archive
+versionnée installable sans environnement de développement, accompagnée de son
+checksum SHA-256. La version canonique est dans
 [storyforge/version.py](storyforge/version.py).
 
 ## Données et exports

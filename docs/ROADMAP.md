@@ -14,9 +14,21 @@ Mise à jour : 9 septembre 2026. Ce document sépare les chantiers de consolidat
 | 6 | Interface et performances — réalisée | Mesures sur fixtures, caches bornés et décodage réduit ; tests de navigation et sauvegarde conservés. Aucun remaniement global des vues non justifié par les mesures. |
 | 7 | Index ciblé — réalisé | Sources autorisées et suivies par Git, reparsing incrémental en mémoire, liens fonctionnalités/code/tests, provenance et limites testées. |
 | 8 | MCP — implémenté, activé et testé | Sept outils et cinq ressources STDIO en lecture seule ; configuration locale active pour ce checkout. Une tâche ouverte antérieurement peut nécessiter un rechargement ; voir MCP.md. |
-| 9 | Distribution Linux et rangement — réalisés | Code regroupé dans `storyforge/`, données XDG séparées, migration SQLite vérifiée, exécutable autonome, entrée de menu, icône et désinstallation conservant les histoires. Tests sur répertoires temporaires et contrôle de l’exécutable construit. |
+| 9 | Distribution Linux et rangement — réalisés | Code regroupé dans `storyforge/`, données XDG séparées, migration SQLite vérifiée, exécutable autonome, archive versionnée avec checksums, entrée de menu, icône, mise à jour atomique et désinstallation conservant les histoires. Tests sur répertoires temporaires et contrôle de l’exécutable construit. |
 
 Chaque chantier reste un changement borné avec tests et commit local. Les phases 5 à 8 ont été explicitement demandées, sans migration SQLite supplémentaire. Une future migration exige une sauvegarde restaurable : revenir au code précédent seul peut ne pas suffire. L’autorisation de confiance Codex n’est pas modifiée automatiquement.
+
+## Travail restant ordonné
+
+| Ordre | Chantier | Critère de sortie |
+| --- | --- | --- |
+| 10 | Recette Fedora interactive | Tester l’application installée avec de vraies interactions : menu, sauvegarde/réouverture, images et exports. L’automatisation reste sur profil temporaire et ne touche pas les histoires personnelles. |
+| 11 | Scénario : contrôle visuel et échanges | Comparer plusieurs PDF multipages à une référence de scénario et vérifier le sous-ensemble FDX annoncé dans Final Draft. Ne pas promettre un aller-retour sans perte. |
+| 12 | Publication de la distribution | Publier l’archive et son checksum depuis un tag Git stable ; l’artefact local est déjà reproductible et testé. AppImage reste facultatif. |
+| 13 | Retours d’usage et apprentissage | À partir de sessions réelles, décider quelles preuves de maîtrise et quels guides doivent évoluer avant tout nouveau schéma ou écran. |
+
+Anglais intégral et professeur IA restent explicitement reportés et ne font pas
+partie de cet ordre de travail.
 
 ## État des fonctionnalités d’origine et reports explicites
 

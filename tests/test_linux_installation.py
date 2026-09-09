@@ -44,6 +44,18 @@ def test_linux_install_and_uninstall_preserve_user_data(tmp_path: Path) -> None:
     assert installed["database"].is_file()
     assert legacy_database.is_file()
 
+    fake_executable.write_bytes(b"updated native executable")
+    installed_again = INSTALLER.install_application(
+        source_root,
+        fake_executable,
+        tmp_path / "home",
+        legacy_database.parent,
+    )
+    assert installed_again["executable"].read_bytes() == b"updated native executable"
+    preserved = sqlite3.connect(installed_again["database"])
+    assert preserved.execute("SELECT title FROM projects").fetchone()[0] == "Histoire"
+    preserved.close()
+
     removed = UNINSTALLER.uninstall_application(tmp_path / "home")
     assert installed["executable"] in removed
     assert installed["database"].is_file()

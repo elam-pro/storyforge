@@ -1,6 +1,6 @@
 # Architecture actuelle
 
-Vérifiée le 9 septembre 2026 sur le code applicatif 0.30.3.
+Vérifiée le 9 septembre 2026 sur le code applicatif 0.31.0.
 
 ## Points d’entrée et dépendances
 
@@ -81,7 +81,10 @@ installe cet exécutable, le fichier `.desktop`, l’icône et la commande utili
 par copies atomiques. `uninstall_linux.sh` ne retire que ces éléments installés :
 les données sont intentionnellement conservées. `tools/organize_workspace.py`
 déplace les anciens fichiers runtime hors du dépôt après copie et vérification ;
-il conserve les environnements de développement.
+il conserve les environnements de développement. `scripts/package_linux_release.sh`
+produit une archive versionnée autonome : elle inclut l’exécutable, les installateurs,
+l’icône, les composants minimaux de migration et un inventaire SHA-256. Son script
+d’installation n’exige ni checkout Git, ni PySide6, ni reconstruction.
 
 ## Index de contexte du repository
 
