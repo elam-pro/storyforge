@@ -4,9 +4,10 @@
 - huit guides locaux reliés aux outils, avec niveaux d’aide explicites et historique des applications/relectures ;
 - diagrammes natifs distincts pour les treize templates, tout en conservant les images personnalisées prioritaires et réversibles ;
 - cartes géographiques multiples dans **Univers**, liées aux lieux et images existants, avec légende, couleurs, calques par type, panoramique, zoom, repères déplaçables, export/réimport et rendu final PNG/PDF/CSV ;
+- SmartType étendu aux noms des personnages du projet et aux transitions usuelles, en plus des en-têtes de scène ;
 - caches d’images bornés, décodage réduit, benchmarks et parcours de captures sur bases temporaires ;
 - MCP de contexte local en lecture seule configuré et validé avec ses sept outils et cinq ressources ;
-- 144 tests automatisés réussis ; anglais intégral et IA volontairement reportés.
+- 145 tests automatisés réussis ; anglais intégral et IA volontairement reportés.
 
 # StoryForge 0.30.3 — Correctifs d’affichage ciblés
 

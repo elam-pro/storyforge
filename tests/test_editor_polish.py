@@ -70,6 +70,49 @@ def test_scene_completion_enter_and_repeated_new_scene(tmp_path):
     window.close()
 
 
+def test_character_and_transition_completion_use_project_context(tmp_path):
+    qt = QApplication.instance() or QApplication([])
+    window = StoryForgeWindow(tmp_path / "smart-type.db")
+    project = window.db.run(
+        "INSERT INTO projects(created_at,title,stage) VALUES(?,?,?)",
+        (NOW(), "Test", "Idée"),
+    ).lastrowid
+    window.db.run(
+        "INSERT INTO characters(project_id,name,created_at,updated_at) VALUES(?,?,?,?)",
+        (project, "Mina", NOW(), NOW()),
+    )
+    window.db.run(
+        "INSERT INTO characters(project_id,name,created_at,updated_at) VALUES(?,?,?,?)",
+        (project, "Sarah", NOW(), NOW()),
+    )
+    window.active_project = project
+    window.show_script_editor()
+    window.show()
+
+    window.script_text.clear()
+    window._set_script_element_mode("character")
+    window._apply_script_block_format("character")
+    QTest.keyClicks(window.script_text, "mi")
+    qt.processEvents()
+    assert window.script_scene_completer.popup().isVisible()
+    QTest.keyClick(window.script_text, Qt.Key.Key_Tab)
+    qt.processEvents()
+    assert window.script_text.toPlainText() == "MINA"
+    assert window._infer_script_element_from_cursor() == "character"
+
+    window.script_text.clear()
+    window._set_script_element_mode("transition")
+    window._apply_script_block_format("transition")
+    QTest.keyClicks(window.script_text, "co")
+    qt.processEvents()
+    assert window.script_scene_completer.popup().isVisible()
+    QTest.keyClick(window.script_text, Qt.Key.Key_Tab)
+    qt.processEvents()
+    assert window.script_text.toPlainText() == "COUPE À :"
+    assert window._infer_script_element_from_cursor() == "transition"
+    window.close()
+
+
 def test_english_navigation_preserves_user_text_and_setting(tmp_path):
     from db import Database
     from PySide6.QtWidgets import QPushButton

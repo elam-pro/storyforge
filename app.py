@@ -19149,6 +19149,34 @@ class StoryForgeWindow(QMainWindow):
             candidates.add(f"EXT. {location} - NUIT")
         return sorted(candidates)
 
+    def _script_character_completion_candidates(self) -> list[str]:
+        candidates = {
+            str(row["name"]).strip().upper()
+            for row in self.db.q(
+                "SELECT name FROM characters WHERE project_id=? AND TRIM(name)<>''",
+                (self.active_project,),
+            )
+        }
+        document = getattr(self, "script_document", None)
+        if isinstance(document, ScreenplayDocument):
+            for element_type, value in document.elements():
+                if element_type != "Character":
+                    continue
+                cue = re.sub(r"\s+\(CONT'D\)\s*$", "", value.strip(), flags=re.IGNORECASE)
+                cue = cue.lstrip("@").strip().upper()
+                if cue:
+                    candidates.add(cue)
+        return sorted(candidates)
+
+    @staticmethod
+    def _script_transition_completion_candidates() -> list[str]:
+        return [
+            "COUPE À :",
+            "FONDU ENCHAÎNÉ :",
+            "FONDU AU NOIR.",
+            "OUVERTURE EN FONDU :",
+        ]
+
     def _refresh_script_scene_completion_model(self) -> None:
         model = getattr(self, "script_scene_completer_model", None)
         if not isinstance(model, QStringListModel):
@@ -19163,7 +19191,8 @@ class StoryForgeWindow(QMainWindow):
         if getattr(self, "_applying_script_scene_completion", False):
             completer.popup().hide()
             return
-        if self._infer_script_element_from_cursor() != "scene":
+        element = self._infer_script_element_from_cursor()
+        if element not in {"scene", "character", "transition"}:
             completer.popup().hide()
             return
         cursor = editor.textCursor()
@@ -19172,7 +19201,19 @@ class StoryForgeWindow(QMainWindow):
             completer.popup().hide()
             return
         options = []
-        if "." not in prefix:
+        if element == "character":
+            character_prefix = prefix.lstrip("@").strip()
+            options = [
+                value for value in self._script_character_completion_candidates()
+                if value.startswith(character_prefix)
+            ]
+            prefix = character_prefix
+        elif element == "transition":
+            options = [
+                value for value in self._script_transition_completion_candidates()
+                if value.startswith(prefix)
+            ]
+        elif "." not in prefix:
             options = [p for p in ("INT.", "EXT.", "INT./EXT.", "I/E.") if p.startswith(prefix)]
         else:
             match = re.match(r"^(INT\./EXT\.|EXT\./INT\.|INT\.|EXT\.|I/E\.)\s*(.*)$", prefix)
@@ -19223,7 +19264,8 @@ class StoryForgeWindow(QMainWindow):
         editor = getattr(self, "script_text", None)
         if not isinstance(editor, ScreenplayEditor):
             return
-        if self._infer_script_element_from_cursor() != "scene":
+        element = self._infer_script_element_from_cursor()
+        if element not in {"scene", "character", "transition"}:
             return
         completer = getattr(self, "script_scene_completer", None)
         if isinstance(completer, QCompleter):
@@ -19243,8 +19285,8 @@ class StoryForgeWindow(QMainWindow):
         finally:
             self._applying_script_scene_completion = False
         editor.setTextCursor(cursor)
-        self._set_script_element_mode("scene")
-        self._apply_script_block_format("scene", cursor)
+        self._set_script_element_mode(element)
+        self._apply_script_block_format(element, cursor)
         if isinstance(completer, QCompleter):
             # QCompleter may schedule a second popup update after the key event
             # (notably on Linux/Wayland).  Hide it once that queued event has
@@ -19476,7 +19518,7 @@ class StoryForgeWindow(QMainWindow):
         if isinstance(self.script_text, ScreenplayEditor):
             self.script_text.refresh_active_line()
         completer = getattr(self, "script_scene_completer", None)
-        if element != "scene" and isinstance(completer, QCompleter):
+        if element not in {"scene", "character", "transition"} and isinstance(completer, QCompleter):
             completer.popup().hide()
         self.script_element_state.setText(self._script_element_caption(element))
         for kind, button in getattr(self, "script_element_buttons", {}).items():
