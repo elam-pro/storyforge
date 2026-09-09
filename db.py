@@ -32,6 +32,8 @@ class Database:
             and 'guided_application_history' not in tables
         ):
             migration_labels.append('connected_learning_history')
+        if tables and 'locations' in tables and 'geography_maps' not in tables:
+            migration_labels.append('geography_maps')
         if migration_labels:
             backup_dir = Path(path).parent / 'backups'
             backup_dir.mkdir(parents=True, exist_ok=True)
@@ -608,6 +610,24 @@ class Database:
             PRIMARY KEY(location_id,image_id),
             FOREIGN KEY(location_id) REFERENCES locations(id) ON DELETE CASCADE,
             FOREIGN KEY(image_id) REFERENCES image_library(id) ON DELETE CASCADE);
+        CREATE TABLE IF NOT EXISTS geography_maps(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL,
+            name TEXT NOT NULL DEFAULT 'Carte principale',
+            scale_label TEXT NOT NULL DEFAULT '', background_image_id INTEGER,
+            width REAL NOT NULL DEFAULT 1600, height REAL NOT NULL DEFAULT 1000,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+            FOREIGN KEY(background_image_id) REFERENCES image_library(id) ON DELETE SET NULL);
+        CREATE TABLE IF NOT EXISTS geography_markers(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, map_id INTEGER NOT NULL,
+            project_id INTEGER NOT NULL, location_id INTEGER,
+            marker_type TEXT NOT NULL DEFAULT 'location', label TEXT NOT NULL DEFAULT '',
+            notes TEXT NOT NULL DEFAULT '', color TEXT NOT NULL DEFAULT '#D84A32',
+            x REAL NOT NULL DEFAULT 400, y REAL NOT NULL DEFAULT 300,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            FOREIGN KEY(map_id) REFERENCES geography_maps(id) ON DELETE CASCADE,
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+            FOREIGN KEY(location_id) REFERENCES locations(id) ON DELETE SET NULL);
         CREATE TABLE IF NOT EXISTS diagnostics(
             project_id INTEGER NOT NULL, doc_type TEXT NOT NULL, item_key TEXT NOT NULL, checked INTEGER NOT NULL DEFAULT 0,
             note TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL,
@@ -808,6 +828,8 @@ class Database:
             "timeline_tracks",
             "timeline_events",
             "image_library",
+            "geography_maps",
+            "geography_markers",
             "script_meta",
         ):
             self.conn.executescript(
@@ -1663,6 +1685,12 @@ class Database:
             "SELECT * FROM guided_runs WHERE project_id=? ORDER BY created_at,id",
             (pid,),
         )]
+        geography_maps=[dict(r) for r in self.q(
+            "SELECT * FROM geography_maps WHERE project_id=? ORDER BY id", (pid,)
+        )]
+        geography_markers=[dict(r) for r in self.q(
+            "SELECT * FROM geography_markers WHERE project_id=? ORDER BY map_id,id", (pid,)
+        )]
         guided_answers=[]
         guided_applications=[]
         guided_application_history=[]
@@ -1693,7 +1721,7 @@ class Database:
             character["portrait_data"] = bytes(portrait_data).hex() if portrait_data else ""
         for reference in character_references:
             reference["image_data"] = bytes(reference["image_data"]).hex()
-        path.write_text(json.dumps({"format":"storyforge-project-v1","project":p,"docs":docs,"questions":qs,"story_map":story_map,"synopsis_answers":synopsis_answers,"story_map_nodes":map_nodes,"story_map_links":map_links,"sequence_blocks":sequence_blocks,"scene_rows":scene_rows,"outline_items":outline_items,"development_status":development_status,"characters":characters,"world_profile":world_profile,"world_rules":world_rules,"world_terms":world_terms,"theme_profile":theme_profile,"theme_positions":theme_positions,"theme_position_characters":theme_position_characters,"theme_motifs":theme_motifs,"theme_motif_locations":theme_motif_locations,"theme_motif_events":theme_motif_events,"theme_motif_images":theme_motif_images,"conflicts":conflicts,"conflict_characters":conflict_characters,"conflict_groups":conflict_groups,"conflict_scenes":conflict_scenes,"conflict_story_nodes":conflict_story_nodes,"conflict_events":conflict_events,"conflict_theme_positions":conflict_theme_positions,"character_arcs":character_arcs,"character_arc_scenes":character_arc_scenes,"character_arc_story_nodes":character_arc_story_nodes,"character_arc_events":character_arc_events,"character_arc_conflicts":character_arc_conflicts,"hook_profile":hook_profile,"story_promises":story_promises,"story_promise_story_nodes":story_promise_story_nodes,"story_promise_scenes":story_promise_scenes,"story_moments":story_moments,"story_moment_story_nodes":story_moment_story_nodes,"story_moment_sequences":story_moment_sequences,"story_moment_scenes":story_moment_scenes,"story_moment_events":story_moment_events,"story_moment_conflicts":story_moment_conflicts,"world_rule_characters":world_rule_characters,"world_rule_groups":world_rule_groups,"world_rule_events":world_rule_events,"world_rule_images":world_rule_images,"relationship_maps":relationship_maps,"relationship_map_nodes":relationship_map_nodes,"character_relationships":relationships,"character_groups":character_groups,"character_group_members":character_group_members,"character_references":character_references,"character_custom_fields":character_custom_fields,"form_templates":form_templates,"form_template_sections":form_template_sections,"form_template_fields":form_template_fields,"project_form_templates":project_form_templates,"form_field_values":form_field_values,"tags":tags,"entity_tags":entity_tags,"scene_characters":scene_characters,"scene_events":scene_events,"scene_story_nodes":scene_story_nodes,"scene_theme_positions":scene_theme_positions,"scene_theme_motifs":scene_theme_motifs,"story_map_node_characters":map_characters,"timeline_tracks":timeline_tracks,"timeline_events":timeline_events,"timeline_event_characters":timeline_event_characters,"script_meta":script_meta,"images":images,"locations":locations,"location_characters":location_characters,"location_events":location_events,"location_scenes":location_scenes,"location_images":location_images,"versions":versions,"guided_runs":guided_runs,"guided_answers":guided_answers,"guided_applications":guided_applications,"guided_application_history":guided_application_history},ensure_ascii=False,indent=2),encoding="utf-8")
+        path.write_text(json.dumps({"format":"storyforge-project-v1","project":p,"docs":docs,"questions":qs,"story_map":story_map,"synopsis_answers":synopsis_answers,"story_map_nodes":map_nodes,"story_map_links":map_links,"sequence_blocks":sequence_blocks,"scene_rows":scene_rows,"outline_items":outline_items,"development_status":development_status,"characters":characters,"world_profile":world_profile,"world_rules":world_rules,"world_terms":world_terms,"theme_profile":theme_profile,"theme_positions":theme_positions,"theme_position_characters":theme_position_characters,"theme_motifs":theme_motifs,"theme_motif_locations":theme_motif_locations,"theme_motif_events":theme_motif_events,"theme_motif_images":theme_motif_images,"conflicts":conflicts,"conflict_characters":conflict_characters,"conflict_groups":conflict_groups,"conflict_scenes":conflict_scenes,"conflict_story_nodes":conflict_story_nodes,"conflict_events":conflict_events,"conflict_theme_positions":conflict_theme_positions,"character_arcs":character_arcs,"character_arc_scenes":character_arc_scenes,"character_arc_story_nodes":character_arc_story_nodes,"character_arc_events":character_arc_events,"character_arc_conflicts":character_arc_conflicts,"hook_profile":hook_profile,"story_promises":story_promises,"story_promise_story_nodes":story_promise_story_nodes,"story_promise_scenes":story_promise_scenes,"story_moments":story_moments,"story_moment_story_nodes":story_moment_story_nodes,"story_moment_sequences":story_moment_sequences,"story_moment_scenes":story_moment_scenes,"story_moment_events":story_moment_events,"story_moment_conflicts":story_moment_conflicts,"world_rule_characters":world_rule_characters,"world_rule_groups":world_rule_groups,"world_rule_events":world_rule_events,"world_rule_images":world_rule_images,"relationship_maps":relationship_maps,"relationship_map_nodes":relationship_map_nodes,"character_relationships":relationships,"character_groups":character_groups,"character_group_members":character_group_members,"character_references":character_references,"character_custom_fields":character_custom_fields,"form_templates":form_templates,"form_template_sections":form_template_sections,"form_template_fields":form_template_fields,"project_form_templates":project_form_templates,"form_field_values":form_field_values,"tags":tags,"entity_tags":entity_tags,"scene_characters":scene_characters,"scene_events":scene_events,"scene_story_nodes":scene_story_nodes,"scene_theme_positions":scene_theme_positions,"scene_theme_motifs":scene_theme_motifs,"story_map_node_characters":map_characters,"timeline_tracks":timeline_tracks,"timeline_events":timeline_events,"timeline_event_characters":timeline_event_characters,"script_meta":script_meta,"images":images,"locations":locations,"location_characters":location_characters,"location_events":location_events,"location_scenes":location_scenes,"location_images":location_images,"geography_maps":geography_maps,"geography_markers":geography_markers,"versions":versions,"guided_runs":guided_runs,"guided_answers":guided_answers,"guided_applications":guided_applications,"guided_application_history":guided_application_history},ensure_ascii=False,indent=2),encoding="utf-8")
     def import_project(self,path:Path):
         data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict) or not isinstance(data.get('project'), dict):
@@ -2333,6 +2361,47 @@ class Database:
                         1 if link.get("is_primary") else 0,
                     ),
                 )
+        imported_geography_maps = {}
+        for map_row in data.get("geography_maps", []):
+            background_image_id = imported_images.get(map_row.get("background_image_id"))
+            imported_geography_maps[map_row.get("id")] = self.run(
+                """INSERT INTO geography_maps(
+                project_id,name,scale_label,background_image_id,width,height,created_at,updated_at)
+                VALUES(?,?,?,?,?,?,?,?)""",
+                (
+                    pid,
+                    map_row.get("name", "Carte principale"),
+                    map_row.get("scale_label", ""),
+                    background_image_id,
+                    map_row.get("width", 1600),
+                    map_row.get("height", 1000),
+                    NOW(),
+                    NOW(),
+                ),
+            ).lastrowid
+        for marker in data.get("geography_markers", []):
+            map_id = imported_geography_maps.get(marker.get("map_id"))
+            if not map_id:
+                continue
+            location_id = imported_locations.get(marker.get("location_id"))
+            self.run(
+                """INSERT INTO geography_markers(
+                map_id,project_id,location_id,marker_type,label,notes,color,x,y,created_at,updated_at)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    map_id,
+                    pid,
+                    location_id,
+                    marker.get("marker_type", "location"),
+                    marker.get("label", ""),
+                    marker.get("notes", ""),
+                    marker.get("color", "#D84A32"),
+                    marker.get("x", 400),
+                    marker.get("y", 300),
+                    NOW(),
+                    NOW(),
+                ),
+            )
         for table, column, imported_targets in (
             ("scene_events", "event_id", imported_timeline_events),
             ("scene_story_nodes", "node_id", imported_nodes),

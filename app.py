@@ -12,6 +12,7 @@ from learning_service import (
     LearningService,
 )
 from image_previews import PixmapCache, decode_preview
+from geography import GeographyView
 
 import csv
 import base64
@@ -258,6 +259,18 @@ TIMELINE_CATEGORIES = (
     "Guerre",
     "Famille",
     "Relation",
+)
+GEOGRAPHY_MARKER_TYPES = (
+    "Lieu",
+    "Ville / implantation",
+    "Route / passage",
+    "Frontière",
+    "Eau",
+    "Forêt",
+    "Relief",
+    "Danger",
+    "Ressource",
+    "Terrain libre",
 )
 CHARACTER_ROLES = (
     "Protagoniste",
@@ -3045,6 +3058,7 @@ class StoryForgeWindow(QMainWindow):
         self._location_pixmap_cache = PixmapCache()
         self._location_thumbnail_cache = PixmapCache(2 * 1024 * 1024)
         self._image_library_thumbnail_cache = PixmapCache(8 * 1024 * 1024)
+        self._geography_background_cache = PixmapCache(32 * 1024 * 1024)
         self._location_image_refresh_generation = 0
         self.story_map_pan_timer = QTimer(self)
         self.story_map_pan_timer.setInterval(24)
@@ -3528,6 +3542,7 @@ class StoryForgeWindow(QMainWindow):
         self._location_pixmap_cache.clear()
         self._location_thumbnail_cache.clear()
         self._image_library_thumbnail_cache.clear()
+        self._geography_background_cache.clear()
         self.db.set_setting("active_project", self.active_project)
         self._update_project_chips()
         # Rebuilding a full workspace can involve several linked lists and
@@ -10630,6 +10645,7 @@ class StoryForgeWindow(QMainWindow):
             self._build_record_template_tab("world", self.active_project),
             tr("Modèle de fiche"),
         )
+        self.universe_tabs.addTab(self._build_world_geography_tab(), "Cartes")
         tab_index = int(self.db.setting(f"universe_tab_{self.active_project}", "0") or 0)
         self.universe_tabs.setCurrentIndex(min(max(tab_index, 0), self.universe_tabs.count() - 1))
         self.universe_tabs.currentChanged.connect(
@@ -11097,6 +11113,453 @@ class StoryForgeWindow(QMainWindow):
                 )
         self.save_state.setText("Lexique de l’univers enregistré")
         QTimer.singleShot(2200, lambda: self.save_state.setText(""))
+
+    def _build_world_geography_tab(self) -> QWidget:
+        tab = QWidget()
+        outer = QHBoxLayout(tab)
+        outer.setContentsMargins(0, 12, 0, 0)
+        outer.setSpacing(12)
+
+        navigation = make_card()
+        navigation.setFixedWidth(250)
+        nav = QVBoxLayout(navigation)
+        nav.setContentsMargins(12, 14, 12, 14)
+        nav.setSpacing(8)
+        nav.addWidget(make_label("CARTES DU PROJET", "Caption"))
+        nav.addWidget(make_label(
+            "Crée plusieurs échelles : monde, région, ville ou trajet.", "Muted", True
+        ))
+        self.geography_map_list = QListWidget()
+        self.geography_map_list.setObjectName("GeographyMapList")
+        nav.addWidget(self.geography_map_list, 1)
+        nav.addWidget(make_button("+ Nouvelle carte", "primary", self._new_geography_map))
+        self.geography_delete_map_button = make_button(
+            "Supprimer la carte", "danger", self._delete_geography_map
+        )
+        nav.addWidget(self.geography_delete_map_button)
+        outer.addWidget(navigation)
+
+        workspace = make_card()
+        workspace_box = QVBoxLayout(workspace)
+        workspace_box.setContentsMargins(14, 14, 14, 14)
+        workspace_box.setSpacing(8)
+        settings = QGridLayout()
+        settings.setHorizontalSpacing(8)
+        settings.setVerticalSpacing(4)
+        settings.addWidget(make_label("NOM DE LA CARTE", "Caption"), 0, 0)
+        settings.addWidget(make_label("ÉCHELLE / PÉRIMÈTRE", "Caption"), 0, 1)
+        settings.addWidget(make_label("FOND DE CARTE", "Caption"), 0, 2)
+        self.geography_map_name = QLineEdit()
+        self.geography_map_name.setPlaceholderText("Ex. Royaume central")
+        self.geography_map_scale = QLineEdit()
+        self.geography_map_scale.setPlaceholderText("Ex. Région · 1 case = 10 km")
+        self.geography_background = QComboBox()
+        self.geography_background.addItem("Quadrillage libre", 0)
+        for image in self.db.q(
+            "SELECT id,title,category FROM image_library WHERE project_id=? ORDER BY title COLLATE NOCASE,id",
+            (self.active_project,),
+        ):
+            self.geography_background.addItem(
+                f"{image['title'] or 'Image sans titre'} · {image['category']}", int(image["id"])
+            )
+        settings.addWidget(self.geography_map_name, 1, 0)
+        settings.addWidget(self.geography_map_scale, 1, 1)
+        settings.addWidget(self.geography_background, 1, 2)
+        self.geography_save_map_button = make_button(
+            "Enregistrer la carte", "secondary", self._save_geography_map
+        )
+        settings.addWidget(self.geography_save_map_button, 1, 3)
+        workspace_box.addLayout(settings)
+
+        add_bar = QHBoxLayout()
+        self.geography_location_combo = QComboBox()
+        self.geography_location_combo.addItem("Choisir un lieu existant…", 0)
+        for location in self.db.q(
+            "SELECT id,name,category FROM locations WHERE project_id=? ORDER BY name COLLATE NOCASE,id",
+            (self.active_project,),
+        ):
+            self.geography_location_combo.addItem(
+                f"{location['name'] or 'Lieu sans nom'} · {location['category']}", int(location["id"])
+            )
+        add_bar.addWidget(self.geography_location_combo, 1)
+        self.geography_add_location_button = make_button(
+            "Placer le lieu", "primary", self._add_geography_location
+        )
+        add_bar.addWidget(self.geography_add_location_button)
+        self.geography_add_terrain_button = make_button(
+            "+ Repère de terrain", "secondary", self._add_geography_terrain
+        )
+        add_bar.addWidget(self.geography_add_terrain_button)
+        add_bar.addWidget(make_button("Recentrer", "tertiary", self._center_geography_map))
+        workspace_box.addLayout(add_bar)
+
+        self.geography_view = GeographyView(
+            self.palette,
+            self._select_geography_marker,
+            self._move_geography_marker,
+            self._edit_geography_marker,
+            self,
+        )
+        workspace_box.addWidget(self.geography_view, 1)
+        marker_bar = QHBoxLayout()
+        self.geography_marker_status = make_label(
+            "Aucun repère sélectionné · glisse le fond pour parcourir la carte.", "Muted", True
+        )
+        marker_bar.addWidget(self.geography_marker_status, 1)
+        self.geography_open_location_button = make_button(
+            "Ouvrir le lieu →", "secondary", self._open_geography_location
+        )
+        self.geography_edit_marker_button = make_button(
+            "Modifier le repère", "secondary", self._edit_selected_geography_marker
+        )
+        self.geography_delete_marker_button = make_button(
+            "Supprimer le repère", "danger", self._delete_geography_marker
+        )
+        marker_bar.addWidget(self.geography_open_location_button)
+        marker_bar.addWidget(self.geography_edit_marker_button)
+        marker_bar.addWidget(self.geography_delete_marker_button)
+        workspace_box.addLayout(marker_bar)
+        outer.addWidget(workspace, 1)
+
+        self.geography_map_id: int | None = None
+        self.geography_marker_id: int | None = None
+        self.geography_map_list.currentItemChanged.connect(self._geography_map_selected)
+        self._refresh_geography_maps(select_first=True)
+        self._sync_geography_controls()
+        return tab
+
+    def _sync_geography_controls(self) -> None:
+        has_map = bool(getattr(self, "geography_map_id", 0))
+        for widget in (
+            getattr(self, "geography_map_name", None),
+            getattr(self, "geography_map_scale", None),
+            getattr(self, "geography_background", None),
+            getattr(self, "geography_save_map_button", None),
+            getattr(self, "geography_delete_map_button", None),
+            getattr(self, "geography_location_combo", None),
+            getattr(self, "geography_add_location_button", None),
+            getattr(self, "geography_add_terrain_button", None),
+        ):
+            if widget:
+                widget.setEnabled(has_map)
+        self._sync_geography_marker_controls()
+
+    def _sync_geography_marker_controls(self) -> None:
+        marker = None
+        if getattr(self, "geography_marker_id", 0):
+            marker = self.db.one(
+                "SELECT * FROM geography_markers WHERE id=? AND project_id=?",
+                (self.geography_marker_id, self.active_project),
+            )
+        has_marker = bool(marker)
+        self.geography_edit_marker_button.setEnabled(has_marker)
+        self.geography_delete_marker_button.setEnabled(has_marker)
+        self.geography_open_location_button.setEnabled(bool(marker and marker["location_id"]))
+        if marker:
+            self.geography_marker_status.setText(
+                f"{marker['label'] or 'Repère'} · {marker['marker_type']} · "
+                f"x {float(marker['x']):.0f}, y {float(marker['y']):.0f}"
+            )
+        else:
+            self.geography_marker_status.setText(
+                "Aucun repère sélectionné · glisse le fond pour parcourir la carte."
+            )
+
+    def _refresh_geography_maps(self, select_first: bool = False) -> None:
+        if not hasattr(self, "geography_map_list"):
+            return
+        rows = self.db.q(
+            "SELECT * FROM geography_maps WHERE project_id=? ORDER BY created_at,id",
+            (self.active_project,),
+        )
+        preferred = int(
+            self.geography_map_id
+            or self.db.setting(f"geography_map_{self.active_project}", "0")
+            or 0
+        )
+        self.geography_map_list.blockSignals(True)
+        self.geography_map_list.clear()
+        selected = None
+        for row in rows:
+            item = QListWidgetItem(
+                f"{row['name'] or 'Carte sans nom'}\n{row['scale_label'] or 'Échelle libre'}"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+            item.setSizeHint(QSize(0, 62))
+            self.geography_map_list.addItem(item)
+            if int(row["id"]) == preferred:
+                selected = item
+        if selected:
+            self.geography_map_list.setCurrentItem(selected)
+        elif rows and select_first:
+            self.geography_map_list.setCurrentRow(0)
+            selected = self.geography_map_list.currentItem()
+        self.geography_map_list.blockSignals(False)
+        if selected:
+            self._load_geography_map(int(selected.data(Qt.ItemDataRole.UserRole)))
+        else:
+            self.geography_map_id = None
+            self.geography_marker_id = None
+            self.geography_view.set_map(
+                {"width": 1600, "height": 1000}, [], QPixmap()
+            )
+        self._sync_geography_controls()
+
+    def _new_geography_map(self) -> None:
+        name, accepted = QInputDialog.getText(
+            self, "Nouvelle carte", "Nom ou périmètre", text="Carte principale"
+        )
+        if not accepted:
+            return
+        self.geography_map_id = int(self.db.run(
+            """INSERT INTO geography_maps(
+            project_id,name,scale_label,created_at,updated_at) VALUES(?,?,?,?,?)""",
+            (self.active_project, name.strip() or "Carte sans nom", "Échelle libre", NOW(), NOW()),
+        ).lastrowid)
+        self.db.set_setting(f"geography_map_{self.active_project}", self.geography_map_id)
+        self._refresh_geography_maps()
+
+    def _delete_geography_map(self) -> None:
+        if not self.geography_map_id:
+            return
+        if QMessageBox.question(
+            self, "Supprimer la carte", "Supprimer cette carte et ses repères ? Les lieux et images resteront conservés."
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        self.db.run("DELETE FROM geography_maps WHERE id=? AND project_id=?", (
+            self.geography_map_id, self.active_project
+        ))
+        self.geography_map_id = None
+        self.geography_marker_id = None
+        self.db.set_setting(f"geography_map_{self.active_project}", "")
+        self._refresh_geography_maps(select_first=True)
+
+    def _geography_map_selected(self, current: QListWidgetItem | None, _previous=None) -> None:
+        if current:
+            self._load_geography_map(int(current.data(Qt.ItemDataRole.UserRole)))
+
+    def _load_geography_map(self, map_id: int) -> None:
+        row = self.db.one(
+            "SELECT * FROM geography_maps WHERE id=? AND project_id=?", (map_id, self.active_project)
+        )
+        if not row:
+            return
+        self.geography_map_id = map_id
+        self.geography_marker_id = None
+        self.db.set_setting(f"geography_map_{self.active_project}", map_id)
+        self.geography_map_name.setText(row["name"] or "")
+        self.geography_map_scale.setText(row["scale_label"] or "")
+        background_index = self.geography_background.findData(int(row["background_image_id"] or 0))
+        self.geography_background.setCurrentIndex(max(0, background_index))
+        markers = [dict(marker) for marker in self.db.q(
+            """SELECT marker.*,COALESCE(NULLIF(marker.label,''),location.name,'Repère') display_label
+            FROM geography_markers marker
+            LEFT JOIN locations location ON location.id=marker.location_id
+            WHERE marker.map_id=? AND marker.project_id=? ORDER BY marker.id""",
+            (map_id, self.active_project),
+        )]
+        background = self._geography_background_pixmap(int(row["background_image_id"] or 0))
+        self.geography_view.set_map(dict(row), markers, background)
+        self._sync_geography_controls()
+
+    def _save_geography_map(self) -> None:
+        if not self.geography_map_id:
+            return
+        self.db.run(
+            """UPDATE geography_maps SET name=?,scale_label=?,background_image_id=?,updated_at=?
+            WHERE id=? AND project_id=?""",
+            (
+                self.geography_map_name.text().strip() or "Carte sans nom",
+                self.geography_map_scale.text().strip(),
+                int(self.geography_background.currentData() or 0) or None,
+                NOW(), self.geography_map_id, self.active_project,
+            ),
+        )
+        self._refresh_geography_maps()
+        self.save_state.setText("Carte géographique enregistrée")
+
+    def _geography_background_pixmap(self, image_id: int) -> QPixmap:
+        if not image_id:
+            return QPixmap()
+        cached = self._geography_background_cache.get(image_id)
+        if cached is not None:
+            return cached
+        row = self.db.one(
+            "SELECT image_data FROM image_library WHERE id=? AND project_id=?",
+            (image_id, self.active_project),
+        )
+        pixmap = decode_preview(bytes(row["image_data"]) if row else b"", QSize(2400, 1600))
+        self._geography_background_cache[image_id] = pixmap
+        return pixmap
+
+    def _center_geography_map(self) -> None:
+        if hasattr(self, "geography_view"):
+            self.geography_view.center_content()
+
+    def _geography_drop_position(self) -> QPointF:
+        point = self.geography_view.center_position()
+        rect = self.geography_view.sceneRect()
+        return QPointF(
+            min(max(point.x(), rect.left() + 25), rect.right() - 25),
+            min(max(point.y(), rect.top() + 25), rect.bottom() - 25),
+        )
+
+    def _add_geography_location(self) -> None:
+        if not self.geography_map_id:
+            return
+        location_id = int(self.geography_location_combo.currentData() or 0)
+        if not location_id:
+            QMessageBox.information(self, "Choisir un lieu", "Sélectionne un lieu existant à placer sur la carte.")
+            return
+        existing = self.db.one(
+            "SELECT id FROM geography_markers WHERE map_id=? AND location_id=?",
+            (self.geography_map_id, location_id),
+        )
+        if existing:
+            self._select_geography_marker(int(existing["id"]))
+            return
+        location = self.db.one(
+            "SELECT name FROM locations WHERE id=? AND project_id=?", (location_id, self.active_project)
+        )
+        if not location:
+            return
+        point = self._geography_drop_position()
+        marker_id = self.db.run(
+            """INSERT INTO geography_markers(
+            map_id,project_id,location_id,marker_type,label,color,x,y,created_at,updated_at)
+            VALUES(?,?,?,?,?,?,?,?,?,?)""",
+            (
+                self.geography_map_id, self.active_project, location_id, "Lieu",
+                location["name"] or "Lieu sans nom", self.palette.accent,
+                point.x(), point.y(), NOW(), NOW(),
+            ),
+        ).lastrowid
+        self._load_geography_map(self.geography_map_id)
+        self._select_geography_marker(int(marker_id))
+
+    def _add_geography_terrain(self) -> None:
+        if not self.geography_map_id:
+            return
+        point = self._geography_drop_position()
+        marker_id = self.db.run(
+            """INSERT INTO geography_markers(
+            map_id,project_id,marker_type,label,color,x,y,created_at,updated_at)
+            VALUES(?,?,?,?,?,?,?,?,?)""",
+            (
+                self.geography_map_id, self.active_project, "Terrain libre", "Nouveau terrain",
+                self.palette.accent, point.x(), point.y(), NOW(), NOW(),
+            ),
+        ).lastrowid
+        self._load_geography_map(self.geography_map_id)
+        if not self._edit_geography_marker(int(marker_id)):
+            self.db.run(
+                "DELETE FROM geography_markers WHERE id=? AND project_id=?",
+                (marker_id, self.active_project),
+            )
+            self._load_geography_map(self.geography_map_id)
+
+    def _select_geography_marker(self, marker_id: int) -> None:
+        self.geography_marker_id = int(marker_id)
+        self.geography_view.scene().clearSelection()
+        item = self.geography_view.marker_items.get(self.geography_marker_id)
+        if item:
+            item.setSelected(True)
+        self._sync_geography_marker_controls()
+
+    def _move_geography_marker(self, marker_id: int, x: float, y: float) -> None:
+        if not self.geography_map_id:
+            return
+        rect = self.geography_view.sceneRect()
+        x = min(max(x, rect.left()), rect.right())
+        y = min(max(y, rect.top()), rect.bottom())
+        item = self.geography_view.marker_items.get(int(marker_id))
+        if item and item.pos() != QPointF(x, y):
+            item.setPos(x, y)
+        self.db.run(
+            """UPDATE geography_markers SET x=?,y=?,updated_at=?
+            WHERE id=? AND map_id=? AND project_id=?""",
+            (x, y, NOW(), marker_id, self.geography_map_id, self.active_project),
+        )
+        self.geography_marker_id = int(marker_id)
+        self._sync_geography_marker_controls()
+
+    def _edit_selected_geography_marker(self) -> None:
+        if self.geography_marker_id:
+            self._edit_geography_marker(self.geography_marker_id)
+
+    def _edit_geography_marker(self, marker_id: int) -> bool:
+        row = self.db.one(
+            """SELECT marker.*,location.name location_name FROM geography_markers marker
+            LEFT JOIN locations location ON location.id=marker.location_id
+            WHERE marker.id=? AND marker.project_id=?""",
+            (marker_id, self.active_project),
+        )
+        if not row:
+            return False
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Modifier le repère géographique")
+        dialog.resize(540, 440)
+        box = QVBoxLayout(dialog)
+        box.addWidget(make_label("REPÈRE DE CARTE", "Caption"))
+        box.addWidget(make_label(row["location_name"] or "Terrain libre", "SectionTitle", True))
+        box.addWidget(make_label("NOM AFFICHÉ", "Caption"))
+        label = QLineEdit(row["label"] or row["location_name"] or "")
+        box.addWidget(label)
+        box.addWidget(make_label("TYPE", "Caption"))
+        marker_type = QComboBox()
+        marker_type.addItems(GEOGRAPHY_MARKER_TYPES)
+        marker_type.setCurrentText(row["marker_type"] or "Terrain libre")
+        marker_type.setEnabled(not bool(row["location_id"]))
+        box.addWidget(marker_type)
+        box.addWidget(make_label("NOTES", "Caption"))
+        notes = make_editor(130, "Pourquoi ce repère compte-t-il pour l’histoire ou le monde ?")
+        notes.setPlainText(row["notes"] or "")
+        box.addWidget(notes)
+        actions = QHBoxLayout()
+        actions.addStretch()
+        actions.addWidget(make_button("Annuler", "secondary", dialog.reject))
+        actions.addWidget(make_button("Enregistrer", "primary", dialog.accept))
+        box.addLayout(actions)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return False
+        self.db.run(
+            """UPDATE geography_markers SET label=?,marker_type=?,notes=?,updated_at=?
+            WHERE id=? AND project_id=?""",
+            (
+                label.text().strip() or row["location_name"] or "Repère",
+                "Lieu" if row["location_id"] else marker_type.currentText(),
+                notes.toPlainText().strip(), NOW(), marker_id, self.active_project,
+            ),
+        )
+        self._load_geography_map(self.geography_map_id)
+        self._select_geography_marker(marker_id)
+        return True
+
+    def _delete_geography_marker(self) -> None:
+        if not self.geography_marker_id:
+            return
+        if QMessageBox.question(
+            self, "Supprimer le repère", "Retirer ce repère de la carte ? Le lieu lié restera conservé."
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        self.db.run(
+            "DELETE FROM geography_markers WHERE id=? AND project_id=?",
+            (self.geography_marker_id, self.active_project),
+        )
+        self.geography_marker_id = None
+        self._load_geography_map(self.geography_map_id)
+
+    def _open_geography_location(self) -> None:
+        if not self.geography_marker_id:
+            return
+        row = self.db.one(
+            "SELECT location_id FROM geography_markers WHERE id=? AND project_id=?",
+            (self.geography_marker_id, self.active_project),
+        )
+        if not row or not row["location_id"]:
+            return
+        self.db.set_setting(f"last_location_{self.active_project}", int(row["location_id"]))
+        self.show_locations()
 
     # ---------- Theme and motifs ----------
 

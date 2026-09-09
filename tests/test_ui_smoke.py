@@ -2265,3 +2265,65 @@ def test_hook_promises_and_desired_moments_connect_to_project(tmp_path: Path) ->
     window.db.conn.close()
     window.deleteLater()
     app.processEvents()
+
+
+def test_geography_workspace_places_and_moves_existing_locations(tmp_path: Path) -> None:
+    app = QApplication.instance() or QApplication([])
+    window = StoryForgeWindow(tmp_path / "geography-ui.db")
+    project_id = window.db.run(
+        "INSERT INTO projects(created_at,title,stage,updated_at) VALUES(?,?,?,?)",
+        (NOW(), "Les routes de brume", "Développement", NOW()),
+    ).lastrowid
+    location_id = window.db.run(
+        """INSERT INTO locations(project_id,position,name,category,created_at,updated_at)
+        VALUES(?,?,?,?,?,?)""",
+        (project_id, 0, "Ville haute", "Ville", NOW(), NOW()),
+    ).lastrowid
+    map_id = window.db.run(
+        """INSERT INTO geography_maps(project_id,name,scale_label,created_at,updated_at)
+        VALUES(?,?,?,?,?)""",
+        (project_id, "Carte principale", "Région", NOW(), NOW()),
+    ).lastrowid
+    window.db.run(
+        """INSERT INTO geography_maps(project_id,name,scale_label,created_at,updated_at)
+        VALUES(?,?,?,?,?)""",
+        (project_id, "Carte de la ville", "Quartier", NOW(), NOW()),
+    )
+    window.active_project = project_id
+    window.db.set_setting("active_project", project_id)
+    window.db.set_setting(f"geography_map_{project_id}", map_id)
+    window.show_universe()
+    window.show()
+    app.processEvents()
+
+    assert [
+        window.universe_tabs.tabText(index)
+        for index in range(window.universe_tabs.count())
+    ][-1] == "Cartes"
+    window.universe_tabs.setCurrentIndex(window.universe_tabs.count() - 1)
+    app.processEvents()
+    assert window.geography_map_list.count() == 2
+    assert window.geography_map_id == map_id
+    location_index = window.geography_location_combo.findData(location_id)
+    assert location_index > 0
+    window.geography_location_combo.setCurrentIndex(location_index)
+    window._add_geography_location()
+    marker = window.db.one(
+        "SELECT * FROM geography_markers WHERE map_id=? AND location_id=?",
+        (map_id, location_id),
+    )
+    assert marker is not None
+    assert marker["label"] == "Ville haute"
+    assert window.geography_marker_id == marker["id"]
+
+    window._move_geography_marker(int(marker["id"]), -200, 4000)
+    moved = window.db.one("SELECT x,y FROM geography_markers WHERE id=?", (marker["id"],))
+    assert moved["x"] == 0
+    assert moved["y"] == 1000
+    assert window.geography_view.marker_items[int(marker["id"])].pos().x() == 0
+    assert window.geography_view.marker_items[int(marker["id"])].pos().y() == 1000
+
+    window.autosave_timer.stop()
+    window.db.conn.close()
+    window.deleteLater()
+    app.processEvents()

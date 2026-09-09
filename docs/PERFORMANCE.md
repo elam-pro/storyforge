@@ -23,6 +23,8 @@ les miniatures des lieux à 2 Mio et celles de la bibliothèque à 8 Mio ; ce
 n’est pas la mémoire totale de Qt. La bibliothèque ne charge plus tous les
 blobs dans une seule requête, décode directement à 170 × 105 maximum et
 réutilise le résultat lors des recherches et changements de filtre.
+Les fonds des cartes géographiques sont décodés au plus à 2 400 × 1 600 et
+partagent un cache LRU de 32 Mio, vidé lors du changement de projet.
 Éviction LRU, réduction avant décodage lorsque le codec le permet, aucune
 modification des originaux. Les invalidations et gardes de génération existantes
 restent conservées. Aucun refactoring global de vues n’est justifié par ces mesures.

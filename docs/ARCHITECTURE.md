@@ -18,6 +18,7 @@ Vérifiée statiquement le 7 septembre 2026 sur le code applicatif 0.30.3. Ce do
 | `pdf_export.py`, `report_export.py` | Manuel pédagogique et documents PDF. |
 | `theme.py`, `i18n.py` | Styles et traduction partielle. |
 | `genres.py`, `template_diagrams.py` | Ressources et rendus narratifs. |
+| `geography.py` | Canevas Qt des cartes, repères déplaçables, panoramique et zoom ; la persistance reste orchestrée par la fenêtre. |
 | `ai_service.py` | Shim désactivé conservé pour anciens imports ; aucun appel depuis l’interface. |
 
 Le principal couplage reste dans `StoryForgeWindow`. Une première extraction vers `LearningService` sépare la persistance et la progression pédagogique ; les autres domaines restent majoritairement dans la fenêtre.
@@ -31,6 +32,7 @@ Le principal couplage reste dans `StoryForgeWindow`. Une première extraction ve
 - Certains liens utilisent `target_type/target_id` : vérifier explicitement leur validité et leur appartenance au projet.
 - `backup_to` utilise l’API de sauvegarde SQLite. Git ne sauvegarde pas la base personnelle.
 - Avant l’ajout de `doc_versions.snapshot_json` à une base existante, le constructeur crée une sauvegarde SQLite dans `backups/`, suffixée `before_structured_versions`. Les bases neuves ne déclenchent pas cette sauvegarde. Pour un retour au code antérieur, restaurer cette copie après fermeture de l’application ; les modifications ultérieures doivent être préservées séparément.
+- Avant l’ajout des tables géographiques à une base existante comportant déjà les lieux, le constructeur crée de même une copie `backups/*before_geography_maps*.db`. `geography_maps` référence éventuellement une image existante ; `geography_markers` référence éventuellement un lieu existant. L’export de projet remappe ces deux références au réimport. Supprimer une carte cascade seulement vers ses repères, jamais vers les lieux ou images sources.
 
 ## Scénario : représentations concurrentes
 
@@ -46,6 +48,10 @@ Les guides chargés alimentent `guided_runs`, `guided_answers`, `guided_applicat
 `LearningService` reçoit la session, le parcours, l’indice et le texte explicitement : aucun widget ni état de fenêtre. Réponses, maîtrise et miroir historique sont sauvegardés ensemble ; terminer une étape inclut la progression dans la même transaction. Les règles existantes sont conservées : acquis reste acquis si la preuve est inchangée, sinon une réponse non vide revient à en pratique. La maîtrise reste globale, tandis que les preuves sont contextualisées par parcours, projet, cible et champ.
 
 L’ajout de l’historique est une migration additive : une base existante reçoit une sauvegarde restaurable `backups/*before_connected_learning_history*.db` avant création et ses applications courantes sont reprises comme traces `legacy`. Revenir à un code antérieur impose de fermer l’application puis de restaurer cette copie si l’on veut retrouver exactement le schéma précédent.
+
+## Géographie connectée
+
+L’onglet `Univers > Cartes` est une représentation supplémentaire des mêmes données, pas une bibliothèque parallèle. Une carte porte son nom, son indication d’échelle, ses dimensions de canevas et éventuellement l’identifiant d’une image de fond. Un repère lié conserve l’identifiant du lieu ; son libellé cartographique, ses notes et sa position restent propres à la carte. Un repère libre décrit un terrain, une frontière, une route ou un autre élément qui ne justifie pas encore une fiche Lieu. `GeographyView` gère uniquement l’affichage et les gestes ; `StoryForgeWindow` valide le projet et écrit en base.
 
 ## Navigation et effets de bord
 

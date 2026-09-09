@@ -145,3 +145,32 @@ def test_connected_learning_history_migration_is_backed_up_and_restorable(tmp_pa
     assert history[0]['event_kind'] == 'legacy'
     assert history[0]['evidence'] == 'Une piste'
     migrated.conn.close()
+
+
+def test_geography_migration_is_backed_up_and_restorable(tmp_path):
+    path = tmp_path / 'world.db'
+    db = Database(path)
+    project(db)
+    db.run('DROP TABLE geography_markers')
+    db.run('DROP TABLE geography_maps')
+    db.conn.close()
+
+    migrated = Database(path)
+    backups = list((tmp_path / 'backups').glob('*before_geography_maps*.db'))
+    assert len(backups) == 1
+    original = sqlite3.connect(backups[0])
+    old_tables = {
+        row[0] for row in original.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+    assert 'geography_maps' not in old_tables
+    assert 'geography_markers' not in old_tables
+    original.close()
+    new_tables = {
+        row[0] for row in migrated.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+    assert {'geography_maps', 'geography_markers'} <= new_tables
+    migrated.conn.close()

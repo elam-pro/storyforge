@@ -1011,6 +1011,71 @@ def test_v016_locations_and_connections_survive_export_import(tmp_path: Path) ->
     db.conn.close()
 
 
+def test_geography_maps_reuse_locations_images_and_survive_export_import(tmp_path: Path) -> None:
+    db = Database(tmp_path / "geography.db")
+    project_id = create_project(db, "Les territoires de verre")
+    image_id = db.run(
+        """INSERT INTO image_library(project_id,title,category,image_data,created_at,updated_at)
+        VALUES(?,?,?,?,?,?)""",
+        (project_id, "Carte du royaume", "Carte", b"map-image", NOW(), NOW()),
+    ).lastrowid
+    location_id = db.run(
+        """INSERT INTO locations(project_id,position,name,category,created_at,updated_at)
+        VALUES(?,?,?,?,?,?)""",
+        (project_id, 0, "Cité du verre", "Ville", NOW(), NOW()),
+    ).lastrowid
+    map_id = db.run(
+        """INSERT INTO geography_maps(
+        project_id,name,scale_label,background_image_id,width,height,created_at,updated_at
+        ) VALUES(?,?,?,?,?,?,?,?)""",
+        (project_id, "Royaume central", "1 case = 10 km", image_id, 1800, 1200, NOW(), NOW()),
+    ).lastrowid
+    db.run(
+        """INSERT INTO geography_markers(
+        map_id,project_id,location_id,marker_type,label,notes,color,x,y,created_at,updated_at
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            map_id, project_id, location_id, "Lieu", "La capitale", "Pouvoir royal",
+            "#D84A32", 420.5, 315.25, NOW(), NOW(),
+        ),
+    )
+    db.run(
+        """INSERT INTO geography_markers(
+        map_id,project_id,marker_type,label,notes,color,x,y,created_at,updated_at
+        ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+        (
+            map_id, project_id, "Frontière", "Mur de brume", "Passage interdit",
+            "#667788", 980, 640, NOW(), NOW(),
+        ),
+    )
+
+    export_path = tmp_path / "geography.storyforge.json"
+    db.export_project(project_id, export_path)
+    imported_id = db.import_project(export_path)
+
+    imported_map = db.one("SELECT * FROM geography_maps WHERE project_id=?", (imported_id,))
+    imported_image = db.one("SELECT id FROM image_library WHERE project_id=?", (imported_id,))
+    imported_location = db.one("SELECT id FROM locations WHERE project_id=?", (imported_id,))
+    assert imported_map["name"] == "Royaume central"
+    assert imported_map["scale_label"] == "1 case = 10 km"
+    assert imported_map["background_image_id"] == imported_image["id"]
+    markers = db.q(
+        "SELECT * FROM geography_markers WHERE map_id=? ORDER BY id", (imported_map["id"],)
+    )
+    assert len(markers) == 2
+    assert markers[0]["location_id"] == imported_location["id"]
+    assert markers[0]["x"] == 420.5
+    assert markers[1]["location_id"] is None
+    assert markers[1]["marker_type"] == "Frontière"
+    assert markers[1]["y"] == 640
+
+    db.run("DELETE FROM geography_maps WHERE id=?", (imported_map["id"],))
+    assert db.one("SELECT COUNT(*) FROM geography_markers WHERE project_id=?", (imported_id,))[0] == 0
+    assert db.one("SELECT COUNT(*) FROM locations WHERE project_id=?", (imported_id,))[0] == 1
+    assert db.one("SELECT COUNT(*) FROM image_library WHERE project_id=?", (imported_id,))[0] == 1
+    db.conn.close()
+
+
 def test_v018_theme_positions_and_motifs_survive_export_import(tmp_path: Path) -> None:
     db = Database(tmp_path / "theme.db")
     project_id = create_project(db, "La fenêtre fermée")

@@ -20,8 +20,7 @@ Chaque chantier reste un changement borné avec tests et commit local. Les phase
 ## Fonctionnalités restantes : numéros d’origine conservés
 
 - Ensemble 2 : niveaux de guidage réalisés. Découverte, Guidé et Autonome exposent des quantités d’aide distinctes et les changements conservent le brouillon ; voir FEATURES.md.
-- Ensemble 9 : cartes géographiques, fonds, repères liés aux lieux et terrains. Reporté, pas ajouté implicitement.
-- Ensemble 18 : vue géographique après l’ensemble 9 ; cohérence des vues à renforcer.
+- Ensembles 9 et 18 : réalisés dans un même espace **Univers > Cartes**. Plusieurs cartes et échelles peuvent coexister ; chaque canevas accepte un fond issu d’Images, des lieux existants et des repères de terrain libres. Déplacement, panoramique, zoom, export et réimport conservent les liens sans créer une seconde bibliothèque de lieux.
 - Ensemble 19 : IA reportée à la demande de l’utilisateur. L’ancien professeur est désactivé ; toute réactivation exige une décision explicite, contrôle des données envoyées et accord de l’auteur sur les propositions.
 - Ensemble 20 : apprentissage connecté étendu. Les transitions guide-outil conservent le contexte de retour, l’état courant reste compatible et un historique contextualisé garde chaque application et relecture ; voir FEATURES.md.
 - Anglais intégral : reporté à la demande de l’utilisateur ; contenus pédagogiques, formulaires et libellés dynamiques à compléter plus tard, sans traduire les textes utilisateur.
