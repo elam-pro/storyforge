@@ -50,9 +50,29 @@ def test_provenance_feature_mapping_incremental_and_delete(repository):
     assert 'app.py' in index.errors
 
 
-@pytest.mark.parametrize('path', ['storyforge.db', '.env', 'secrets.py', 'output/test.py', 'docs/archive/a.md', '../app.py', '/etc/passwd', 'tests/private.json', 'docs/STORY.md'])
+@pytest.mark.parametrize('path', ['storyforge.db', '.env', 'secrets.py', 'output/test.py', 'docs/archive/a.md', '../app.py', '/etc/passwd', 'tests/private.json', 'docs/STORY.md', 'content/sessions/private.json', 'content/sessions/../../storyforge.db'])
 def test_allowlist_rejects_private_paths(path):
     assert not allowed(path)
+
+
+@pytest.mark.parametrize('path', ['geography.py', 'content/sessions/session_01.json', 'content/sessions/guide_build_universe.json', 'content/sessions/guide_rewrite.json'])
+def test_allowlist_accepts_static_geography_and_guide_sources(path):
+    assert allowed(path)
+
+
+def test_static_guide_and_geography_sources_are_searchable(repository):
+    (repository / 'content/sessions').mkdir(parents=True)
+    (repository / 'geography.py').write_text(
+        'def render_geography_map():\n    return "REPERE_CARTOGRAPHIQUE"\n', encoding='utf8',
+    )
+    (repository / 'content/sessions/guide_build_universe.json').write_text(
+        '{"question": "QUESTION_UNIVERS_STATIQUE"}', encoding='utf8',
+    )
+    git(repository, 'add', 'geography.py', 'content/sessions/guide_build_universe.json')
+    git(repository, 'commit', '-m', 'static sources')
+    index = RepositoryIndex(repository)
+    assert index.search('REPERE_CARTOGRAPHIQUE')['results'][0]['path'] == 'geography.py'
+    assert index.search('QUESTION_UNIVERS_STATIQUE')['results'][0]['path'] == 'content/sessions/guide_build_universe.json'
 
 
 def test_excludes_tracked_private_untracked_and_symlink(repository, tmp_path_factory):

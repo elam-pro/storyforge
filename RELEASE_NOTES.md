@@ -8,7 +8,7 @@
 - caches d’images bornés, décodage réduit, benchmarks et parcours de captures sur bases temporaires ;
 - mesures reproductibles ajoutées pour 600 événements, 200 nœuds relationnels et 600 repères géographiques, sans refonte non justifiée par les résultats ;
 - MCP de contexte local en lecture seule configuré et validé avec ses sept outils et cinq ressources ;
-- 153 tests automatisés réussis ; anglais intégral et IA volontairement reportés.
+- 160 tests automatisés réussis ; anglais intégral et IA volontairement reportés.
 
 # StoryForge 0.30.3 — Correctifs d’affichage ciblés
 

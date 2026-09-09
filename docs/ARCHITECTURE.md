@@ -66,7 +66,8 @@ croisée avec les fichiers suivis par Git. Il lit uniquement les fichiers couran
 pas les anciens blobs Git. Les empreintes sont recalculées à chaque requête ;
 seuls les contenus modifiés sont reparsés. Index en mémoire, sans SQLite ni import
 du runtime applicatif. Python est découpé par AST (sans exécution), Markdown par
-sections/lignes de tableau ; `FEATURES.md` relie domaine, symboles et tests.
+sections/lignes de tableau ; les douze JSON pédagogiques sont autorisés nommément,
+pas par motif générique. `FEATURES.md` relie domaine, symboles et tests.
 
 Provenance : révision HEAD, blob de l’index Git, SHA-256 du contenu effectivement
 lu, modifications indexées/non indexées, fichier, symbole et lignes. Lecture par

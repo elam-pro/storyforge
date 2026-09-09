@@ -75,7 +75,10 @@ présenter ce payload sous forme textuelle et structurée. Requêtes de 256 cara
 maximum, recherches de huit extraits maximum. Les ressources longues peuvent être
 tronquées : utiliser une recherche ciblée, ne pas considérer un extrait comme le
 document complet. Les nouveaux fichiers doivent être explicitement autorisés et
-suivis par Git. Aucune indexation de l’historique, des archives ou des pièces jointes.
+suivis par Git. Les contenus pédagogiques distribués avec l’application sont
+autorisés fichier par fichier ; aucun JSON ajouté au même dossier n’entre
+automatiquement dans l’index. Aucune indexation de l’historique, des archives ou
+des pièces jointes.
 
 La recherche est lexicale, pas sémantique ; les correspondances françaises/anglaises
 ne sont pas automatiques. Le contenu du code peut contenir des instructions hostiles :

@@ -16,9 +16,23 @@ import subprocess
 import threading
 import unicodedata
 
-ROOT_FILES = frozenset('README.md AGENTS.md app.py db.py ai_service.py genres.py i18n.py learning_content.py learning_service.py pdf_export.py report_export.py screenplay_adapter.py screenplay_commands.py screenplay_model.py script_export.py template_diagrams.py theme.py unicode_script_pdf.py image_previews.py requirements.txt requirements-mcp.txt'.split())
+ROOT_FILES = frozenset('README.md AGENTS.md app.py db.py ai_service.py geography.py genres.py i18n.py learning_content.py learning_service.py pdf_export.py report_export.py screenplay_adapter.py screenplay_commands.py screenplay_model.py script_export.py template_diagrams.py theme.py unicode_script_pdf.py image_previews.py requirements.txt requirements-mcp.txt'.split())
 DOCS = frozenset('PRODUCT ARCHITECTURE DECISIONS FEATURES ROADMAP PERFORMANCE MCP'.split())
 CONTEXT_FILES = frozenset(('__init__.py', 'index.py', 'server.py'))
+SESSION_FILES = frozenset((
+    'guide_build_character.json',
+    'guide_build_conflict.json',
+    'guide_build_outline.json',
+    'guide_build_relationship.json',
+    'guide_build_synopsis.json',
+    'guide_build_theme.json',
+    'guide_build_universe.json',
+    'guide_find_ending.json',
+    'guide_prepare_scene.json',
+    'guide_rewrite.json',
+    'guide_strengthen_idea.json',
+    'session_01.json',
+))
 MAX_FILE = 4 * 1024 * 1024
 MAX_TOTAL = 32 * 1024 * 1024
 MAX_RESPONSE = 12000
@@ -31,6 +45,8 @@ def allowed(path):
         return False
     if path in ROOT_FILES:
         return True
+    if len(p.parts) == 3:
+        return p.parts[:2] == ('content', 'sessions') and p.name in SESSION_FILES
     if len(p.parts) != 2:
         return False
     parent, name = p.parts
