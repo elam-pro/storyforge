@@ -50,12 +50,17 @@ def test_release_archive_is_verified_and_installs_without_repository(tmp_path: P
     for line in (bundle / "SHA256SUMS").read_text(encoding="utf-8").splitlines():
         checksum, relative = line.split("  ", 1)
         assert checksum == _sha256(bundle / relative)
+    installer_text = (bundle / "install.sh").read_text(encoding="utf-8")
+    assert "/proc/[0-9]*/exe" in installer_text
+    assert 'readlink -f -- "$process_executable"' in installer_text
+    assert "pgrep" not in installer_text
 
     home = tmp_path / "home"
+    install_env = {"HOME": str(home), "PATH": "/usr/bin:/bin"}
     subprocess.run(
         [str(bundle / "install.sh")],
         cwd=bundle,
-        env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+        env=install_env,
         check=True,
         capture_output=True,
         text=True,
@@ -72,7 +77,7 @@ def test_release_archive_is_verified_and_installs_without_repository(tmp_path: P
     rejected = subprocess.run(
         [str(bundle / "install.sh")],
         cwd=bundle,
-        env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+        env=install_env,
         capture_output=True,
         text=True,
     )

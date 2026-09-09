@@ -1,6 +1,6 @@
 # Architecture actuelle
 
-Vérifiée le 9 septembre 2026 sur le code applicatif 0.31.0.
+Vérifiée le 9 septembre 2026 sur le code applicatif 0.31.1.
 
 ## Points d’entrée et dépendances
 

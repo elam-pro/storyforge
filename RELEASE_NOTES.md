@@ -1,3 +1,11 @@
+# StoryForge 0.31.1 — Lisibilité des guides et installation ciblée
+
+- sélection des guides affichée comme une bande continue, contrastée et cohérente sur les trois colonnes ;
+- survol mieux différencié, curseur interactif et focus clavier sur des lignes entières ;
+- rappel du guide actif replacé au-dessus du catalogue pour rester immédiatement visible ;
+- installateur corrigé afin qu’une première installation temporaire ne soit pas bloquée par une autre instance de StoryForge ;
+- données utilisateur et format de projet inchangés.
+
 # StoryForge 0.31.0 — Application Linux et consolidation
 
 - audit canonique du produit, de l’architecture, des décisions, des fonctionnalités et de la roadmap ;

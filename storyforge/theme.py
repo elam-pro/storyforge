@@ -695,7 +695,29 @@ def stylesheet(p: Palette, editor_font_size: int = 15) -> str:
     QTextEdit[themeField="true"], QTextEdit[conflictField="true"],
     QTextEdit[promiseField="true"] {{ font-size: {editor_font_size}px; }}
     QTreeWidget#GuideCatalog::item:selected {{
-        background: {p.accent_soft}; color: {p.text}; border-left: 3px solid {p.accent};
+        background: {p.selection}; color: {p.text};
+        border-top: 1px solid {p.accent}; border-bottom: 1px solid {p.accent};
+        border-radius: 0; font-weight: 600;
+    }}
+    QTreeWidget#GuideCatalog {{
+        background: {p.bg}; border: 1px solid {p.border}; border-radius: 3px;
+        selection-background-color: {p.selection}; selection-color: {p.text};
+    }}
+    QTreeWidget#GuideCatalog:focus {{ border-color: {p.border_strong}; }}
+    QTreeWidget#GuideCatalog::item {{
+        border-radius: 0; padding: 6px 10px;
+    }}
+    QTreeWidget#GuideCatalog::item:hover {{
+        background: {p.surface_raised}; color: {p.text};
+        border-top: 1px solid {p.border_strong}; border-bottom: 1px solid {p.border_strong};
+    }}
+    QTreeWidget#GuideCatalog::item:selected:hover {{
+        background: {p.selection}; color: {p.text};
+        border-top-color: {p.accent_hover}; border-bottom-color: {p.accent_hover};
+    }}
+    QLabel#GuideSelection {{
+        color: {p.text}; background: {p.accent_soft}; border: 1px solid {p.accent};
+        border-radius: 3px; padding: 8px 11px; font-size: 12px; font-weight: 650;
     }}
     QListWidget#GenreList {{ border: 1px solid {p.border}; background: {p.surface}; }}
     QListWidget#GenreList::item {{ padding: 8px; }}

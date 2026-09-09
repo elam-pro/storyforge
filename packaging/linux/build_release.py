@@ -81,7 +81,18 @@ if ! command -v sha256sum >/dev/null; then
   exit 3
 fi
 (cd "$bundle_root" && sha256sum -c SHA256SUMS)
-if pgrep -u "$(id -u)" -f '/StoryForge( |$)' >/dev/null; then
+target_executable="${HOME}/.local/lib/storyforge/StoryForge"
+storyforge_running=0
+if [[ -x "$target_executable" ]]; then
+  for process_executable in /proc/[0-9]*/exe; do
+    [[ -e "$process_executable" ]] || continue
+    if [[ "$(readlink -f -- "$process_executable" 2>/dev/null || true)" == "$target_executable" ]]; then
+      storyforge_running=1
+      break
+    fi
+  done
+fi
+if [[ "$storyforge_running" == 1 ]]; then
   echo "Ferme StoryForge avant de lancer la mise à jour." >&2
   exit 2
 fi

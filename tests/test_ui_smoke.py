@@ -7,6 +7,7 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QColor, QPixmap, QTextCursor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QComboBox,
     QInputDialog,
@@ -41,7 +42,7 @@ def test_every_main_view_opens_without_mutating_user_data(tmp_path: Path) -> Non
     window.show()
     app.processEvents()
 
-    assert APP_VERSION == "0.31.0"
+    assert APP_VERSION == "0.31.1"
     assert len(LEARNING_SESSION.steps) == 14
     assert [key for key, _title in DEVELOPMENT_DOCUMENTS] == [
         "premise",
@@ -471,6 +472,15 @@ def test_guides_keep_runs_isolated_and_apply_to_existing_project(tmp_path: Path)
     assert catalog_card is not None
     assert window.guide_catalog_tree.minimumHeight() == 720
     assert catalog_card.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Expanding
+    assert (
+        window.guide_catalog_tree.selectionBehavior()
+        == QAbstractItemView.SelectionBehavior.SelectRows
+    )
+    assert window.guide_catalog_tree.allColumnsShowFocus()
+    assert window.guide_catalog_tree.cursor().shape() == Qt.CursorShape.PointingHandCursor
+    assert window.guide_selection_label.text().startswith("SÉLECTION  ·  ")
+    assert "QTreeWidget#GuideCatalog::item:hover" in app.styleSheet()
+    assert "QLabel#GuideSelection" in app.styleSheet()
     window.autosave_timer.stop()
     window.db.conn.close()
     window.deleteLater()
