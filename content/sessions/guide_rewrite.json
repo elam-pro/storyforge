@@ -1,0 +1,72 @@
+{
+  "key": "rewrite_pass",
+  "cycle": "Guide ciblé",
+  "title": "Préparer une passe de réécriture",
+  "subtitle": "Diagnostiquer un problème, choisir une passe limitée et vérifier son effet.",
+  "description": "Six étapes facultatives pour réécrire avec une intention claire. Le guide conserve le raisonnement ; il ne modifie jamais le texte à ta place.",
+  "deliverable": "Une passe de réécriture définie et vérifiable, reliée à l’historique des versions du projet.",
+  "requires_project": true,
+  "apply_label": "Ouvrir l’historique des versions",
+  "steps": [
+    {
+      "key": "reader_effect", "title": "Décrire l’effet actuel", "concept_key": "rewrite_reader_effect", "concept_label": "Effet de lecture",
+      "question": "À quel endroit la lecture produit-elle un effet différent de celui que tu recherches ?",
+      "why": "Un diagnostic observable évite de corriger tout le texte à partir d’un malaise trop général.",
+      "example": "Après la découverte de la dette, la scène ralentit alors que je veux maintenir l’urgence.",
+      "placeholder": "À cet endroit… Le lecteur peut ressentir ou comprendre… Je cherche plutôt…",
+      "tips": ["Nomme un passage précis.", "Distingue ton intention de l’effet observé."],
+      "review": "Relis : saurais-tu retrouver exactement la zone à examiner ?",
+      "optional": true
+    },
+    {
+      "key": "cause", "title": "Formuler une hypothèse", "concept_key": "rewrite_cause", "concept_label": "Hypothèse de diagnostic",
+      "question": "Quel élément du texte pourrait produire cet effet ?",
+      "why": "Une hypothèse peut être testée puis rejetée. Elle vaut mieux qu’une correction globale sans critère.",
+      "example": "Trois explications répètent une information déjà comprise dans l’action précédente.",
+      "placeholder": "L’effet pourrait venir de… Je peux le vérifier en…",
+      "tips": ["Considère structure, information, point de vue ou rythme.", "Garde plusieurs hypothèses si nécessaire."],
+      "review": "Relis : l’hypothèse porte-t-elle sur le texte, pas sur une qualité vague de l’auteur ?",
+      "optional": true
+    },
+    {
+      "key": "scale", "title": "Choisir la bonne échelle", "concept_key": "rewrite_scale", "concept_label": "Échelle de réécriture",
+      "question": "Le problème concerne-t-il le projet, une séquence, une scène, un échange ou une phrase ?",
+      "why": "Corriger d’abord l’échelle la plus large concernée évite de polir des passages qui devront être déplacés ou supprimés.",
+      "example": "Le problème est dans l’ordre des révélations de la séquence, pas dans le style des dialogues.",
+      "placeholder": "L’échelle utile est… Je laisse de côté pour cette passe…",
+      "tips": ["Macro avant micro lorsque les deux sont liés.", "Une passe peut volontairement ignorer les autres niveaux."],
+      "review": "Relis : le périmètre est-il assez petit pour être terminé ?",
+      "optional": true
+    },
+    {
+      "key": "operation", "title": "Définir une opération", "concept_key": "rewrite_operation", "concept_label": "Opération de réécriture",
+      "question": "Quelle transformation précise vas-tu tester ?",
+      "why": "Couper, déplacer, condenser, développer, inverser ou changer le point de vue sont des opérations vérifiables.",
+      "example": "Supprimer les deux explications et déplacer l’indice restant avant l’entrée de Sarah.",
+      "placeholder": "Je vais… sans modifier…",
+      "tips": ["Fais une seule famille de changements par passe.", "Conserve une version avant les changements importants."],
+      "review": "Relis : l’opération répond-elle directement à ton hypothèse ?",
+      "optional": true
+    },
+    {
+      "key": "criterion", "title": "Choisir un critère", "concept_key": "rewrite_criterion", "concept_label": "Critère de vérification",
+      "question": "Comment sauras-tu si cette passe améliore réellement le passage ?",
+      "why": "Un critère empêche de confondre changement et amélioration.",
+      "example": "La dette doit être comprise une fois, puis la décision de Mina doit arriver sans explication intermédiaire.",
+      "placeholder": "Après la passe, on doit pouvoir… sans…",
+      "tips": ["Choisis un effet lisible.", "Le critère peut révéler que l’ancienne version fonctionnait mieux."],
+      "review": "Relis : peux-tu comparer avant et après avec ce critère ?",
+      "optional": true
+    },
+    {
+      "key": "result", "title": "Comparer et décider", "concept_key": "rewrite_result", "concept_label": "Décision après comparaison",
+      "question": "Après comparaison avec la version précédente, que gardes-tu, ajustes-tu ou annules-tu ?",
+      "why": "La réécriture reste réversible lorsque chaque passe conserve son intention et sa trace.",
+      "example": "Le rythme s’améliore, mais l’indice devient trop discret : je garde la coupe et reformule seulement l’indice.",
+      "placeholder": "Le résultat produit… Je garde… Je reprends…",
+      "tips": ["Compare l’effet, pas seulement le nombre de mots.", "Une passe annulée apporte aussi une information."],
+      "review": "Relis : ta décision répond-elle au critère défini avant la passe ?",
+      "optional": true
+    }
+  ]
+}

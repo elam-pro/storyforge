@@ -1,0 +1,62 @@
+{
+  "key": "build_relationship",
+  "cycle": "Guide ciblé",
+  "title": "Construire une relation",
+  "subtitle": "Observer ce que deux personnages veulent l’un de l’autre et comment le lien évolue.",
+  "description": "Cinq étapes facultatives pour travailler une relation directionnelle sans réduire les personnages à une étiquette.",
+  "deliverable": "Des réponses applicables, une par une, à une relation existante de la carte du projet.",
+  "requires_project": true,
+  "apply_label": "Revoir et appliquer les étapes",
+  "steps": [
+    {
+      "key": "participants", "title": "Choisir le lien à observer", "concept_key": "relationship_participants", "concept_label": "Points de vue de la relation",
+      "question": "Entre quelles personnes travailles-tu, et pourquoi ce lien compte-t-il dans cette histoire ?",
+      "why": "Nommer les deux points de vue évite de traiter la relation comme une propriété abstraite.",
+      "example": "Mina dépend du réseau de Sarah ; Sarah voit en Mina une partenaire brillante mais imprévisible.",
+      "placeholder": "A attend de B… B attend de A… Ce lien compte parce que…",
+      "tips": ["Une relation peut être asymétrique.", "Crée d’abord le lien dans la carte s’il n’existe pas."],
+      "review": "Relis : distingue-t-on clairement les attentes des deux côtés ?",
+      "optional": true
+    },
+    {
+      "key": "description", "title": "Le lien actuel", "concept_key": "relationship_description", "concept_label": "Description de la relation",
+      "question": "Comment chacun décrirait-il cette relation aujourd’hui ?",
+      "why": "Deux versions incompatibles d’un même lien peuvent être plus utiles qu’une étiquette unique.",
+      "example": "Mina parle d’une amitié exigeante ; Sarah pense assurer seule la stabilité de leur association.",
+      "placeholder": "Pour A… Pour B… Dans les faits…",
+      "tips": ["Décris des comportements observables.", "Conserve les désaccords de perception."],
+      "review": "Relis : la description montre-t-elle quelque chose que les personnages pourraient faire ?",
+      "optional": true
+    },
+    {
+      "key": "tension", "title": "La tension active", "concept_key": "relationship_tension", "concept_label": "Tension relationnelle",
+      "question": "Qu’est-ce qui rapproche ces personnages tout en compliquant leur lien ?",
+      "why": "La tension peut venir d’une attente, d’un besoin contradictoire ou d’un déséquilibre, sans exiger une dispute permanente.",
+      "example": "Elles veulent sauver l’atelier, mais chacune veut être celle qui décide en situation de crise.",
+      "placeholder": "Elles partagent… Pourtant… Le point sensible est…",
+      "tips": ["Cherche aussi ce qui maintient le lien.", "Ne grossis pas artificiellement le désaccord."],
+      "review": "Relis : comprend-on pourquoi elles restent liées malgré la difficulté ?",
+      "optional": true
+    },
+    {
+      "key": "secret", "title": "Ce qui n’est pas dit", "concept_key": "relationship_secret", "concept_label": "Information cachée",
+      "question": "Une information, une intention ou un malentendu modifie-t-il la relation ?",
+      "why": "Le non-dit est facultatif. Il est utile seulement s’il change une décision ou la lecture d’un comportement.",
+      "example": "Sarah a déjà refusé une offre de rachat sans en parler à Mina.",
+      "placeholder": "A ignore que… Si cela devient connu…",
+      "tips": ["Un malentendu suffit parfois.", "Passe cette étape si aucun secret n’est nécessaire."],
+      "review": "Relis : cette information a-t-elle une conséquence précise ?",
+      "optional": true
+    },
+    {
+      "key": "evolution", "title": "Le déplacement du lien", "concept_key": "relationship_evolution", "concept_label": "Évolution de la relation",
+      "question": "Après les événements importants, qu’est-ce qui change dans leurs attentes ou leurs actes ?",
+      "why": "Une relation peut se rapprocher, se rompre, se redéfinir ou rester stable après avoir été mise à l’épreuve.",
+      "example": "Mina cesse de demander une permission ; Sarah accepte de conseiller sans décider à sa place.",
+      "placeholder": "Au début… Après… À la fin ou provisoirement…",
+      "tips": ["Compare des actes plutôt que deux adjectifs.", "Une évolution inachevée est légitime."],
+      "review": "Relis : le déplacement vient-il des événements et des choix du récit ?",
+      "optional": true
+    }
+  ]
+}

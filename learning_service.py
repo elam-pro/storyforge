@@ -32,11 +32,44 @@ OUTLINE_GUIDE_FIELDS = {
     'unit_consequence': ('consequence', 'Conséquence / changement'),
 }
 
+UNIVERSE_GUIDE_FIELDS = {
+    'period': ('epoch', 'Époque et durée'),
+    'places': ('places', 'Lieux importants'),
+    'society': ('society', 'Société et pouvoir'),
+    'culture': ('culture', 'Culture et vie quotidienne'),
+    'worldview': ('worldview', 'Vision du monde'),
+    'signature': ('originality', 'Signature de l’univers'),
+}
+
+RELATIONSHIP_GUIDE_FIELDS = {
+    'description': ('description', 'Description de la relation'),
+    'tension': ('tension', 'Tension'),
+    'secret': ('secret', 'Secret ou non-dit'),
+    'evolution': ('evolution', 'Évolution'),
+}
+
+THEME_GUIDE_FIELDS = {
+    'question': ('central_question', 'Question centrale'),
+    'interest': ('personal_interest', 'Intérêt personnel'),
+    'avoid_message': ('avoid_message', 'Morale à éviter'),
+    'opening_view': ('opening_view', 'Vision au début'),
+    'decisions': ('decisions_note', 'Décisions qui éprouvent le thème'),
+    'ending_response': ('ending_response', 'Réponse de la fin'),
+}
+
 # Fixed destinations only; neither table nor field names come from user text.
+# Each tuple ends with the trusted key column. Project profiles use project_id
+# as their stable target; list-like tools use their ordinary id column.
 FIELD_GUIDES = {
-    'build_character': ('characters', 'character', 'name', 'Personnage', CHARACTER_GUIDE_FIELDS),
-    'build_conflict': ('conflicts', 'conflict', 'title', 'Conflit', CONFLICT_GUIDE_FIELDS),
-    'build_outline': ('outline_items', 'outline_item', 'title', 'Élément du plan', OUTLINE_GUIDE_FIELDS),
+    'build_character': ('characters', 'character', 'name', 'Personnage', CHARACTER_GUIDE_FIELDS, 'id'),
+    'build_conflict': ('conflicts', 'conflict', 'title', 'Conflit', CONFLICT_GUIDE_FIELDS, 'id'),
+    'build_outline': ('outline_items', 'outline_item', 'title', 'Élément du plan', OUTLINE_GUIDE_FIELDS, 'id'),
+    'build_universe': ('world_profiles', 'project', '', 'Cadre de l’univers', UNIVERSE_GUIDE_FIELDS, 'project_id'),
+    'build_relationship': (
+        'character_relationships', 'relationship', 'relationship_type', 'Relation',
+        RELATIONSHIP_GUIDE_FIELDS, 'id',
+    ),
+    'build_theme': ('theme_profiles', 'project', '', 'Thème', THEME_GUIDE_FIELDS, 'project_id'),
 }
 
 SYNOPSIS_GUIDE_STEPS = {
@@ -132,12 +165,20 @@ class LearningService:
             spec = FIELD_GUIDES.get(run['guide_key'])
             if not spec or session.key != run['guide_key'] or step.key not in spec[4]:
                 raise ValueError('Ce guide ne peut pas appliquer cette réponse à une fiche.')
-            table, target_type, _title_field, _label, fields = spec
+            table, target_type, _title_field, _label, fields, id_field = spec
             if not draft.strip() or mode not in {'append', 'replace'}:
                 raise ValueError('Une réponse et un mode d’application valides sont nécessaires.')
             field, _label = fields[step.key]
-            target = self.db.one(f'SELECT * FROM {table} WHERE id=? AND project_id=?',
-                                (target_id, run['project_id']))
+            target = self.db.one(
+                f'SELECT * FROM {table} WHERE {id_field}=? AND project_id=?',
+                (target_id, run['project_id']),
+            )
+            if not target and id_field == 'project_id' and target_id == int(run['project_id']):
+                self.db.run(
+                    f'INSERT INTO {table}(project_id,created_at,updated_at) VALUES(?,?,?)',
+                    (target_id, NOW(), NOW()),
+                )
+                target = self.db.one(f'SELECT * FROM {table} WHERE project_id=?', (target_id,))
             if not target:
                 raise ValueError('Choisis une fiche de ce projet.')
             current = target[field] or ''
@@ -146,7 +187,7 @@ class LearningService:
             proposed = draft.strip()
             if mode == 'append' and current.strip():
                 proposed = current + '\n\n' + proposed
-            self.db.run(f'UPDATE {table} SET {field}=?,updated_at=? WHERE id=? AND project_id=?',
+            self.db.run(f'UPDATE {table} SET {field}=?,updated_at=? WHERE {id_field}=? AND project_id=?',
                         (proposed, NOW(), target_id, run['project_id']))
             if target_type == 'outline_item':
                 self._sync_outline_source(target, field, proposed, int(run['project_id']))

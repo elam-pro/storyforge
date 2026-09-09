@@ -8,7 +8,10 @@ from learning_service import (
     CONFLICT_GUIDE_FIELDS,
     FIELD_GUIDES,
     OUTLINE_GUIDE_FIELDS,
+    RELATIONSHIP_GUIDE_FIELDS,
     SYNOPSIS_GUIDE_STEPS,
+    THEME_GUIDE_FIELDS,
+    UNIVERSE_GUIDE_FIELDS,
     LearningService,
 )
 from image_previews import PixmapCache, decode_preview
@@ -138,10 +141,15 @@ GUIDE_SESSIONS = {
     "build_conflict": load_session(BASE_DIR / "content" / "sessions" / "guide_build_conflict.json"),
     "build_synopsis": load_session(BASE_DIR / "content" / "sessions" / "guide_build_synopsis.json"),
     "build_outline": load_session(BASE_DIR / "content" / "sessions" / "guide_build_outline.json"),
+    "build_universe": load_session(BASE_DIR / "content" / "sessions" / "guide_build_universe.json"),
+    "build_relationship": load_session(BASE_DIR / "content" / "sessions" / "guide_build_relationship.json"),
+    "build_theme": load_session(BASE_DIR / "content" / "sessions" / "guide_build_theme.json"),
+    "rewrite_pass": load_session(BASE_DIR / "content" / "sessions" / "guide_rewrite.json"),
 }
 GUIDE_ORDER = (
     "seed", "strengthen_idea", "find_ending", "prepare_scene",
     "build_character", "build_conflict", "build_synopsis", "build_outline",
+    "build_universe", "build_relationship", "build_theme", "rewrite_pass",
 )
 GUIDE_CATALOG_GROUPS = (
     (
@@ -150,8 +158,12 @@ GUIDE_CATALOG_GROUPS = (
         ("seed", "strengthen_idea", "find_ending", "build_synopsis", "build_outline"),
     ),
     ("characters", "GUIDES POUR LES PERSONNAGES", ("build_character",)),
+    ("relationships", "GUIDES POUR LES RELATIONS", ("build_relationship",)),
     ("scenes", "GUIDES POUR LES SCÈNES", ("prepare_scene",)),
     ("conflicts", "GUIDES POUR LES CONFLITS", ("build_conflict",)),
+    ("universe", "GUIDES POUR L’UNIVERS", ("build_universe",)),
+    ("theme", "GUIDES POUR LE THÈME", ("build_theme",)),
+    ("rewrite", "GUIDES POUR LA RÉÉCRITURE", ("rewrite_pass",)),
 )
 GUIDE_LEVELS = {
     "discovery": "Découverte",
@@ -206,6 +218,46 @@ LEARNING_TOOL_LINKS = {
         key: ("characters", "", f"Personnage · {label}", "character", field,
               "Choisis un personnage. L’aperçu permet d’ajouter ou de remplacer ce seul champ.")
         for key, (field, label) in CHARACTER_GUIDE_FIELDS.items()
+    },
+    "build_universe": {
+        **{
+            key: (
+                "universe", "frame", f"Univers · {label}", "project", field,
+                "Prévisualise puis applique cette réponse au seul champ correspondant du Cadre.",
+            )
+            for key, (field, label) in UNIVERSE_GUIDE_FIELDS.items()
+        },
+        "rule_test": (
+            "universe", "rules", "Univers · Règles", "project", "",
+            "Crée ou complète une règle avec sa portée, sa limite, son coût, ses exceptions et ses conséquences.",
+        ),
+    },
+    "build_relationship": {
+        "participants": (
+            "relations", "", "Personnages · Carte des relations", "relationship", "",
+            "Choisis ou crée une relation directionnelle avant de préciser le lien.",
+        ),
+        **{
+            key: (
+                "relations", "", f"Relation · {label}", "relationship", field,
+                "Choisis une relation existante. L’aperçu ne modifiera que ce champ après confirmation.",
+            )
+            for key, (field, label) in RELATIONSHIP_GUIDE_FIELDS.items()
+        },
+    },
+    "build_theme": {
+        key: (
+            "theme", "", f"Thème · {label}", "project", field,
+            "Prévisualise puis applique cette réponse au seul champ correspondant de la fiche Thème.",
+        )
+        for key, (field, label) in THEME_GUIDE_FIELDS.items()
+    },
+    "rewrite_pass": {
+        key: (
+            "rewrite", "", "Réécriture · Historique des versions", "project", "",
+            "Conserve ta réponse comme trace de travail, puis compare le texte aux versions du projet.",
+        )
+        for key in ("reader_effect", "cause", "scale", "operation", "criterion", "result")
     },
     "seed": {
         "idea": ("development", "premise", "Construction · Prémisse", "project", "", "Clarifie ce que l’histoire explore."),
@@ -4324,8 +4376,11 @@ class StoryForgeWindow(QMainWindow):
                 "build_conflict": "ConflictGuideScroll",
                 "build_synopsis": "SynopsisGuideScroll",
                 "build_outline": "OutlineGuideScroll",
+                "build_universe": "UniverseGuideScroll",
+                "build_relationship": "RelationshipGuideScroll",
+                "build_theme": "ThemeGuideScroll",
             }
-            scroll.setObjectName(scroll_names[run["guide_key"]])
+            scroll.setObjectName(scroll_names.get(run["guide_key"], "ConnectedGuideScroll"))
             scroll.setWidgetResizable(True)
             scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             scroll.setWidget(right_widget)
@@ -4362,6 +4417,19 @@ class StoryForgeWindow(QMainWindow):
             "promise": (
                 "SELECT id,title,promise_type FROM story_promises WHERE project_id=? ORDER BY position,id",
                 lambda row: f"{row['title'] or 'Promesse sans titre'} · {row['promise_type'] or 'concept'}",
+            ),
+            "relationship": (
+                """SELECT relation.id,relation.relationship_type,
+                          first.name AS first_name,second.name AS second_name
+                   FROM character_relationships relation
+                   JOIN characters first ON first.id=relation.character_a_id
+                   JOIN characters second ON second.id=relation.character_b_id
+                   WHERE relation.project_id=?
+                   ORDER BY first.name COLLATE NOCASE,second.name COLLATE NOCASE,relation.id""",
+                lambda row: (
+                    f"{row['first_name'] or 'Sans nom'} → {row['second_name'] or 'Sans nom'}"
+                    f" · {row['relationship_type'] or 'relation'}"
+                ),
             ),
         }
         spec = queries.get(target_type)
@@ -4429,6 +4497,7 @@ class StoryForgeWindow(QMainWindow):
 
         self.learning_target_combo = None
         target_rows = self._learning_target_rows(project_id, target_type) if project_id else []
+        target_combo = None
         if project_id and target_type != "project":
             target_combo = QComboBox()
             target_combo.setObjectName("LearningTargetCombo")
@@ -4437,6 +4506,7 @@ class StoryForgeWindow(QMainWindow):
                 "character": "Choisir un personnage…",
                 "conflict": "Choisir un conflit…",
                 "outline_item": "Choisir un élément du plan…",
+                "relationship": "Choisir une relation…",
             }
             prompt = prompts.get(target_type, "Choisir un élément…")
             target_combo.addItem(prompt if field_guide else "Tout l’outil", 0)
@@ -4457,8 +4527,11 @@ class StoryForgeWindow(QMainWindow):
         if project_id:
             if applicable_field:
                 apply_button = make_button("Prévisualiser la réponse", "primary", self._preview_field_answer)
-                apply_button.setEnabled(bool(target_combo.currentData()))
-                target_combo.currentIndexChanged.connect(lambda: apply_button.setEnabled(bool(target_combo.currentData())))
+                apply_button.setEnabled(target_type == "project" or bool(target_combo and target_combo.currentData()))
+                if target_combo:
+                    target_combo.currentIndexChanged.connect(
+                        lambda: apply_button.setEnabled(bool(target_combo.currentData()))
+                    )
                 box.addWidget(apply_button)
             elif synopsis_guide:
                 box.addWidget(make_button("Prévisualiser le passage", "primary", self._preview_synopsis_answer))
@@ -4560,32 +4633,43 @@ class StoryForgeWindow(QMainWindow):
         run = self.db.guided_run(self._guide_run_id)
         if not run or run["guide_key"] not in FIELD_GUIDES:
             return
-        table, _target_type, title_field, target_label, fields = FIELD_GUIDES[run["guide_key"]]
+        table, target_type, title_field, target_label, fields, id_field = FIELD_GUIDES[run["guide_key"]]
         step = self._guide_session.steps[self._learning_idx]
         target_combo = getattr(self, "learning_target_combo", None)
-        if step.key not in fields or not isinstance(target_combo, QComboBox):
+        if step.key not in fields:
             return
-        target_id = int(target_combo.currentData() or 0)
-        target = self.db.one(f"SELECT * FROM {table} WHERE id=? AND project_id=?",
-                             (target_id, run["project_id"]))
+        if target_type == "project":
+            target_id = int(run["project_id"])
+        elif isinstance(target_combo, QComboBox):
+            target_id = int(target_combo.currentData() or 0)
+        else:
+            return
+        target = self.db.one(
+            f"SELECT * FROM {table} WHERE {id_field}=? AND project_id=?",
+            (target_id, run["project_id"]),
+        )
         draft = self.learning_draft.toPlainText().strip()
-        if not target or not draft:
+        if (not target and id_field != "project_id") or not draft:
             QMessageBox.information(self, f"Application · {target_label}", "Choisis une fiche et écris une réponse avant d’ouvrir l’aperçu.")
             return
         field, label = fields[step.key]
-        current = target[field] or ""
+        current = target[field] if target else ""
         dialog = QDialog(self)
         prefixes = {
             "build_character": "CharacterGuide",
             "build_conflict": "ConflictGuide",
             "build_outline": "OutlineGuide",
+            "build_universe": "UniverseGuide",
+            "build_relationship": "RelationshipGuide",
+            "build_theme": "ThemeGuide",
         }
         prefix = prefixes[run["guide_key"]]
         dialog.setObjectName(f"{prefix}Preview")
         dialog.setWindowTitle(f"Appliquer · {target_label}")
         dialog.resize(760, 620)
         box = QVBoxLayout(dialog)
-        box.addWidget(make_label(f"{target[title_field] or target_label} · {label}", "SectionTitle", True))
+        target_title = target[title_field] if target and title_field else target_label
+        box.addWidget(make_label(f"{target_title or target_label} · {label}", "SectionTitle", True))
         box.addWidget(make_label("Seul ce champ sera modifié, après confirmation. Annuler laisse la fiche intacte.", "Muted", True))
         mode = QComboBox()
         mode.setObjectName(f"{prefix}ApplyMode")
@@ -4689,6 +4773,34 @@ class StoryForgeWindow(QMainWindow):
             if target_id:
                 self.promise_tabs.setCurrentIndex(1)
                 self._load_story_promise(target_id)
+        elif view == "universe":
+            tab = 1 if document == "rules" else 0
+            self.db.set_setting(f"universe_tab_{self.active_project}", tab)
+            self.show_universe()
+        elif view == "theme":
+            expression_fields = {
+                "opening_view", "decisions_note", "consequences_note",
+                "conflicts_note", "ending_response", "notes",
+            }
+            self.db.set_setting(
+                f"theme_tab_{self.active_project}",
+                2 if target_field in expression_fields else 0,
+            )
+            self.show_theme()
+        elif view == "relations":
+            relation = self.db.one(
+                "SELECT character_a_id FROM character_relationships WHERE id=? AND project_id=?",
+                (target_id, self.active_project),
+            ) if target_id else None
+            if relation:
+                self.db.set_setting(
+                    f"last_character_{self.active_project}",
+                    int(relation["character_a_id"]),
+                )
+            self.show_characters()
+            QTimer.singleShot(0, self._edit_character_relationships)
+        elif view == "rewrite":
+            self.show_rewrite()
         else:
             self.show_projects()
         QTimer.singleShot(
@@ -4722,6 +4834,14 @@ class StoryForgeWindow(QMainWindow):
         elif view == "promises" and hasattr(self, "story_promise_fields"):
             self.promise_tabs.setCurrentIndex(1)
             field = self.story_promise_fields.get(target_field)
+            if field:
+                field.setFocus()
+        elif view == "universe" and hasattr(self, "world_profile_fields"):
+            field = self.world_profile_fields.get(target_field)
+            if field:
+                field.setFocus()
+        elif view == "theme" and hasattr(self, "theme_profile_fields"):
+            field = self.theme_profile_fields.get(target_field)
             if field:
                 field.setFocus()
         elif view == "development" and getattr(self, "development_doc_type", "") == "synopsis":
@@ -4900,6 +5020,9 @@ class StoryForgeWindow(QMainWindow):
         guide_key = run["guide_key"]
         if guide_key in FIELD_GUIDES or guide_key == "build_synopsis":
             self._move_learning(0)
+            return
+        if guide_key == "rewrite_pass":
+            self._open_learning_tool()
             return
         if guide_key == "strengthen_idea":
             document = self.db.ensure_doc(run["project_id"], "premise", "Prémisse / Concept")

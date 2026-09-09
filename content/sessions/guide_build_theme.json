@@ -1,0 +1,72 @@
+{
+  "key": "build_theme",
+  "cycle": "Guide ciblé",
+  "title": "Explorer le thème",
+  "subtitle": "Faire émerger une question par les choix et leurs conséquences, sans imposer une morale.",
+  "description": "Six étapes facultatives pour relier une préoccupation personnelle aux positions contradictoires de l’histoire.",
+  "deliverable": "Une fiche Thème enrichie champ par champ après prévisualisation et confirmation.",
+  "requires_project": true,
+  "apply_label": "Revoir et appliquer les étapes",
+  "steps": [
+    {
+      "key": "question", "title": "Formuler une question ouverte", "concept_key": "theme_question", "concept_label": "Question thématique",
+      "question": "Quelle question humaine ton histoire pourrait-elle mettre à l’épreuve sans devoir la résoudre simplement ?",
+      "why": "Une question autorise plusieurs expériences et positions. Une morale choisie trop tôt risque de transformer les scènes en démonstration.",
+      "example": "Peut-on protéger quelqu’un sans décider à sa place ?",
+      "placeholder": "Jusqu’où… ? Peut-on… sans… ? Que devient… lorsque… ?",
+      "tips": ["Évite une question qui contient déjà sa bonne réponse.", "La formulation peut rester provisoire."],
+      "review": "Relis : deux personnages raisonnables pourraient-ils répondre différemment ?",
+      "optional": true
+    },
+    {
+      "key": "interest", "title": "Pourquoi elle te concerne", "concept_key": "theme_interest", "concept_label": "Intérêt personnel",
+      "question": "Qu’est-ce qui t’intrigue, te touche ou te divise dans cette question ?",
+      "why": "Ton intérêt sert de boussole lorsque plusieurs directions narratives sont possibles, sans obliger l’histoire à raconter ta vie.",
+      "example": "Je suis partagé entre aider rapidement et laisser l’autre prendre un risque qui lui appartient.",
+      "placeholder": "Cette question m’intéresse parce que… Je reste partagé entre…",
+      "tips": ["Une contradiction vaut mieux qu’une réponse parfaite.", "Garde ce que tu souhaites réellement explorer."],
+      "review": "Relis : cette note explique-t-elle ce que tu veux observer plutôt que prouver ?",
+      "optional": true
+    },
+    {
+      "key": "avoid_message", "title": "Éviter la réponse automatique", "concept_key": "theme_avoid_message", "concept_label": "Morale à éviter",
+      "question": "Quelle réponse trop simple réduirait la complexité que tu veux conserver ?",
+      "why": "Identifier une morale automatique aide à ne pas construire chaque conséquence pour la confirmer.",
+      "example": "Aider est toujours juste, ou au contraire toute aide est une forme de contrôle.",
+      "placeholder": "Je ne veux pas réduire l’histoire à…",
+      "tips": ["N’invente pas une nuance artificielle.", "Une histoire peut tout de même prendre position."],
+      "review": "Relis : as-tu préservé une vraie difficulté plutôt qu’un simple flou ?",
+      "optional": true
+    },
+    {
+      "key": "opening_view", "title": "La vision au départ", "concept_key": "theme_opening_view", "concept_label": "Vision initiale",
+      "question": "Au début, quelle réponse semblent donner le personnage principal ou son monde ?",
+      "why": "Une position initiale permet d’observer ce que les événements confirment, compliquent ou renversent.",
+      "example": "Mina croit qu’être responsable signifie résoudre seule les problèmes des autres.",
+      "placeholder": "Au début, la personne ou le monde semble croire que…",
+      "tips": ["Formule une croyance visible dans les décisions.", "Le monde et le protagoniste peuvent être en désaccord."],
+      "review": "Relis : cette position pourrait-elle être montrée par un choix ?",
+      "optional": true
+    },
+    {
+      "key": "decisions", "title": "Mettre la question à l’épreuve", "concept_key": "theme_decisions", "concept_label": "Décisions thématiques",
+      "question": "Quels choix donnent des réponses différentes à la question ?",
+      "why": "Le thème devient perceptible lorsque les positions ont des coûts et des conséquences, pas seulement lorsqu’elles sont expliquées.",
+      "example": "Mina cache une dette pour protéger Sarah ; plus tard, elle lui donne les comptes et accepte son refus.",
+      "placeholder": "Un premier choix… Sa conséquence… Un choix différent…",
+      "tips": ["Compare au moins deux réponses en action.", "Évite de récompenser mécaniquement la position que tu préfères."],
+      "review": "Relis : les conséquences viennent-elles du récit plutôt que d’un jugement extérieur ?",
+      "optional": true
+    },
+    {
+      "key": "ending_response", "title": "Ce que la fin suggère", "concept_key": "theme_ending_response", "concept_label": "Réponse de la fin",
+      "question": "Après le dernier choix, que suggère la fin — et que laisse-t-elle encore ouvert ?",
+      "why": "Une fin peut prendre position sans énoncer une leçon. Le résultat, le coût et l’état des relations portent cette réponse.",
+      "example": "Mina renonce à décider pour Sarah, mais reste présente lorsque celle-ci assume les conséquences.",
+      "placeholder": "La fin suggère… Elle ne résout pas complètement…",
+      "tips": ["Décris d’abord le résultat concret.", "La réponse peut rester ambivalente."],
+      "review": "Relis : cette suggestion découle-t-elle du parcours plutôt que d’une phrase ajoutée à la fin ?",
+      "optional": true
+    }
+  ]
+}

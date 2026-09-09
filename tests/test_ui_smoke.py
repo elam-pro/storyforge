@@ -444,11 +444,11 @@ def test_guides_keep_runs_isolated_and_apply_to_existing_project(tmp_path: Path)
     assert window.guide_run_count_badge.height() <= window.guide_run_count_badge.sizeHint().height() + 2
     window.show_guides()
     app.processEvents()
-    assert window.guide_catalog_tree.topLevelItemCount() == 4
+    assert window.guide_catalog_tree.topLevelItemCount() == 8
     assert sum(
         window.guide_catalog_tree.topLevelItem(index).childCount()
         for index in range(window.guide_catalog_tree.topLevelItemCount())
-    ) == 8
+    ) == 12
     assert {
         guide_key
         for _group_key, _label, guide_keys in GUIDE_CATALOG_GROUPS
@@ -460,8 +460,12 @@ def test_guides_keep_runs_isolated_and_apply_to_existing_project(tmp_path: Path)
     ] == [
         "GUIDES POUR L’HISTOIRE",
         "GUIDES POUR LES PERSONNAGES",
+        "GUIDES POUR LES RELATIONS",
         "GUIDES POUR LES SCÈNES",
         "GUIDES POUR LES CONFLITS",
+        "GUIDES POUR L’UNIVERS",
+        "GUIDES POUR LE THÈME",
+        "GUIDES POUR LA RÉÉCRITURE",
     ]
     catalog_card = window.findChild(QWidget, "GuideCatalogCard")
     assert catalog_card is not None

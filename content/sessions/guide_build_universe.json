@@ -1,0 +1,82 @@
+{
+  "key": "build_universe",
+  "cycle": "Guide ciblé",
+  "title": "Construire un univers utile au récit",
+  "subtitle": "Définir les repères du monde qui modifient réellement les choix et les conséquences.",
+  "description": "Sept étapes facultatives pour préciser un cadre sans rédiger une encyclopédie. Chaque réponse peut rester courte et provisoire.",
+  "deliverable": "Un cadre d’univers relié au projet, complété champ par champ après prévisualisation et confirmation.",
+  "requires_project": true,
+  "apply_label": "Revoir et appliquer les étapes",
+  "steps": [
+    {
+      "key": "period", "title": "Le temps qui compte", "concept_key": "universe_period", "concept_label": "Époque et durée",
+      "question": "Quand se déroule l’histoire, et quel aspect de cette période agit vraiment sur elle ?",
+      "why": "Une date seule ne construit pas un monde. Le repère devient utile lorsqu’il limite une action, crée une habitude ou rend une situation possible.",
+      "example": "Trois ans après la fermeture des frontières, les déplacements exigent encore un garant local.",
+      "placeholder": "L’histoire se déroule… Cela compte parce que…",
+      "tips": ["Garde seulement les repères qui auront un effet.", "Une durée approximative peut suffire."],
+      "review": "Relis : retirer ce repère changerait-il une décision ou une possibilité ?",
+      "optional": true
+    },
+    {
+      "key": "places", "title": "Les lieux structurants", "concept_key": "universe_places", "concept_label": "Lieux importants",
+      "question": "Quels lieux reviennent, et qu’autorisent-ils ou empêchent-ils ?",
+      "why": "Un lieu devient narratif par son usage, ses accès, ses distances et les comportements qu’il impose.",
+      "example": "Le seul pont relie le quartier ouvrier au tribunal et ferme chaque nuit à vingt heures.",
+      "placeholder": "Le lieu… permet… mais empêche…",
+      "tips": ["Deux ou trois lieux peuvent suffire.", "Décris une contrainte concrète plutôt qu’une ambiance seule."],
+      "review": "Relis : chaque lieu a-t-il un effet distinct sur les actions ?",
+      "optional": true
+    },
+    {
+      "key": "society", "title": "Pouvoir et organisation", "concept_key": "universe_society", "concept_label": "Société et pouvoir",
+      "question": "Qui peut décider, qui doit négocier, et qui supporte les conséquences ?",
+      "why": "L’organisation sociale devient lisible lorsqu’elle influence les marges de manœuvre des personnages.",
+      "example": "Les ateliers élisent leurs représentants, mais seuls les propriétaires peuvent contester une saisie.",
+      "placeholder": "Dans ce monde, le pouvoir de… appartient à… Cela oblige…",
+      "tips": ["Observe aussi les pouvoirs informels.", "Évite de décrire toute l’administration si elle n’apparaît pas."],
+      "review": "Relis : comprend-on comment ce pouvoir se manifeste dans une situation ?",
+      "optional": true
+    },
+    {
+      "key": "culture", "title": "La vie quotidienne", "concept_key": "universe_culture", "concept_label": "Culture vécue",
+      "question": "Quelles habitudes, croyances ou ressources influencent les gestes ordinaires ?",
+      "why": "La culture se perçoit dans ce que les personnes font, célèbrent, évitent ou tiennent pour évident.",
+      "example": "Refuser un repas offert signifie publiquement que l’on rompt une alliance.",
+      "placeholder": "Il est habituel de… Refuser ou détourner cette habitude signifie…",
+      "tips": ["Pars d’un geste visible.", "Une culture peut contenir des désaccords et des exceptions."],
+      "review": "Relis : cette note pourrait-elle apparaître sans explication dans une scène ?",
+      "optional": true
+    },
+    {
+      "key": "worldview", "title": "Ce que le monde croit possible", "concept_key": "universe_worldview", "concept_label": "Vision du monde",
+      "question": "Qu’est-ce que les habitants considèrent comme normal, impossible, admirable ou interdit ?",
+      "why": "Une vision dominante fournit un point de comparaison, pas une opinion partagée par tout le monde.",
+      "example": "Demander de l’aide à sa famille est honorable ; la demander à une institution est perçu comme un aveu d’échec.",
+      "placeholder": "La vision dominante affirme… Certains personnages la contestent parce que…",
+      "tips": ["Laisse de la place aux contre-exemples.", "Distingue croyance collective et vérité du monde."],
+      "review": "Relis : quels personnages adhèrent à cette vision, et lesquels la contredisent ?",
+      "optional": true
+    },
+    {
+      "key": "signature", "title": "La signature du monde", "concept_key": "universe_signature", "concept_label": "Singularité de l’univers",
+      "question": "Quelle combinaison rend ce monde reconnaissable et spécifique à cette histoire ?",
+      "why": "La singularité ne demande pas une invention spectaculaire. Elle peut venir d’une règle, d’un usage ou d’une tension familière assemblés d’une façon précise.",
+      "example": "Chaque promesse publique devient un contrat transmissible que les héritiers doivent honorer.",
+      "placeholder": "Ce monde se distingue par… Cela transforme l’histoire en…",
+      "tips": ["Relie l’originalité au conflit ou aux personnages.", "Évite une liste de décorations sans effet."],
+      "review": "Relis : cette signature change-t-elle l’histoire plutôt que son apparence seule ?",
+      "optional": true
+    },
+    {
+      "key": "rule_test", "title": "Tester une règle", "concept_key": "universe_rule_test", "concept_label": "Règle en action",
+      "question": "Quelle règle du monde peux-tu tester par une limite, un coût, une exception et une conséquence ?",
+      "why": "Une règle devient crédible quand elle résiste aux solutions faciles et produit des conséquences observables.",
+      "example": "On peut effacer un souvenir, mais seulement en le transférant à une autre personne qui pourra le raconter.",
+      "placeholder": "La règle… Sa limite… Son coût… Une exception… Sa conséquence…",
+      "tips": ["Une règle sociale fonctionne autant qu’une règle magique.", "Ouvre ensuite l’onglet Règles pour créer sa fiche."],
+      "review": "Relis : sais-tu ce qui arrive quand quelqu’un respecte, détourne ou brise cette règle ?",
+      "optional": true
+    }
+  ]
+}
