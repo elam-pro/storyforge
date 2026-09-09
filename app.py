@@ -142,6 +142,16 @@ GUIDE_ORDER = (
     "seed", "strengthen_idea", "find_ending", "prepare_scene",
     "build_character", "build_conflict", "build_synopsis", "build_outline",
 )
+GUIDE_CATALOG_GROUPS = (
+    (
+        "story",
+        "GUIDES POUR L’HISTOIRE",
+        ("seed", "strengthen_idea", "find_ending", "build_synopsis", "build_outline"),
+    ),
+    ("characters", "GUIDES POUR LES PERSONNAGES", ("build_character",)),
+    ("scenes", "GUIDES POUR LES SCÈNES", ("prepare_scene",)),
+    ("conflicts", "GUIDES POUR LES CONFLITS", ("build_conflict",)),
+)
 GUIDE_LEVELS = {
     "discovery": "Découverte",
     "guided": "Guidé",
@@ -2630,6 +2640,23 @@ class TimelineView(QGraphicsView):
         prefix = "+" if rounded > 0 else ""
         return f"{prefix}{number} {singular}{plural}"
 
+    @staticmethod
+    def adaptive_relative_label(time_hours: float, explicit: str = "") -> str:
+        """Express an internal hour offset with a readable calendar-scale unit."""
+        if explicit.strip():
+            return explicit.strip()
+        magnitude = abs(float(time_hours))
+        if magnitude >= TIMELINE_UNITS["year"][1]:
+            unit_key = "year"
+        elif magnitude >= TIMELINE_UNITS["month"][1]:
+            unit_key = "month"
+        elif magnitude >= TIMELINE_UNITS["day"][1]:
+            unit_key = "day"
+        else:
+            unit_key = "hour"
+        factor = TIMELINE_UNITS[unit_key][1]
+        return TimelineView.relative_label(float(time_hours) / factor, unit_key)
+
     def set_events(
         self,
         events: list[dict],
@@ -3816,6 +3843,8 @@ class StoryForgeWindow(QMainWindow):
         active_actions.addWidget(resume_button)
         active_box.addLayout(active_actions)
         catalog_card = make_card()
+        catalog_card.setObjectName("GuideCatalogCard")
+        catalog_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         catalog_box = QVBoxLayout(catalog_card)
         catalog_box.setContentsMargins(20, 18, 20, 18)
         catalog_box.setSpacing(10)
@@ -3824,19 +3853,39 @@ class StoryForgeWindow(QMainWindow):
         self.guide_catalog_tree = QTreeWidget()
         self.guide_catalog_tree.setObjectName("GuideCatalog")
         self.guide_catalog_tree.setHeaderLabels(["Guide", "À utiliser quand…", "Livrable"])
-        self.guide_catalog_tree.setRootIsDecorated(False)
+        self.guide_catalog_tree.setRootIsDecorated(True)
+        self.guide_catalog_tree.setWordWrap(True)
         self.guide_catalog_tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.guide_catalog_tree.setMinimumHeight(220)
+        self.guide_catalog_tree.setMinimumHeight(720)
+        self.guide_catalog_tree.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.guide_catalog_tree.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         catalog_header = self.guide_catalog_tree.header()
-        catalog_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        catalog_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
         catalog_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         catalog_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        for guide_key in GUIDE_ORDER:
-            session = GUIDE_SESSIONS[guide_key]
-            item = QTreeWidgetItem([session.title, session.description, session.deliverable])
-            item.setData(0, Qt.ItemDataRole.UserRole, guide_key)
-            self.guide_catalog_tree.addTopLevelItem(item)
-        self.guide_catalog_tree.setCurrentItem(self.guide_catalog_tree.topLevelItem(0))
+        self.guide_catalog_tree.setColumnWidth(0, 320)
+        first_guide_item = None
+        for group_key, group_label, guide_keys in GUIDE_CATALOG_GROUPS:
+            group_item = QTreeWidgetItem([f"{group_label} · {len(guide_keys)}", "", ""])
+            group_item.setData(0, Qt.ItemDataRole.UserRole + 1, group_key)
+            group_item.setFlags(group_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+            group_font = QFont(group_item.font(0))
+            group_font.setWeight(QFont.Weight.DemiBold)
+            group_item.setFont(0, group_font)
+            group_item.setSizeHint(0, QSize(0, 38))
+            self.guide_catalog_tree.addTopLevelItem(group_item)
+            group_item.setFirstColumnSpanned(True)
+            for guide_key in guide_keys:
+                session = GUIDE_SESSIONS[guide_key]
+                item = QTreeWidgetItem([session.title, session.description, session.deliverable])
+                item.setData(0, Qt.ItemDataRole.UserRole, guide_key)
+                for column in range(3):
+                    item.setSizeHint(column, QSize(0, 62))
+                group_item.addChild(item)
+                first_guide_item = first_guide_item or item
+            group_item.setExpanded(True)
+        if first_guide_item:
+            self.guide_catalog_tree.setCurrentItem(first_guide_item)
         self.guide_catalog_tree.itemDoubleClicked.connect(lambda *_args: self._start_selected_guide())
         catalog_box.addWidget(self.guide_catalog_tree)
         self.guide_selection_label = make_label("", "Body", True)
@@ -3855,7 +3904,7 @@ class StoryForgeWindow(QMainWindow):
         catalog_actions.addWidget(make_button("Commencer →", "primary", self._start_selected_guide))
         catalog_box.addLayout(catalog_actions)
         if not runs_only:
-            page.addWidget(catalog_card)
+            page.addWidget(catalog_card, 1)
             page.addSpacing(12)
             mastery_card = make_card()
             mastery_box = QHBoxLayout(mastery_card)
@@ -3906,7 +3955,8 @@ class StoryForgeWindow(QMainWindow):
             empty_box.addLayout(empty_copy, 1)
             empty_box.addWidget(make_button("Commencer un guide →", "primary", self.show_guides))
             page.addWidget(empty)
-        page.addStretch()
+        if runs_only:
+            page.addStretch()
 
     def show_guide_runs(self) -> None:
         self._show_guides_page(runs_only=True)
@@ -3935,7 +3985,9 @@ class StoryForgeWindow(QMainWindow):
         selected = tree.selectedItems() if isinstance(tree, QTreeWidget) else []
         if not selected:
             return
-        self._start_guide(str(selected[0].data(0, Qt.ItemDataRole.UserRole)))
+        guide_key = str(selected[0].data(0, Qt.ItemDataRole.UserRole) or "")
+        if guide_key in GUIDE_SESSIONS:
+            self._start_guide(guide_key)
 
     def _start_guide(
         self,
@@ -16299,7 +16351,9 @@ class StoryForgeWindow(QMainWindow):
                 continue
             item = QTreeWidgetItem(
                 [
-                    row["display_label"] or f"{float(row['time_hours']):g} h",
+                    TimelineView.adaptive_relative_label(
+                        float(row["time_hours"]), row["display_label"] or ""
+                    ),
                     row["title"],
                     row["track_name"] or "Timeline",
                     row["category"],
@@ -18494,7 +18548,14 @@ class StoryForgeWindow(QMainWindow):
         if isinstance(completer, QCompleter):
             completer.popup().hide()
         cursor = editor.textCursor()
-        cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
+        # BlockUnderCursor also selects a paragraph separator for a middle
+        # block. Replacing it merged the completed heading with the previous
+        # line and made the next Return appear to move backwards.
+        cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
+        cursor.movePosition(
+            QTextCursor.MoveOperation.EndOfBlock,
+            QTextCursor.MoveMode.KeepAnchor,
+        )
         self._applying_script_scene_completion = True
         try:
             cursor.insertText(str(value).strip().upper())

@@ -7,8 +7,42 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
-from app import StoryForgeWindow
+from app import StoryForgeWindow, TimelineView
 from db import NOW
+
+
+def test_overview_timeline_uses_readable_relative_units() -> None:
+    assert TimelineView.adaptive_relative_label(-6) == "-6 heures"
+    assert TimelineView.adaptive_relative_label(-10 * 24) == "-10 jours"
+    assert TimelineView.adaptive_relative_label(2 * 30 * 24) == "+2 mois"
+    assert TimelineView.adaptive_relative_label(2 * 365 * 24) == "+2 ans"
+    assert TimelineView.adaptive_relative_label(-240, "Dix jours avant") == "Dix jours avant"
+
+
+def test_overview_timeline_displays_the_adaptive_label(tmp_path: Path) -> None:
+    app = QApplication.instance() or QApplication([])
+    window = StoryForgeWindow(tmp_path / "overview-time.db")
+    project_id = window.db.run(
+        "INSERT INTO projects(created_at,title,stage,updated_at) VALUES(?,?,?,?)",
+        (NOW(), "Repères", "Idée", NOW()),
+    ).lastrowid
+    track_id = window.db.run(
+        """INSERT INTO timeline_tracks(project_id,name,color,position,created_at,updated_at)
+        VALUES(?,?,?,?,?,?)""",
+        (project_id, "Backstory", "#D84A32", 0, NOW(), NOW()),
+    ).lastrowid
+    window.db.run(
+        """INSERT INTO timeline_events(
+        project_id,track_id,title,time_hours,display_label,category,created_at,updated_at
+        ) VALUES(?,?,?,?,?,?,?,?)""",
+        (project_id, track_id, "Dix jours plus tôt", -240, "", "Backstory", NOW(), NOW()),
+    )
+    window.active_project = int(project_id)
+    window.db.set_setting("active_project", project_id)
+    window.show_story_overview()
+    app.processEvents()
+    assert window.overview_timeline.topLevelItem(0).text(0) == "-10 jours"
+    window.close()
 
 
 def test_leaving_arcs_ignores_a_deleted_character_selection(tmp_path: Path) -> None:

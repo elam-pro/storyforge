@@ -1,6 +1,7 @@
 import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QTextCursor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from app import StoryForgeWindow
@@ -26,6 +27,22 @@ def test_scene_completion_enter_and_repeated_new_scene(tmp_path):
         assert window.script_text.toPlainText() == expected
         assert not hasattr(window.script_text, '_type_rail')
         assert window.script_text.extraSelections()
+    window.script_text.setPlainText("AVANT\nIN\nAPRÈS")
+    cursor = window.script_text.textCursor()
+    cursor.setPosition(len("AVANT\nIN"))
+    window.script_text.setTextCursor(cursor)
+    window._set_script_element_mode("scene")
+    window._apply_script_block_format("scene")
+    window._update_script_scene_completion()
+    QTest.keyClick(window.script_text, Qt.Key.Key_Tab)
+    qt.processEvents()
+    assert window.script_text.toPlainText() == "AVANT\nINT.\nAPRÈS"
+    assert window.script_text.textCursor().blockNumber() == 1
+    QTest.keyClick(window.script_text, Qt.Key.Key_Return)
+    qt.processEvents()
+    assert window.script_text.toPlainText() == "AVANT\nINT.\n\nAPRÈS"
+    assert window.script_text.textCursor().blockNumber() == 2
+    assert window.script_element_mode == "action"
     window.script_text.clear()
     window._set_script_element_mode("action")
     window._apply_script_block_format("action")
