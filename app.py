@@ -157,6 +157,11 @@ GUIDE_LEVELS = {
     "guided": "Guidé",
     "autonomous": "Autonome",
 }
+GUIDE_LEVEL_DETAILS = {
+    "discovery": "Définition, exemple et repères pour découvrir la notion.",
+    "guided": "Question et rappel court pour avancer avec un appui léger.",
+    "autonomous": "Question et livrable uniquement, sans piste de réponse.",
+}
 
 # A guide explains one problem at a time; these links take the learner to the
 # real project workspace where that precise notion can be tested.  They do not
@@ -4022,6 +4027,18 @@ class StoryForgeWindow(QMainWindow):
             default_level = assistance_level or self.db.setting("guide_assistance_level", "discovery")
             level_box.setCurrentIndex(max(0, level_box.findData(default_level)))
             box.addWidget(level_box)
+            level_detail = make_label(
+                GUIDE_LEVEL_DETAILS.get(str(level_box.currentData()), ""),
+                "Muted",
+                True,
+            )
+            level_detail.setObjectName("GuideStartLevelDescription")
+            level_box.currentIndexChanged.connect(
+                lambda: level_detail.setText(
+                    GUIDE_LEVEL_DETAILS.get(str(level_box.currentData()), "")
+                )
+            )
+            box.addWidget(level_detail)
             box.addStretch()
             actions = QHBoxLayout()
             actions.addStretch()
@@ -4169,6 +4186,13 @@ class StoryForgeWindow(QMainWindow):
         concept.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         brief_head.addWidget(concept)
         brief_box.addLayout(brief_head)
+        level_description = make_label(
+            GUIDE_LEVEL_DETAILS.get(run["assistance_level"], ""),
+            "Muted",
+            True,
+        )
+        level_description.setObjectName("GuideLevelDescription")
+        brief_box.addWidget(level_description)
         question_label = make_label(
             step.question,
             "CardTitle" if compact_height else "SectionTitle",
@@ -4233,7 +4257,7 @@ class StoryForgeWindow(QMainWindow):
         self.learning_draft.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.learning_draft.setPlainText(answer)
         right.addWidget(self.learning_draft, 1)
-        if step.review:
+        if step.review and level != "autonomous":
             right.addWidget(make_label(step.review, "Muted", True))
         if step.optional:
             right.addWidget(make_label("Étape facultative · tu peux la passer et y revenir ensuite.", "Muted", True))

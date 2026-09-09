@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QInputDialog,
+    QLabel,
     QPushButton,
     QSizePolicy,
     QTextEdit,
@@ -466,6 +467,39 @@ def test_guides_keep_runs_isolated_and_apply_to_existing_project(tmp_path: Path)
     assert catalog_card is not None
     assert window.guide_catalog_tree.minimumHeight() == 720
     assert catalog_card.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Expanding
+    window.autosave_timer.stop()
+    window.db.conn.close()
+    window.deleteLater()
+    app.processEvents()
+
+
+def test_changing_guide_level_preserves_the_visible_draft(tmp_path: Path) -> None:
+    app = QApplication.instance() or QApplication([])
+    window = StoryForgeWindow(tmp_path / "guide-levels.db")
+    run_id = window.db.create_guided_run(
+        "seed", "Niveaux", assistance_level="discovery", legacy_session_key="session01"
+    )
+
+    window.show_learning(run_id=run_id)
+    app.processEvents()
+    window.learning_draft.setPlainText("Une réponse encore provisoire.")
+    guided_index = window.guide_level.findData("guided")
+    window.guide_level.setCurrentIndex(guided_index)
+    app.processEvents()
+
+    assert window.db.guided_run(run_id)["assistance_level"] == "guided"
+    assert window.db.one(
+        "SELECT answer FROM guided_answers WHERE run_id=? AND step_key='idea'",
+        (run_id,),
+    )[0] == "Une réponse encore provisoire."
+    assert window.learning_draft.toPlainText() == "Une réponse encore provisoire."
+    assert "rappel court" in window.findChild(QLabel, "GuideLevelDescription").text()
+
+    autonomous_index = window.guide_level.findData("autonomous")
+    window.guide_level.setCurrentIndex(autonomous_index)
+    app.processEvents()
+    assert "livrable uniquement" in window.findChild(QLabel, "GuideLevelDescription").text()
+
     window.autosave_timer.stop()
     window.db.conn.close()
     window.deleteLater()

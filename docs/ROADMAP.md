@@ -19,7 +19,7 @@ Chaque chantier reste un changement borné avec tests et commit local. Les phase
 
 ## Fonctionnalités restantes : numéros d’origine conservés
 
-- Ensemble 2 : niveaux de guidage à approfondir. Les guides Personnage, Conflit, Synopsis et Plan détaillé sont livrés, voir FEATURES.md.
+- Ensemble 2 : niveaux de guidage réalisés. Découverte, Guidé et Autonome exposent des quantités d’aide distinctes et les changements conservent le brouillon ; voir FEATURES.md.
 - Ensemble 9 : cartes géographiques, fonds, repères liés aux lieux et terrains. Reporté, pas ajouté implicitement.
 - Ensemble 18 : vue géographique après l’ensemble 9 ; cohérence des vues à renforcer.
 - Ensemble 19 : IA reportée à la demande de l’utilisateur. L’ancien professeur est désactivé ; toute réactivation exige une décision explicite, contrôle des données envoyées et accord de l’auteur sur les propositions.
