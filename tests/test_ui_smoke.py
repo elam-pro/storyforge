@@ -2323,6 +2323,22 @@ def test_geography_workspace_places_and_moves_existing_locations(tmp_path: Path)
     assert window.geography_view.marker_items[int(marker["id"])].pos().x() == 0
     assert window.geography_view.marker_items[int(marker["id"])].pos().y() == 1000
 
+    terrain_id = window.db.run(
+        """INSERT INTO geography_markers(
+        map_id,project_id,marker_type,label,color,x,y,created_at,updated_at
+        ) VALUES(?,?,?,?,?,?,?,?,?)""",
+        (map_id, project_id, "Frontière", "Ligne de brume", "#667788", 700, 450, NOW(), NOW()),
+    ).lastrowid
+    window._load_geography_map(map_id)
+    assert "Frontière : 1" in window.geography_legend.text()
+    filter_index = window.geography_layer_filter.findData("Frontière")
+    window.geography_layer_filter.setCurrentIndex(filter_index)
+    assert not window.geography_view.marker_items[int(marker["id"])].isVisible()
+    assert window.geography_view.marker_items[int(terrain_id)].isVisible()
+    assert window.db.setting(f"geography_layer_{map_id}") == "Frontière"
+    window._load_geography_map(map_id)
+    assert window.geography_layer_filter.currentData() == "Frontière"
+
     window.autosave_timer.stop()
     window.db.conn.close()
     window.deleteLater()

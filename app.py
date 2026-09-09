@@ -11190,8 +11190,18 @@ class StoryForgeWindow(QMainWindow):
             "+ Repère de terrain", "secondary", self._add_geography_terrain
         )
         add_bar.addWidget(self.geography_add_terrain_button)
+        add_bar.addWidget(make_label("CALQUE", "Caption"))
+        self.geography_layer_filter = QComboBox()
+        self.geography_layer_filter.addItem("Tous les repères", "")
+        for marker_type in GEOGRAPHY_MARKER_TYPES:
+            self.geography_layer_filter.addItem(marker_type, marker_type)
+        self.geography_layer_filter.setMinimumWidth(155)
+        add_bar.addWidget(self.geography_layer_filter)
         add_bar.addWidget(make_button("Recentrer", "tertiary", self._center_geography_map))
         workspace_box.addLayout(add_bar)
+
+        self.geography_legend = make_label("Aucun repère sur cette carte.", "Muted", True)
+        workspace_box.addWidget(self.geography_legend)
 
         self.geography_view = GeographyView(
             self.palette,
@@ -11224,6 +11234,7 @@ class StoryForgeWindow(QMainWindow):
         self.geography_map_id: int | None = None
         self.geography_marker_id: int | None = None
         self.geography_map_list.currentItemChanged.connect(self._geography_map_selected)
+        self.geography_layer_filter.currentIndexChanged.connect(self._filter_geography_markers)
         self._refresh_geography_maps(select_first=True)
         self._sync_geography_controls()
         return tab
@@ -11239,6 +11250,7 @@ class StoryForgeWindow(QMainWindow):
             getattr(self, "geography_location_combo", None),
             getattr(self, "geography_add_location_button", None),
             getattr(self, "geography_add_terrain_button", None),
+            getattr(self, "geography_layer_filter", None),
         ):
             if widget:
                 widget.setEnabled(has_map)
@@ -11303,6 +11315,10 @@ class StoryForgeWindow(QMainWindow):
             self.geography_view.set_map(
                 {"width": 1600, "height": 1000}, [], QPixmap()
             )
+            self.geography_layer_filter.blockSignals(True)
+            self.geography_layer_filter.setCurrentIndex(0)
+            self.geography_layer_filter.blockSignals(False)
+            self._update_geography_legend([])
         self._sync_geography_controls()
 
     def _new_geography_map(self) -> None:
@@ -11360,7 +11376,40 @@ class StoryForgeWindow(QMainWindow):
         )]
         background = self._geography_background_pixmap(int(row["background_image_id"] or 0))
         self.geography_view.set_map(dict(row), markers, background)
+        self._update_geography_legend(markers)
+        saved_filter = self.db.setting(f"geography_layer_{map_id}", "")
+        filter_index = self.geography_layer_filter.findData(saved_filter)
+        self.geography_layer_filter.blockSignals(True)
+        self.geography_layer_filter.setCurrentIndex(max(0, filter_index))
+        self.geography_layer_filter.blockSignals(False)
+        self.geography_view.set_marker_filter(saved_filter if filter_index >= 0 else "")
         self._sync_geography_controls()
+
+    def _update_geography_legend(self, markers: list[dict]) -> None:
+        counts: dict[str, int] = {}
+        for marker in markers:
+            marker_type = str(marker.get("marker_type") or "Repère")
+            counts[marker_type] = counts.get(marker_type, 0) + 1
+        if not counts:
+            self.geography_legend.setText("Aucun repère sur cette carte.")
+            return
+        self.geography_legend.setText(
+            "Légende · " + "   ·   ".join(
+                f"{marker_type} : {count}" for marker_type, count in sorted(counts.items())
+            )
+        )
+
+    def _filter_geography_markers(self, _index: int = -1) -> None:
+        if not self.geography_map_id:
+            return
+        marker_type = str(self.geography_layer_filter.currentData() or "")
+        self.db.set_setting(f"geography_layer_{self.geography_map_id}", marker_type)
+        self.geography_view.set_marker_filter(marker_type)
+        if self.geography_marker_id:
+            item = self.geography_view.marker_items.get(self.geography_marker_id)
+            if not item or not item.isVisible():
+                self.geography_marker_id = None
+        self._sync_geography_marker_controls()
 
     def _save_geography_map(self) -> None:
         if not self.geography_map_id:
@@ -11515,6 +11564,19 @@ class StoryForgeWindow(QMainWindow):
         notes = make_editor(130, "Pourquoi ce repère compte-t-il pour l’histoire ou le monde ?")
         notes.setPlainText(row["notes"] or "")
         box.addWidget(notes)
+        box.addWidget(make_label("COULEUR", "Caption"))
+        color_row = QHBoxLayout()
+        color_value = QLineEdit(row["color"] or self.palette.accent)
+        color_value.setReadOnly(True)
+        color_row.addWidget(color_value, 1)
+
+        def choose_color() -> None:
+            chosen = QColorDialog.getColor(QColor(color_value.text()), dialog, "Couleur du repère")
+            if chosen.isValid():
+                color_value.setText(chosen.name())
+
+        color_row.addWidget(make_button("Choisir…", "secondary", choose_color))
+        box.addLayout(color_row)
         actions = QHBoxLayout()
         actions.addStretch()
         actions.addWidget(make_button("Annuler", "secondary", dialog.reject))
@@ -11523,12 +11585,12 @@ class StoryForgeWindow(QMainWindow):
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return False
         self.db.run(
-            """UPDATE geography_markers SET label=?,marker_type=?,notes=?,updated_at=?
+            """UPDATE geography_markers SET label=?,marker_type=?,notes=?,color=?,updated_at=?
             WHERE id=? AND project_id=?""",
             (
                 label.text().strip() or row["location_name"] or "Repère",
                 "Lieu" if row["location_id"] else marker_type.currentText(),
-                notes.toPlainText().strip(), NOW(), marker_id, self.active_project,
+                notes.toPlainText().strip(), color_value.text(), NOW(), marker_id, self.active_project,
             ),
         )
         self._load_geography_map(self.geography_map_id)
@@ -18301,6 +18363,7 @@ class StoryForgeWindow(QMainWindow):
                         "x": marker.get("x", 0),
                         "y": marker.get("y", 0),
                         "notes": marker.get("notes", ""),
+                        "color": marker.get("color", ""),
                     }
                 )
         (directory / "cartes_geographiques.md").write_text(
@@ -18321,13 +18384,13 @@ class StoryForgeWindow(QMainWindow):
         ) as handle:
             writer = csv.writer(handle)
             writer.writerow(
-                ["Carte", "Échelle", "Repère", "Type", "Lieu lié", "Position X", "Position Y", "Notes"]
+                ["Carte", "Échelle", "Repère", "Type", "Lieu lié", "Couleur", "Position X", "Position Y", "Notes"]
             )
             for row in csv_rows:
                 writer.writerow(
                     [
                         row["map"], row["scale"], row["label"], row["type"],
-                        row["location"], row["x"], row["y"], row["notes"],
+                        row["location"], row["color"], row["x"], row["y"], row["notes"],
                     ]
                 )
 

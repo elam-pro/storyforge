@@ -69,6 +69,7 @@ class GeographyView(QGraphicsView):
         self.on_move = on_move
         self.on_edit = on_edit
         self.marker_items: dict[int, GeographyMarkerItem] = {}
+        self.marker_types: dict[int, str] = {}
         self.has_background = False
         self.setObjectName("GeographyMapCanvas")
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -86,6 +87,7 @@ class GeographyView(QGraphicsView):
     def set_map(self, map_row: dict, markers: list[dict], background: QPixmap) -> None:
         self.map_scene.clear()
         self.marker_items = {}
+        self.marker_types = {}
         width = max(800.0, float(map_row.get("width", 1600)))
         height = max(560.0, float(map_row.get("height", 1000)))
         self.map_scene.setSceneRect(0, 0, width, height)
@@ -106,6 +108,13 @@ class GeographyView(QGraphicsView):
             )
             self.map_scene.addItem(item)
             self.marker_items[item.marker_id] = item
+            self.marker_types[item.marker_id] = str(marker.get("marker_type") or "")
+
+    def set_marker_filter(self, marker_type: str = "") -> None:
+        for marker_id, item in self.marker_items.items():
+            item.setVisible(not marker_type or self.marker_types.get(marker_id) == marker_type)
+            if not item.isVisible():
+                item.setSelected(False)
 
     def drawBackground(self, painter, rect) -> None:
         super().drawBackground(painter, rect)
@@ -126,9 +135,10 @@ class GeographyView(QGraphicsView):
 
     def center_content(self) -> None:
         self.resetTransform()
-        if self.marker_items:
+        visible_items = [item for item in self.marker_items.values() if item.isVisible()]
+        if visible_items:
             bounds = QRectF()
-            for item in self.marker_items.values():
+            for item in visible_items:
                 bounds = bounds.united(item.sceneBoundingRect()) if not bounds.isNull() else item.sceneBoundingRect()
             self.centerOn(bounds.center())
         else:
