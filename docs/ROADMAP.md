@@ -25,7 +25,7 @@ Chaque chantier reste un changement borné avec tests et commit local. Les phase
 - Ensemble 20 : apprentissage connecté étendu. Douze guides couvrent désormais aussi l’univers, les relations, le thème et la réécriture. Les transitions guide-outil conservent le contexte de retour, les applications ciblent un seul champ confirmé et un historique contextualisé garde chaque application et relecture ; voir FEATURES.md.
 - Anglais intégral : reporté à la demande de l’utilisateur ; contenus pédagogiques, formulaires et libellés dynamiques à compléter plus tard, sans traduire les textes utilisateur.
 - Templates : réalisé. Les treize modèles ont des schémas natifs distincts (causalité, film, actes, mouvements, cercle, séquences, voyage, contraste, mystère, relation, valeurs, facettes et beats) ; l’image personnalisée par modèle reste prioritaire et réversible.
-- Qualité : fixtures de 200 personnages/lieux, scénario de 2 000 paragraphes, images volumineuses, cache de bibliothèque, fenêtre minimale et sauvegardes de navigation sont couvertes. Une validation Fedora interactive reste nécessaire ; les deux langues sont reportées avec l’anglais intégral.
+- Qualité : fixtures de 200 personnages/lieux, 600 événements, 200 nœuds relationnels, 600 repères géographiques, scénario de 2 000 paragraphes, images volumineuses, caches bornés, fenêtre minimale et sauvegardes de navigation sont couvertes. Une validation Fedora interactive reste nécessaire ; les deux langues sont reportées avec l’anglais intégral.
 
 ## Validation prioritaire de la phase 2
 

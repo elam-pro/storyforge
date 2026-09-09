@@ -6,6 +6,7 @@
 - cartes géographiques multiples dans **Univers**, liées aux lieux et images existants, avec légende, couleurs, calques par type, panoramique, zoom, repères déplaçables, export/réimport et rendu final PNG/PDF/CSV ;
 - SmartType étendu aux noms des personnages du projet et aux transitions usuelles, en plus des en-têtes de scène ;
 - caches d’images bornés, décodage réduit, benchmarks et parcours de captures sur bases temporaires ;
+- mesures reproductibles ajoutées pour 600 événements, 200 nœuds relationnels et 600 repères géographiques, sans refonte non justifiée par les résultats ;
 - MCP de contexte local en lecture seule configuré et validé avec ses sept outils et cinq ressources ;
 - 153 tests automatisés réussis ; anglais intégral et IA volontairement reportés.
 

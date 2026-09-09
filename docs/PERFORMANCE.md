@@ -1,6 +1,6 @@
 # Mesures reproductibles
 
-Mesures du 8 septembre 2026, Qt hors écran, fixtures synthétiques uniquement.
+Mesures actualisées le 9 septembre 2026, Qt hors écran, fixtures synthétiques uniquement.
 Ce sont des indications locales, pas des seuils garantis sur chaque machine.
 
 ```bash
@@ -14,9 +14,13 @@ JPEG 5 000 × 3 500, 15 répétitions : décodage complet puis réduction, médi
 formats sans décodage réduit peuvent coûter davantage.
 
 Reconstruction de vues avec 200 personnages et 200 lieux, huit répétitions :
-Lieux 35,99 ms (max 36,82), Personnages 50,08 ms (max 52,23), Vue d’ensemble
-17,32 ms (max 22,49). Cette fixture de navigation n’ajoute pas d’images ; le
-décodage est mesuré séparément. Pas de promesse de fluidité universelle.
+Lieux 55,10 ms (max 57,31), Personnages 50,87 ms (max 51,79), Vue d’ensemble
+23,17 ms (max 28,03). Les canevas lourds utilisent les mêmes 200 personnages,
+600 événements répartis sur trois timelines et 600 repères géographiques :
+Chronologie 19,76 ms (max 27,37), carte de 200 nœuds et 199 relations 50,08 ms
+(max 54,42), carte géographique 8,05 ms (max 8,32). Ces mesures couvrent la
+construction locale des vues et n’ajoutent pas de portraits ou fonds lourds ;
+le décodage est mesuré séparément. Pas de promesse de fluidité universelle.
 
 `image_previews.py` borne chaque cache de grands aperçus à 48 Mio d’octets,
 les miniatures des lieux à 2 Mio et celles de la bibliothèque à 8 Mio ; ce
