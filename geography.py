@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPixmap
+from PySide6.QtGui import QBrush, QColor, QFont, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem,
     QGraphicsItem,
@@ -145,3 +146,76 @@ class GeographyView(QGraphicsView):
             event.accept()
             return
         super().wheelEvent(event)
+
+
+def render_geography_map(
+    path: Path,
+    map_row: dict,
+    markers: list[dict],
+    background: QPixmap,
+    palette,
+) -> None:
+    """Render one portable map image without depending on the visible workspace."""
+
+    source_width = min(4000.0, max(800.0, float(map_row.get("width", 1600))))
+    source_height = min(3000.0, max(560.0, float(map_row.get("height", 1000))))
+    scale = min(1.0, 2200.0 / source_width, 1500.0 / source_height)
+    width = max(1, round(source_width * scale))
+    height = max(1, round(source_height * scale))
+    image = QImage(width, height, QImage.Format.Format_ARGB32)
+    image.fill(QColor(palette.surface_raised))
+    painter = QPainter(image)
+    try:
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        if not background.isNull():
+            scaled = background.scaled(
+                QSize(width, height),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            painter.drawPixmap(
+                round((width - scaled.width()) / 2),
+                round((height - scaled.height()) / 2),
+                scaled,
+            )
+        else:
+            step = max(12.0, 50.0 * scale)
+            painter.setPen(QPen(QColor(palette.border), 1))
+            x = 0.0
+            while x <= width:
+                painter.drawLine(QPointF(x, 0), QPointF(x, height))
+                x += step
+            y = 0.0
+            while y <= height:
+                painter.drawLine(QPointF(0, y), QPointF(width, y))
+                y += step
+
+        painter.setFont(QFont("DejaVu Sans", 10))
+        for marker in markers:
+            x = min(width, max(0.0, float(marker.get("x", 0)) * scale))
+            y = min(height, max(0.0, float(marker.get("y", 0)) * scale))
+            color = QColor(marker.get("color") or palette.accent)
+            if not color.isValid():
+                color = QColor(palette.accent)
+            radius = max(7.0, 10.0 * scale)
+            painter.setPen(QPen(color.lighter(135), 2))
+            painter.setBrush(QBrush(color))
+            painter.drawEllipse(QPointF(x, y), radius, radius)
+            painter.setPen(QPen(QColor(palette.text), 1))
+            label = str(
+                marker.get("display_label")
+                or marker.get("label")
+                or marker.get("location_name")
+                or "Repère"
+            )
+            painter.drawText(
+                QRectF(x + radius + 5, y - 15, min(360.0, width - x), 44),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                label,
+            )
+    finally:
+        painter.end()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not image.save(str(path), "PNG"):
+        raise OSError(f"Impossible d’enregistrer la carte : {path}")

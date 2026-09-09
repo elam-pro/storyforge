@@ -52,6 +52,7 @@ L’ajout de l’historique est une migration additive : une base existante reç
 ## Géographie connectée
 
 L’onglet `Univers > Cartes` est une représentation supplémentaire des mêmes données, pas une bibliothèque parallèle. Une carte porte son nom, son indication d’échelle, ses dimensions de canevas et éventuellement l’identifiant d’une image de fond. Un repère lié conserve l’identifiant du lieu ; son libellé cartographique, ses notes et sa position restent propres à la carte. Un repère libre décrit un terrain, une frontière, une route ou un autre élément qui ne justifie pas encore une fiche Lieu. `GeographyView` gère uniquement l’affichage et les gestes ; `StoryForgeWindow` valide le projet et écrit en base.
+`render_geography_map` produit une image bornée indépendante de la vue affichée. L’export final l’utilise pour livrer un PNG par carte, un index PDF et un CSV des repères ; la sauvegarde JSON demeure la source réimportable.
 
 ## Navigation et effets de bord
 

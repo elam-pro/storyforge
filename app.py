@@ -12,7 +12,7 @@ from learning_service import (
     LearningService,
 )
 from image_previews import PixmapCache, decode_preview
-from geography import GeographyView
+from geography import GeographyView, render_geography_map
 
 import csv
 import base64
@@ -17746,6 +17746,7 @@ class StoryForgeWindow(QMainWindow):
             self._write_final_timeline(root, project_id, events)
             self._write_final_characters(root, project_id, characters)
             self._write_final_universe(root, project_id, locations)
+            self._write_final_geography(root, project_id)
             self._write_final_images(root, project_id)
             self.db.export_project(
                 project_id, root / "08_Sauvegarde" / "projet.storyforge.json"
@@ -17767,7 +17768,7 @@ class StoryForgeWindow(QMainWindow):
                         "3. `03_Plan` — cartes de l’histoire, séquencier et liste de scènes.",
                         "4. `04_Chronologie` — chronologie lisible et tableau CSV.",
                         "5. `05_Personnages` — fiches, portraits et relations.",
-                        "6. `06_Univers` — lieux, monde, règles, lexique, thème et conflits.",
+                        "6. `06_Univers` — lieux, monde, règles, lexique, thème, conflits et cartes géographiques.",
                         "7. `07_Images` — bibliothèque d’images originale.",
                         "8. `08_Sauvegarde` — sauvegarde complète réimportable dans StoryForge.", "",
                         "`00_metadata.json` et `00_manifest.json` décrivent le projet, les volumes exportés et la version de l’application.", "",
@@ -17825,6 +17826,18 @@ class StoryForgeWindow(QMainWindow):
                     (project_id,),
                 )[0]
             )
+            geography_map_count = int(
+                self.db.one(
+                    "SELECT COUNT(*) FROM geography_maps WHERE project_id=?",
+                    (project_id,),
+                )[0]
+            )
+            geography_marker_count = int(
+                self.db.one(
+                    "SELECT COUNT(*) FROM geography_markers WHERE project_id=?",
+                    (project_id,),
+                )[0]
+            )
             manifest_payload = {
                 "format": "storyforge-final-v2",
                 "application": APP_NAME,
@@ -17847,6 +17860,8 @@ class StoryForgeWindow(QMainWindow):
                     "timelines": track_count,
                     "rules": rule_count,
                     "terms": term_count,
+                    "geography_maps": geography_map_count,
+                    "geography_markers": geography_marker_count,
                 },
                 "files": len(files_before_manifest) + 1,
                 "backup": "08_Sauvegarde/projet.storyforge.json",
@@ -18222,6 +18237,99 @@ class StoryForgeWindow(QMainWindow):
             (directory / file_name).write_text(
                 self._final_export_markdown(title, rows, fields), encoding="utf-8"
             )
+
+    def _write_final_geography(self, root: Path, project_id: int) -> None:
+        directory = root / "06_Univers"
+        image_directory = directory / "cartes"
+        image_directory.mkdir(exist_ok=True)
+        maps = [
+            dict(row)
+            for row in self.db.q(
+                """SELECT map.*,image.title background_title,image.image_data background_data
+                FROM geography_maps map
+                LEFT JOIN image_library image ON image.id=map.background_image_id
+                WHERE map.project_id=? ORDER BY map.created_at,map.id""",
+                (project_id,),
+            )
+        ]
+        index_rows: list[dict] = []
+        csv_rows: list[dict] = []
+        for index, map_row in enumerate(maps, start=1):
+            markers = [
+                dict(row)
+                for row in self.db.q(
+                    """SELECT marker.*,location.name location_name,
+                    COALESCE(NULLIF(marker.label,''),location.name,'Repère') display_label
+                    FROM geography_markers marker
+                    LEFT JOIN locations location ON location.id=marker.location_id
+                    WHERE marker.map_id=? AND marker.project_id=? ORDER BY marker.id""",
+                    (map_row["id"], project_id),
+                )
+            ]
+            name = self._final_export_safe_name(
+                map_row.get("name", ""), f"carte_{index:02d}"
+            )
+            file_name = f"{index:02d}_{name}.png"
+            background_data = map_row.pop("background_data", None)
+            background = decode_preview(
+                bytes(background_data) if background_data else b"", QSize(2400, 1600)
+            )
+            render_geography_map(
+                image_directory / file_name,
+                map_row,
+                markers,
+                background,
+                self.palette,
+            )
+            index_rows.append(
+                {
+                    "title": map_row.get("name", "") or "Carte sans nom",
+                    "scale": map_row.get("scale_label", "") or "Échelle libre",
+                    "background": map_row.get("background_title", "") or "Quadrillage libre",
+                    "markers": len(markers),
+                    "file": f"cartes/{file_name}",
+                }
+            )
+            for marker in markers:
+                csv_rows.append(
+                    {
+                        "map": map_row.get("name", "") or "Carte sans nom",
+                        "scale": map_row.get("scale_label", "") or "Échelle libre",
+                        "label": marker.get("display_label", ""),
+                        "type": marker.get("marker_type", ""),
+                        "location": marker.get("location_name", "") or "",
+                        "x": marker.get("x", 0),
+                        "y": marker.get("y", 0),
+                        "notes": marker.get("notes", ""),
+                    }
+                )
+        (directory / "cartes_geographiques.md").write_text(
+            self._final_export_markdown(
+                "Cartes géographiques",
+                index_rows,
+                (
+                    ("scale", "Échelle / périmètre"),
+                    ("background", "Fond"),
+                    ("markers", "Nombre de repères"),
+                    ("file", "Image"),
+                ),
+            ),
+            encoding="utf-8",
+        )
+        with (directory / "cartes_geographiques.csv").open(
+            "w", encoding="utf-8-sig", newline=""
+        ) as handle:
+            writer = csv.writer(handle)
+            writer.writerow(
+                ["Carte", "Échelle", "Repère", "Type", "Lieu lié", "Position X", "Position Y", "Notes"]
+            )
+            for row in csv_rows:
+                writer.writerow(
+                    [
+                        row["map"], row["scale"], row["label"], row["type"],
+                        row["location"], row["x"], row["y"], row["notes"],
+                    ]
+                )
 
     def _write_final_images(self, root: Path, project_id: int) -> None:
         directory = root / "07_Images"

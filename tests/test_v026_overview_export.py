@@ -132,10 +132,24 @@ def test_overview_reuses_project_data_and_final_export_is_portable(tmp_path: Pat
         "INSERT INTO timeline_event_characters(event_id,character_id) VALUES(?,?)",
         (event_id, character_a),
     )
-    window.db.run(
+    location_id = window.db.run(
         """INSERT INTO locations(project_id,position,name,category,description,created_at,updated_at)
         VALUES(?,?,?,?,?,?,?)""",
         (project_id, 0, "Musée", "Travail", "Un musée fermé la nuit", NOW(), NOW()),
+    ).lastrowid
+    geography_map_id = window.db.run(
+        """INSERT INTO geography_maps(project_id,name,scale_label,created_at,updated_at)
+        VALUES(?,?,?,?,?)""",
+        (project_id, "Quartier du musée", "Quartier · plan libre", NOW(), NOW()),
+    ).lastrowid
+    window.db.run(
+        """INSERT INTO geography_markers(
+        map_id,project_id,location_id,marker_type,label,notes,x,y,created_at,updated_at
+        ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+        (
+            geography_map_id, project_id, location_id, "Lieu", "Musée", "Point de départ",
+            420, 320, NOW(), NOW(),
+        ),
     )
     map_node_a = window.db.run(
         """INSERT INTO story_map_nodes(
@@ -192,6 +206,9 @@ def test_overview_reuses_project_data_and_final_export_is_portable(tmp_path: Pat
             "05_Personnages/personnages.pdf",
             "05_Personnages/relations.pdf",
             "06_Univers/lieux.pdf",
+            "06_Univers/cartes_geographiques.pdf",
+            "06_Univers/cartes_geographiques.csv",
+            "06_Univers/cartes/01_Quartier_du_musée.png",
             "08_Sauvegarde/projet.storyforge.json",
         }.issubset(names)
         metadata = json.loads(archive.read("00_metadata.json").decode("utf-8"))
@@ -202,7 +219,14 @@ def test_overview_reuses_project_data_and_final_export_is_portable(tmp_path: Pat
         assert final_manifest["application_version"] == "0.30.3"
         assert final_manifest["counts"]["story_map_nodes"] == 2
         assert final_manifest["counts"]["story_map_links"] == 1
+        assert final_manifest["counts"]["geography_maps"] == 1
+        assert final_manifest["counts"]["geography_markers"] == 1
         assert archive.read("03_Plan/cartes.pdf").startswith(b"%PDF")
+        assert archive.read("06_Univers/cartes_geographiques.pdf").startswith(b"%PDF")
+        assert archive.read("06_Univers/cartes/01_Quartier_du_musée.png").startswith(b"\x89PNG")
+        geography_csv = archive.read("06_Univers/cartes_geographiques.csv").decode("utf-8-sig")
+        assert "Quartier du musée" in geography_csv
+        assert "Point de départ" in geography_csv
         assert not any(name.endswith(".md") for name in names)
         scenario = json.loads(archive.read("01_Scenario/scenario.json").decode("utf-8"))
         assert scenario["format"] == "storyforge-screenplay-v1"
