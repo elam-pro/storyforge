@@ -6,9 +6,9 @@ import sys
 import tempfile
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PySide6.QtWidgets import QApplication
-from app import StoryForgeWindow
-from db import NOW
-from report_export import export_report_pdf
+from storyforge.app import StoryForgeWindow
+from storyforge.db import NOW
+from storyforge.report_export import export_report_pdf
 
 qt = QApplication([])
 output = Path(tempfile.mkdtemp(prefix="storyforge-qa-"))

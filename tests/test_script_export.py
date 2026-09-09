@@ -1,7 +1,7 @@
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-from script_export import (
+from storyforge.script_export import (
     _layout_screenplay_pages,
     export_fdx,
     export_script_pdf,

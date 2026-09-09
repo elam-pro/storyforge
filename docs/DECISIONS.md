@@ -16,6 +16,7 @@ Consolidées le 7 septembre 2026 à partir du contexte existant et de l’audit 
 | D10 | Éditeur existant conservé pendant consolidation | Le modèle structuré est le point d’appui ; pas de second stockage indépendant. |
 | D11 | Applications pédagogiques traçables | Garder un état courant par parcours/étape pour la compatibilité et un historique contextuel append-only pour ne plus effacer les applications et relectures précédentes. |
 | D12 | La carte réutilise les sources du projet | Une carte référence les fiches Lieux et les images existantes au lieu de les recopier. Le repère ajoute seulement une position et un contexte cartographique ; supprimer la représentation ne supprime pas sa source. |
+| D13 | Code et données utilisateur séparés | Le dépôt contient le package, les tests et l’outillage. La base, ses sauvegardes, le cache et les exports utilisent les emplacements Linux de l’utilisateur. Une migration copie et contrôle les données avant de retirer quoi que ce soit du dépôt ; la désinstallation ne supprime jamais les histoires. |
 
 ## Compatibilités historiques
 

@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-set -e
-cd "$(dirname "$0")"
-app_version="$(awk -F'"' '/^APP_VERSION = / { print $2; exit }' app.py)"
-: "${app_version:=locale}"
-if [ ! -d .venv ]; then python3 -m venv .venv; fi
-. .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-printf '\nStoryForge %s pour Linux est prêt.\n' "$app_version"
+set -euo pipefail
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd -- "$repo_root"
+"$repo_root/scripts/build_linux.sh"
+if pgrep -u "$(id -u)" -f 'python([^ ]*)? .*app\.py|/StoryForge( |$)' >/dev/null; then
+  echo "Ferme StoryForge avant l’installation afin de migrer la base sans perdre de modification." >&2
+  exit 2
+fi
+"$repo_root/.venv/bin/python" "$repo_root/packaging/linux/install_application.py" \
+  --source-root "$repo_root" \
+  --executable "$repo_root/dist/StoryForge"
+printf '\nStoryForge est disponible dans le menu des applications et avec la commande storyforge.\n'

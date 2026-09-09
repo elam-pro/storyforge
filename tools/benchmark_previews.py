@@ -7,7 +7,7 @@ from time import perf_counter
 from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QSize, Qt
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QApplication
-from image_previews import decode_preview, PixmapCache
+from storyforge.image_previews import decode_preview, PixmapCache
 
 
 def main():

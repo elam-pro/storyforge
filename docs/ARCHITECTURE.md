@@ -1,31 +1,42 @@
 # Architecture actuelle
 
-Vérifiée statiquement le 7 septembre 2026 sur le code applicatif 0.30.3. Ce document ne décrit pas une architecture déjà refactorisée.
+Vérifiée le 9 septembre 2026 sur le code applicatif 0.30.3.
 
 ## Points d’entrée et dépendances
 
-`run_linux.sh` → `app.py:main` → `StoryForgeWindow` → `Database` et modules spécialisés.
+Installation : `install_linux.sh` → PyInstaller → `dist/StoryForge` →
+`~/.local/lib/storyforge/StoryForge`. Développement : `run_linux.sh` →
+`python -m storyforge` → `storyforge.app:main` → `StoryForgeWindow` →
+`Database` et modules spécialisés.
 
 | Module | Responsabilité actuelle |
 | --- | --- |
-| `app.py` | Navigation, vues Qt, état partagé, règles métier, orchestration et SQL direct. |
-| `db.py` | Schéma, migrations, requêtes, sauvegarde SQLite, import/export de projet. |
-| `screenplay_model.py` | Blocs typés avec identifiants et document sérialisable, indépendant de Qt. |
-| `screenplay_adapter.py` | Lecture des paragraphes Qt et résolution texte/JSON, sans fenêtre ni accès à la base. |
-| `learning_content.py`, `content/sessions/` | Modèles et chargement des guides JSON. |
-| `learning_service.py` | Réponses, progression, miroir historique, applications aux outils et changements de maîtrise, sans Qt. |
-| `script_export.py` | Parsing, FDX, PDF scénario. |
-| `pdf_export.py`, `report_export.py` | Manuel pédagogique et documents PDF. |
-| `theme.py`, `i18n.py` | Styles et traduction partielle. |
-| `genres.py`, `template_diagrams.py` | Ressources et rendus narratifs. |
-| `geography.py` | Canevas Qt des cartes, repères déplaçables, panoramique et zoom ; la persistance reste orchestrée par la fenêtre. |
-| `ai_service.py` | Shim désactivé conservé pour anciens imports ; aucun appel depuis l’interface. |
+| `storyforge/app.py` | Navigation, vues Qt, état partagé, règles métier, orchestration et SQL direct. |
+| `storyforge/db.py` | Schéma, migrations, requêtes, sauvegarde SQLite, import/export de projet. |
+| `storyforge/runtime_paths.py` | Emplacements XDG et copie atomique contrôlée de l’ancienne base. |
+| `storyforge/screenplay_model.py` | Blocs typés avec identifiants et document sérialisable, indépendant de Qt. |
+| `storyforge/screenplay_adapter.py` | Lecture des paragraphes Qt et résolution texte/JSON, sans fenêtre ni accès à la base. |
+| `storyforge/learning_content.py`, `storyforge/content/sessions/` | Modèles et chargement des guides JSON. |
+| `storyforge/learning_service.py` | Réponses, progression, miroir historique, applications aux outils et changements de maîtrise, sans Qt. |
+| `storyforge/script_export.py` | Parsing, FDX, PDF scénario. |
+| `storyforge/pdf_export.py`, `storyforge/report_export.py` | Manuel pédagogique et documents PDF. |
+| `storyforge/theme.py`, `storyforge/i18n.py` | Styles et traduction partielle. |
+| `storyforge/genres.py`, `storyforge/template_diagrams.py` | Ressources et rendus narratifs. |
+| `storyforge/geography.py` | Canevas Qt des cartes, repères déplaçables, panoramique et zoom ; la persistance reste orchestrée par la fenêtre. |
+| `storyforge/ai_service.py` | Shim désactivé conservé pour anciens imports ; aucun appel depuis l’interface. |
 
 Le principal couplage reste dans `StoryForgeWindow`. Une première extraction vers `LearningService` sépare la persistance et la progression pédagogique ; les autres domaines restent majoritairement dans la fenêtre.
 
 ## Données et écritures
 
 - SQLite locale ; images en BLOB et préférences dans `settings`.
+- En installation normale, la base et ses sauvegardes sont sous
+  `~/.local/share/storyforge/`, la configuration sous `~/.config/storyforge/`, le
+  cache sous `~/.cache/storyforge/` et les exports sous `~/Documents/StoryForge/`.
+- `STORYFORGE_DB_PATH`, `STORYFORGE_DATA_DIR` et `STORYFORGE_EXPORT_DIR`
+  permettent des emplacements explicites pour les tests et outils. Une ancienne
+  base du dépôt est copiée sans écrasement via l’API de sauvegarde SQLite puis
+  contrôlée avec `PRAGMA integrity_check`.
 - `Database.__init__` appelle l’initialisation et les migrations. La fenêtre possède aussi des migrations historiques.
 - `Database.run` valide les requêtes isolées ; `transaction` protège les opérations composées avec des savepoints imbriqués.
 - `Database.import_project` valide format et forme des collections puis remappe les identifiants dans une transaction. Un échec annule les écritures de cet import.
@@ -57,7 +68,20 @@ L’onglet `Univers > Cartes` est une représentation supplémentaire des mêmes
 ## Navigation et effets de bord
 
 Les vues sont reconstruites avec des sauvegardes différées et attributs partagés. Les changements de page, timers et caches d’images demandent des tests conjoints.
-Terminer le guide initial régénère le manuel dans `output/manuals/`, à côté de la base utilisée. L’export manuel propose aussi ce dossier. L’ancien PDF racine est conservé localement mais ignoré par Git ; son historique Git n’est pas réécrit. Une erreur d’export automatique est signalée sans annuler l’enregistrement du guide.
+Terminer le guide initial régénère le manuel dans `~/Documents/StoryForge/Manuels`
+pour l’installation normale. Avec une base temporaire explicitement fournie, le
+manuel reste à côté de cette base afin d’isoler les tests. Une erreur d’export
+automatique est signalée sans annuler l’enregistrement du guide.
+
+## Distribution Linux
+
+`scripts/build_linux.sh` produit un exécutable monofichier PyInstaller et y
+embarque les guides et ressources visuelles. `packaging/linux/install_application.py`
+installe cet exécutable, le fichier `.desktop`, l’icône et la commande utilisateur
+par copies atomiques. `uninstall_linux.sh` ne retire que ces éléments installés :
+les données sont intentionnellement conservées. `tools/organize_workspace.py`
+déplace les anciens fichiers runtime hors du dépôt après copie et vérification ;
+il conserve les environnements de développement.
 
 ## Index de contexte du repository
 

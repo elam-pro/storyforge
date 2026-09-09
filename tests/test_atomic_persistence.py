@@ -3,8 +3,8 @@ import sqlite3
 
 import pytest
 
-from db import Database, NOW
-from screenplay_model import ScreenplayDocument
+from storyforge.db import Database, NOW
+from storyforge.screenplay_model import ScreenplayDocument
 
 
 @pytest.fixture

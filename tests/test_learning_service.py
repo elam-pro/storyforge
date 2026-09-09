@@ -2,15 +2,21 @@ from pathlib import Path
 
 import pytest
 
-from db import Database, NOW
-from learning_content import load_session
-from learning_service import LearningService
+from storyforge.db import Database, NOW
+from storyforge.learning_content import load_session
+from storyforge.learning_service import LearningService
 
 
 @pytest.fixture
 def learning(tmp_path):
     db = Database(tmp_path / 'learning.db')
-    session = load_session(Path(__file__).resolve().parents[1] / 'content/sessions/session_01.json')
+    session = load_session(
+        Path(__file__).resolve().parents[1]
+        / "storyforge"
+        / "content"
+        / "sessions"
+        / "session_01.json"
+    )
     run = db.create_guided_run('seed', 'Test', legacy_session_key=session.key)
     yield db, LearningService(db), session, run
     db.conn.close()

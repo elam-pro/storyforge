@@ -1,4 +1,4 @@
-from screenplay_model import BlockType, ScreenplayBlock, ScreenplayDocument
+from storyforge.screenplay_model import BlockType, ScreenplayBlock, ScreenplayDocument
 
 
 def test_legacy_script_migrates_to_typed_blocks_and_public_elements() -> None:

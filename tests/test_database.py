@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 
-from db import NOW, Database
+from storyforge.db import NOW, Database
 
 
 def create_project(db: Database, title: str = "Test") -> int:

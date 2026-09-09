@@ -8,7 +8,10 @@
 - caches d’images bornés, décodage réduit, benchmarks et parcours de captures sur bases temporaires ;
 - mesures reproductibles ajoutées pour 600 événements, 200 nœuds relationnels et 600 repères géographiques, sans refonte non justifiée par les résultats ;
 - MCP de contexte local en lecture seule configuré et validé avec ses sept outils et cinq ressources ;
-- 160 tests automatisés réussis ; anglais intégral et IA volontairement reportés.
+- code applicatif regroupé dans le package `storyforge`, sans réécriture métier ;
+- données, sauvegardes, cache et exports sortis du dépôt vers les emplacements Linux de l’utilisateur, avec migration SQLite vérifiée et copie de retour arrière ;
+- exécutable Linux autonome, entrée de menu, icône, commande `storyforge` et désinstallation conservant toutes les histoires ;
+- 173 tests automatisés réussis ; anglais intégral et IA volontairement reportés.
 
 # StoryForge 0.30.3 — Correctifs d’affichage ciblés
 

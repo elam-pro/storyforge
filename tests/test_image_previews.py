@@ -1,7 +1,7 @@
 from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QSize
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QApplication
-from image_previews import PixmapCache, decode_preview
+from storyforge.image_previews import PixmapCache, decode_preview
 
 
 def fixture_jpeg():
@@ -44,7 +44,7 @@ def test_memory_budget_lru_replacement_and_clear():
 
 
 def test_obsolete_location_preview_cannot_paint():
-    from app import StoryForgeWindow
+    from storyforge.app import StoryForgeWindow
     class View:
         _location_image_refresh_generation = 3
         location_id = 8
@@ -55,9 +55,9 @@ def test_obsolete_location_preview_cannot_paint():
 
 
 def test_image_library_decodes_a_bounded_thumbnail_once(tmp_path, monkeypatch):
-    import app as app_module
-    from app import StoryForgeWindow
-    from db import NOW
+    import storyforge.app as app_module
+    from storyforge.app import StoryForgeWindow
+    from storyforge.db import NOW
 
     qt = QApplication.instance() or QApplication([])
     window = StoryForgeWindow(tmp_path / "library.db")

@@ -1,11 +1,11 @@
 from pathlib import Path
 
-from app import GUIDE_LEVEL_DETAILS, GUIDE_LEVELS, GUIDE_ORDER, GUIDE_SESSIONS
-from learning_content import load_session
+from storyforge.app import GUIDE_LEVEL_DETAILS, GUIDE_LEVELS, GUIDE_ORDER, GUIDE_SESSIONS
+from storyforge.learning_content import load_session
 
 
 def test_session_content_follows_the_universal_questions_one_at_a_time() -> None:
-    path = Path(__file__).parents[1] / "content" / "sessions" / "session_01.json"
+    path = Path(__file__).parents[1] / "storyforge" / "content" / "sessions" / "session_01.json"
     session = load_session(path)
 
     assert session.key == "session01"

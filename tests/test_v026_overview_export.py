@@ -7,8 +7,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
-from app import StoryForgeWindow, TimelineView
-from db import NOW
+from storyforge.app import StoryForgeWindow, TimelineView
+from storyforge.db import NOW
 
 
 def test_overview_timeline_uses_readable_relative_units() -> None:

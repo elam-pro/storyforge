@@ -3,8 +3,8 @@
 Keep existing mastery semantics and legacy mirrors during this extraction.
 Application target selection and navigation remain in the UI.
 """
-from db import NOW, Database
-from learning_content import LearningSession
+from .db import NOW, Database
+from .learning_content import LearningSession
 
 CHARACTER_GUIDE_FIELDS = {
     'situation': ('start_situation', 'Situation initiale'),

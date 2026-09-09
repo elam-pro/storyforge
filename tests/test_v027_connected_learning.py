@@ -5,8 +5,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QLabel
 
-from app import StoryForgeWindow
-from db import NOW, Database
+from storyforge.app import StoryForgeWindow
+from storyforge.db import NOW, Database
 
 
 def _project(db: Database, title: str = "Projet guidé") -> int:

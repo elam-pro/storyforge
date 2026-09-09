@@ -4,10 +4,10 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QColor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QGraphicsPixmapItem
-from app import StoryForgeWindow, TEMPLATE_LIBRARY
-from db import NOW
-from template_diagrams import DIAGRAM_FAMILIES, build_diagram
-from theme import DARK
+from storyforge.app import StoryForgeWindow, TEMPLATE_LIBRARY
+from storyforge.db import NOW
+from storyforge.template_diagrams import DIAGRAM_FAMILIES, build_diagram
+from storyforge.theme import DARK
 
 
 def test_margins_centered_script_and_nonoverlapping_popup(tmp_path):

@@ -1071,7 +1071,7 @@ class Database:
         n=self.one("SELECT COUNT(*) c FROM doc_versions WHERE project_id=? AND doc_type=?",(pid,doc_type))[0]+1
         return self.run("INSERT INTO doc_versions(project_id,doc_type,label,content,created_at,snapshot_json) VALUES(?,?,?,?,?,?)",(pid,doc_type,label or f"V{n}",content,NOW(),snapshot_json)).lastrowid
     def save_screenplay(self, pid, document_json, *, title_meta=None):
-        from screenplay_model import ScreenplayDocument
+        from .screenplay_model import ScreenplayDocument
         document = ScreenplayDocument.from_json(document_json)
         if document is None:
             raise ValueError('Scénario structuré invalide')
@@ -1102,7 +1102,7 @@ class Database:
             return self.snapshot(pid, 'script', doc['content'], label, payload)
 
     def restore_screenplay_version(self, pid, version_id):
-        from screenplay_model import ScreenplayDocument
+        from .screenplay_model import ScreenplayDocument
         with self.transaction():
             row = self.one("SELECT * FROM doc_versions WHERE id=? AND project_id=? AND doc_type='script'", (version_id, pid))
             if not row:

@@ -83,7 +83,7 @@ def import_fdx_document(path: Path, project_id=None):
     Inline styling/revisions are not a lossless Final Draft round trip.
     Unknown paragraph types are rejected rather than silently flattened.
     """
-    from screenplay_model import BlockType, ScreenplayBlock, ScreenplayDocument
+    from .screenplay_model import BlockType, ScreenplayBlock, ScreenplayDocument
     root = ET.parse(path).getroot()
     if root.tag != 'FinalDraft':
         raise ValueError('Document Final Draft attendu')
@@ -367,7 +367,7 @@ def export_script_pdf(
     try:
         '\n'.join([title, author, contact, draft_date, based_on, copyright_notice] + [value for _, value in screenplay_elements]).encode('cp1252')
     except UnicodeEncodeError:
-        from unicode_script_pdf import render
+        from .unicode_script_pdf import render
         render(path, pages, title, author, contact, draft_date, based_on, copyright_notice, include_title_page)
         return
 

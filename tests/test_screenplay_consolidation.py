@@ -1,10 +1,10 @@
 import json
 import subprocess
 import pytest
-from screenplay_model import ScreenplayDocument
-from screenplay_adapter import load_document
-from screenplay_commands import cycle, after_return, margins
-from script_export import export_script_pdf, export_fdx, import_fdx_document
+from storyforge.screenplay_model import ScreenplayDocument
+from storyforge.screenplay_adapter import load_document
+from storyforge.screenplay_commands import cycle, after_return, margins
+from storyforge.script_export import export_script_pdf, export_fdx, import_fdx_document
 
 
 @pytest.mark.parametrize('change', ['future', 'duplicate', 'metadata', 'text', 'kind', 'block'])

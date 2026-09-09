@@ -4,10 +4,10 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 import pytest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-import app as app_module
-from app import StoryForgeWindow
-from ai_service import ProfessorAI
-from db import Database, NOW
+import storyforge.app as app_module
+from storyforge.app import StoryForgeWindow
+from storyforge.ai_service import ProfessorAI
+from storyforge.db import Database, NOW
 
 
 def test_manual_output_is_next_to_test_database(tmp_path, monkeypatch):

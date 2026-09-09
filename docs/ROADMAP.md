@@ -14,6 +14,7 @@ Mise à jour : 9 septembre 2026. Ce document sépare les chantiers de consolidat
 | 6 | Interface et performances — réalisée | Mesures sur fixtures, caches bornés et décodage réduit ; tests de navigation et sauvegarde conservés. Aucun remaniement global des vues non justifié par les mesures. |
 | 7 | Index ciblé — réalisé | Sources autorisées et suivies par Git, reparsing incrémental en mémoire, liens fonctionnalités/code/tests, provenance et limites testées. |
 | 8 | MCP — implémenté, activé et testé | Sept outils et cinq ressources STDIO en lecture seule ; configuration locale active pour ce checkout. Une tâche ouverte antérieurement peut nécessiter un rechargement ; voir MCP.md. |
+| 9 | Distribution Linux et rangement — réalisés | Code regroupé dans `storyforge/`, données XDG séparées, migration SQLite vérifiée, exécutable autonome, entrée de menu, icône et désinstallation conservant les histoires. Tests sur répertoires temporaires et contrôle de l’exécutable construit. |
 
 Chaque chantier reste un changement borné avec tests et commit local. Les phases 5 à 8 ont été explicitement demandées, sans migration SQLite supplémentaire. Une future migration exige une sauvegarde restaurable : revenir au code précédent seul peut ne pas suffire. L’autorisation de confiance Codex n’est pas modifiée automatiquement.
 
@@ -25,7 +26,7 @@ Chaque chantier reste un changement borné avec tests et commit local. Les phase
 - Ensemble 20 : apprentissage connecté étendu. Douze guides couvrent désormais aussi l’univers, les relations, le thème et la réécriture. Les transitions guide-outil conservent le contexte de retour, les applications ciblent un seul champ confirmé et un historique contextualisé garde chaque application et relecture ; voir FEATURES.md.
 - Anglais intégral : reporté à la demande de l’utilisateur ; contenus pédagogiques, formulaires et libellés dynamiques à compléter plus tard, sans traduire les textes utilisateur.
 - Templates : réalisé. Les treize modèles ont des schémas natifs distincts (causalité, film, actes, mouvements, cercle, séquences, voyage, contraste, mystère, relation, valeurs, facettes et beats) ; l’image personnalisée par modèle reste prioritaire et réversible.
-- Qualité : fixtures de 200 personnages/lieux, 600 événements, 200 nœuds relationnels, 600 repères géographiques, scénario de 2 000 paragraphes, images volumineuses, caches bornés, fenêtre minimale et sauvegardes de navigation sont couvertes. Une validation Fedora interactive reste nécessaire ; les deux langues sont reportées avec l’anglais intégral.
+- Qualité : fixtures de 200 personnages/lieux, 600 événements, 200 nœuds relationnels, 600 repères géographiques, scénario de 2 000 paragraphes, images volumineuses, caches bornés, fenêtre minimale et sauvegardes de navigation sont couvertes. L’exécutable et l’entrée de menu sont contrôlés automatiquement ; une validation Fedora interactive reste nécessaire. Les deux langues sont reportées avec l’anglais intégral.
 
 ## Validation prioritaire de la phase 2
 

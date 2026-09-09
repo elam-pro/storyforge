@@ -22,7 +22,7 @@ Chronologie 19,76 ms (max 27,37), carte de 200 nœuds et 199 relations 50,08 ms
 construction locale des vues et n’ajoutent pas de portraits ou fonds lourds ;
 le décodage est mesuré séparément. Pas de promesse de fluidité universelle.
 
-`image_previews.py` borne chaque cache de grands aperçus à 48 Mio d’octets,
+`storyforge/image_previews.py` borne chaque cache de grands aperçus à 48 Mio d’octets,
 les miniatures des lieux à 2 Mio et celles de la bibliothèque à 8 Mio ; ce
 n’est pas la mémoire totale de Qt. La bibliothèque ne charge plus tous les
 blobs dans une seule requête, décode directement à 170 × 105 maximum et

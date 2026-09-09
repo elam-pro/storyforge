@@ -2,20 +2,40 @@
 
 Application locale Linux pour apprendre le storytelling en construisant et en écrivant ses histoires. L’apprentissage reste central ; l’atelier sert à appliquer les notions.
 
-## Lancement
+## Installation Linux
 
-Prérequis recommandé : Python 3.11+ avec venv et un environnement graphique Linux.
+Prérequis de construction : Python 3.11+ avec `venv`, une connexion lors de la
+première installation et un environnement graphique Linux.
 
 ```bash
-./run_linux.sh
+./install_linux.sh
 ```
 
-Le premier lancement crée `.venv` et installe PySide6 (connexion nécessaire à l’installation). Pour réparer ou actualiser l’environnement : `./install_linux.sh`.
-Les lanceurs lisent la version canonique `APP_VERSION` dans [app.py](app.py), sans numéro dupliqué à maintenir.
+Le script construit un exécutable autonome puis installe StoryForge pour
+l’utilisateur courant. L’application est ensuite disponible dans le menu Linux
+et avec la commande `storyforge` lorsque `~/.local/bin` est dans le `PATH`.
+`./uninstall_linux.sh` retire l’application, le raccourci et l’icône, sans
+supprimer les histoires, sauvegardes ou exports.
+
+Pour le développement, `./run_linux.sh` prépare `.venv` au besoin et lance le
+package directement. `./scripts/build_linux.sh` reconstruit seulement
+`dist/StoryForge`. La version canonique est dans
+[storyforge/version.py](storyforge/version.py).
 
 ## Données et exports
 
-La base `storyforge.db`, les sauvegardes et les exports sont ignorés par Git. Le manuel cumulatif est généré dans `output/manuals/` à côté de la base ; l’ancien PDF racine reste local et n’est plus suivi. Un commit ne sauvegarde pas les histoires. Ouvrir l’application peut appliquer des migrations : ne pas utiliser les données personnelles pour tester.
+Les données sont séparées du code :
+
+- base et sauvegardes : `~/.local/share/storyforge/` ;
+- configuration : `~/.config/storyforge/` ;
+- cache : `~/.cache/storyforge/` ;
+- exports et manuels : `~/Documents/StoryForge/`.
+
+Au premier démarrage, une éventuelle ancienne base placée dans le dépôt est
+copiée par l’API SQLite et contrôlée avant utilisation ; la source n’est jamais
+écrasée. Un commit ne sauvegarde pas les histoires. Ouvrir l’application peut
+appliquer des migrations : ne jamais utiliser les données personnelles pour les
+tests.
 
 - Scénario : Éditeur de scripts → Page de garde → Exporter PDF ou FDX.
 - Histoire complète : Projets → Plus… → Exporter l’histoire terminée…, ou Vue d’ensemble.

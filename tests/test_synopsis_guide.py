@@ -2,9 +2,9 @@ import pytest
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QComboBox, QDialog, QPushButton, QScrollArea, QTextEdit
 
-from app import GUIDE_ORDER, GUIDE_SESSIONS, LEARNING_TOOL_LINKS, SYNOPSIS_STEPS, StoryForgeWindow
-from db import Database, NOW
-from learning_service import LearningService, SYNOPSIS_GUIDE_STEPS
+from storyforge.app import GUIDE_ORDER, GUIDE_SESSIONS, LEARNING_TOOL_LINKS, SYNOPSIS_STEPS, StoryForgeWindow
+from storyforge.db import Database, NOW
+from storyforge.learning_service import LearningService, SYNOPSIS_GUIDE_STEPS
 
 
 def setup_project(db):

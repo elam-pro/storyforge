@@ -4,8 +4,8 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtGui import QTextDocument
 from PySide6.QtWidgets import QApplication
 
-from screenplay_adapter import block_type, block_values, load_document
-from screenplay_model import BlockType, ScreenplayBlock, ScreenplayDocument
+from storyforge.screenplay_adapter import block_type, block_values, load_document
+from storyforge.screenplay_model import BlockType, ScreenplayBlock, ScreenplayDocument
 
 
 def test_explicit_types_override_ambiguous_text_and_keep_model_ids():

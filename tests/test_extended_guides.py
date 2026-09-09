@@ -3,9 +3,9 @@ from pathlib import Path
 import pytest
 from PySide6.QtWidgets import QApplication, QComboBox, QScrollArea
 
-from app import GUIDE_ORDER, GUIDE_SESSIONS, LEARNING_TOOL_LINKS, StoryForgeWindow
-from db import Database, NOW
-from learning_service import (
+from storyforge.app import GUIDE_ORDER, GUIDE_SESSIONS, LEARNING_TOOL_LINKS, StoryForgeWindow
+from storyforge.db import Database, NOW
+from storyforge.learning_service import (
     LearningService,
     RELATIONSHIP_GUIDE_FIELDS,
     THEME_GUIDE_FIELDS,

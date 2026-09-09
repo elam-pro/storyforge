@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=StoryForge
+GenericName=Atelier d’écriture
+Comment=Apprendre le storytelling et construire ses histoires
+Exec="@EXECUTABLE@"
+Icon=storyforge
+Terminal=false
+Categories=Office;WordProcessor;
+Keywords=writing;screenplay;storytelling;scénario;écriture;
+StartupNotify=true
+StartupWMClass=StoryForge

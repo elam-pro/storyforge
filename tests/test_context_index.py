@@ -55,7 +55,19 @@ def test_allowlist_rejects_private_paths(path):
     assert not allowed(path)
 
 
-@pytest.mark.parametrize('path', ['geography.py', 'content/sessions/session_01.json', 'content/sessions/guide_build_universe.json', 'content/sessions/guide_rewrite.json'])
+@pytest.mark.parametrize('path', [
+    'geography.py',
+    'content/sessions/session_01.json',
+    'content/sessions/guide_build_universe.json',
+    'content/sessions/guide_rewrite.json',
+    'storyforge/app.py',
+    'storyforge/runtime_paths.py',
+    'storyforge/content/sessions/session_01.json',
+    'install_linux.sh',
+    'scripts/build_linux.sh',
+    'packaging/linux/install_application.py',
+    'tools/organize_workspace.py',
+])
 def test_allowlist_accepts_static_geography_and_guide_sources(path):
     assert allowed(path)
 

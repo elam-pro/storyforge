@@ -3,7 +3,7 @@
 No window, persistence or exports here. Explicit Qt paragraph states take
 precedence; untyped legacy paragraphs retain the editor's inference rules.
 """
-from screenplay_model import BlockType, ScreenplayDocument, SCENE_PREFIXES, TRANSITION_EXACT
+from .screenplay_model import BlockType, ScreenplayDocument, SCENE_PREFIXES, TRANSITION_EXACT
 
 
 QT_BLOCK_TYPES = dict(zip(range(1001, 1007), (

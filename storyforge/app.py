@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import sqlite3
-import screenplay_adapter
-import screenplay_commands
-from learning_service import (
+from . import screenplay_adapter, screenplay_commands
+from .learning_service import (
     CHARACTER_GUIDE_FIELDS,
     CONFLICT_GUIDE_FIELDS,
     FIELD_GUIDES,
@@ -14,8 +13,8 @@ from learning_service import (
     UNIVERSE_GUIDE_FIELDS,
     LearningService,
 )
-from image_previews import PixmapCache, decode_preview
-from geography import GeographyView, render_geography_map
+from .image_previews import PixmapCache, decode_preview
+from .geography import GeographyView, render_geography_map
 
 import csv
 import base64
@@ -29,10 +28,10 @@ import sys
 import tempfile
 import zipfile
 from html import escape
-from report_export import export_report_pdf
-from template_diagrams import build_diagram
-from genres import GENRES
-from i18n import set_language, tr
+from .report_export import export_report_pdf
+from .template_diagrams import build_diagram
+from .genres import GENRES
+from .i18n import set_language, tr
 from datetime import datetime
 from itertools import pairwise
 from pathlib import Path
@@ -119,17 +118,20 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from db import NOW, Database
-from learning_content import load_session
-from pdf_export import export_manual_pdf
-from script_export import export_fdx, export_script_pdf, import_fdx, import_fdx_document, parse_screenplay
-from screenplay_model import BlockType, ScreenplayDocument
-from theme import DARK, LIGHT, Palette, stylesheet
+from .db import NOW, Database
+from .learning_content import load_session
+from .pdf_export import export_manual_pdf
+from .runtime_paths import migrate_legacy_database, prepare_runtime_directories, resolve_runtime_paths
+from .script_export import export_fdx, export_script_pdf, import_fdx, import_fdx_document, parse_screenplay
+from .screenplay_model import BlockType, ScreenplayDocument
+from .theme import DARK, LIGHT, Palette, stylesheet
+from .version import APP_VERSION
 
 APP_NAME = "StoryForge"
-APP_VERSION = "0.30.3"
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = Path(os.environ.get("STORYFORGE_DB_PATH", BASE_DIR / "storyforge.db"))
+SOURCE_ROOT = BASE_DIR.parent
+RUNTIME_PATHS = resolve_runtime_paths()
+DB_PATH = RUNTIME_PATHS.database
 IDEA_ATTACHMENT_LIMIT = 25 * 1024 * 1024
 LEARNING_SESSION = load_session(BASE_DIR / "content" / "sessions" / "session_01.json")
 GUIDE_SESSIONS = {
@@ -20326,6 +20328,8 @@ class StoryForgeWindow(QMainWindow):
             QMessageBox.information(self, "PDF généré", f"Manuel créé :\n{path}")
 
     def _manual_output_path(self) -> Path:
+        if self.db.path.resolve() == DB_PATH.resolve():
+            return RUNTIME_PATHS.exports / 'Manuels' / 'Mon manuel d’écriture & storytelling.pdf'
         return self.db.path.parent / 'output' / 'manuals' / 'Mon manuel d’écriture & storytelling.pdf'
 
     def _write_cumulative_manual(self) -> None:
@@ -21979,7 +21983,7 @@ class StoryForgeWindow(QMainWindow):
 
     def _backup_now(self) -> None:
         stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")  # noqa: DTZ005 - local filename
-        path = BASE_DIR / "backups" / f"storyforge_{stamp}.db"
+        path = self.db.path.parent / "backups" / f"storyforge_{stamp}.db"
         try:
             self.db.backup_to(path)
             self.backup_status.setText(f"Sauvegarde créée : {path.name}")
@@ -21997,7 +22001,7 @@ class StoryForgeWindow(QMainWindow):
 
     def _open_data_folder(self) -> None:
         try:
-            subprocess.Popen(["xdg-open", str(BASE_DIR)], start_new_session=True)
+            subprocess.Popen(["xdg-open", str(self.db.path.parent)], start_new_session=True)
         except OSError as exc:
             QMessageBox.critical(self, "Dossier inaccessible", str(exc))
 
@@ -22013,10 +22017,16 @@ class StoryForgeWindow(QMainWindow):
 
 
 def main() -> int:
+    prepare_runtime_directories(RUNTIME_PATHS)
+    if "STORYFORGE_DB_PATH" not in os.environ:
+        migrate_legacy_database(SOURCE_ROOT, RUNTIME_PATHS)
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationDisplayName(APP_NAME)
     app.setOrganizationName("StoryForge")
+    icon_path = BASE_DIR / "resources" / "storyforge.svg"
+    if icon_path.is_file():
+        app.setWindowIcon(QIcon(str(icon_path)))
     app.setStyle("Fusion")
     system_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
     system_font.setPointSize(10)

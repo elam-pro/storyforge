@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from db import NOW, Database
-from screenplay_model import BlockType, ScreenplayDocument
+from storyforge.db import NOW, Database
+from storyforge.screenplay_model import BlockType, ScreenplayDocument
 
 
 def test_structured_script_survives_storyforge_project_archive(tmp_path: Path) -> None:

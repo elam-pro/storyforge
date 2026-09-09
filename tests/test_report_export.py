@@ -4,7 +4,7 @@ import subprocess
 import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication
-from report_export import export_report_pdf
+from storyforge.report_export import export_report_pdf
 
 
 def test_paginated_report_preserves_unicode_and_every_paragraph(tmp_path):

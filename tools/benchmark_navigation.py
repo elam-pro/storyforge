@@ -6,7 +6,7 @@ from statistics import median
 from time import perf_counter
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PySide6.QtWidgets import QApplication
-from app import RelationshipMapDialog, StoryForgeWindow
+from storyforge.app import RelationshipMapDialog, StoryForgeWindow
 
 
 def measure(label, repetitions, callback, app):

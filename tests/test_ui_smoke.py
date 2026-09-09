@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app import (
+from storyforge.app import (
     APP_VERSION,
     CURRICULUM,
     DEVELOPMENT_DOCUMENTS,
@@ -32,7 +32,7 @@ from app import (
     StoryForgeWindow,
     TimelineEventItem,
 )
-from db import NOW, Database
+from storyforge.db import NOW, Database
 
 
 def test_every_main_view_opens_without_mutating_user_data(tmp_path: Path) -> None:

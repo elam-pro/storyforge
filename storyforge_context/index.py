@@ -16,9 +16,25 @@ import subprocess
 import threading
 import unicodedata
 
-ROOT_FILES = frozenset('README.md AGENTS.md app.py db.py ai_service.py geography.py genres.py i18n.py learning_content.py learning_service.py pdf_export.py report_export.py screenplay_adapter.py screenplay_commands.py screenplay_model.py script_export.py template_diagrams.py theme.py unicode_script_pdf.py image_previews.py requirements.txt requirements-mcp.txt'.split())
+ROOT_FILES = frozenset(
+    'README.md AGENTS.md main.py app.py db.py ai_service.py geography.py genres.py i18n.py '
+    'learning_content.py learning_service.py pdf_export.py report_export.py screenplay_adapter.py '
+    'screenplay_commands.py screenplay_model.py script_export.py template_diagrams.py theme.py '
+    'unicode_script_pdf.py image_previews.py requirements.txt requirements-build.txt requirements-mcp.txt '
+    'pyproject.toml install_linux.sh run_linux.sh uninstall_linux.sh'.split()
+)
+PACKAGE_FILES = frozenset(
+    '__init__.py __main__.py version.py runtime_paths.py app.py db.py ai_service.py geography.py '
+    'genres.py i18n.py learning_content.py learning_service.py pdf_export.py report_export.py '
+    'screenplay_adapter.py screenplay_commands.py screenplay_model.py script_export.py '
+    'template_diagrams.py theme.py unicode_script_pdf.py image_previews.py'.split()
+)
 DOCS = frozenset('PRODUCT ARCHITECTURE DECISIONS FEATURES ROADMAP PERFORMANCE MCP'.split())
 CONTEXT_FILES = frozenset(('__init__.py', 'index.py', 'server.py'))
+LINUX_PACKAGING_FILES = frozenset(
+    ('install_application.py', 'uninstall_application.py', 'storyforge.desktop.in')
+)
+SCRIPT_FILES = frozenset(('bootstrap_dev.sh', 'build_linux.sh'))
 SESSION_FILES = frozenset((
     'guide_build_character.json',
     'guide_build_conflict.json',
@@ -45,15 +61,23 @@ def allowed(path):
         return False
     if path in ROOT_FILES:
         return True
+    if len(p.parts) == 2 and p.parts[0] == 'storyforge' and p.name in PACKAGE_FILES:
+        return True
     if len(p.parts) == 3:
-        return p.parts[:2] == ('content', 'sessions') and p.name in SESSION_FILES
+        return bool(
+            (p.parts[:2] == ('content', 'sessions') and p.name in SESSION_FILES)
+            or (p.parts[:2] == ('packaging', 'linux') and p.name in LINUX_PACKAGING_FILES)
+        )
+    if len(p.parts) == 4:
+        return p.parts[:3] == ('storyforge', 'content', 'sessions') and p.name in SESSION_FILES
     if len(p.parts) != 2:
         return False
     parent, name = p.parts
     return bool((parent == 'docs' and p.suffix == '.md' and p.stem in DOCS)
                 or (parent == 'tests' and re.fullmatch(r'test_[a-z0-9_]+\.py', name))
                 or (parent == 'storyforge_context' and name in CONTEXT_FILES)
-                or (parent == 'tools' and name in {'benchmark_previews.py', 'benchmark_navigation.py', 'qa_polish.py'}))
+                or (parent == 'scripts' and name in SCRIPT_FILES)
+                or (parent == 'tools' and name in {'benchmark_previews.py', 'benchmark_navigation.py', 'organize_workspace.py', 'qa_polish.py'}))
 
 
 def tokens(text):

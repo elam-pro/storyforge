@@ -4,8 +4,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QTextCursor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
-from app import StoryForgeWindow
-from db import NOW
+from storyforge.app import StoryForgeWindow
+from storyforge.db import NOW
 
 
 def test_scene_completion_enter_and_repeated_new_scene(tmp_path):
@@ -114,7 +114,7 @@ def test_character_and_transition_completion_use_project_context(tmp_path):
 
 
 def test_english_navigation_preserves_user_text_and_setting(tmp_path):
-    from db import Database
+    from storyforge.db import Database
     from PySide6.QtWidgets import QPushButton
     qt = QApplication.instance() or QApplication([])
     path = tmp_path / "english.db"
