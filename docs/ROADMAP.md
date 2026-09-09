@@ -17,7 +17,7 @@ Mise à jour : 9 septembre 2026. Ce document sépare les chantiers de consolidat
 
 Chaque chantier reste un changement borné avec tests et commit local. Les phases 5 à 8 ont été explicitement demandées, sans migration SQLite supplémentaire. Une future migration exige une sauvegarde restaurable : revenir au code précédent seul peut ne pas suffire. L’autorisation de confiance Codex n’est pas modifiée automatiquement.
 
-## Fonctionnalités restantes : numéros d’origine conservés
+## État des fonctionnalités d’origine et reports explicites
 
 - Ensemble 2 : niveaux de guidage réalisés. Découverte, Guidé et Autonome exposent des quantités d’aide distinctes et les changements conservent le brouillon ; voir FEATURES.md.
 - Ensembles 9 et 18 : réalisés dans un même espace **Univers > Cartes**. Plusieurs cartes et échelles peuvent coexister ; chaque canevas accepte un fond issu d’Images, des lieux existants et des repères de terrain libres. Déplacement, panoramique, zoom, export et réimport conservent les liens sans créer une seconde bibliothèque de lieux.

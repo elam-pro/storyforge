@@ -1,3 +1,13 @@
+# Travail postérieur à StoryForge 0.30.3 — Consolidation
+
+- audit canonique du produit, de l’architecture, des décisions, des fonctionnalités et de la roadmap ;
+- huit guides locaux reliés aux outils, avec niveaux d’aide explicites et historique des applications/relectures ;
+- diagrammes natifs distincts pour les treize templates, tout en conservant les images personnalisées prioritaires et réversibles ;
+- cartes géographiques multiples dans **Univers**, liées aux lieux et images existants, avec panoramique, zoom, repères déplaçables et export/réimport ;
+- caches d’images bornés, décodage réduit, benchmarks et parcours de captures sur bases temporaires ;
+- MCP de contexte local en lecture seule configuré et validé avec ses sept outils et cinq ressources ;
+- 144 tests automatisés réussis ; anglais intégral et IA volontairement reportés.
+
 # StoryForge 0.30.3 — Correctifs d’affichage ciblés
 
 - Rétablissement des marges extérieures sur les trois pages signalées.

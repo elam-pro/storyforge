@@ -11,7 +11,7 @@ Prérequis recommandé : Python 3.11+ avec venv et un environnement graphique Li
 ```
 
 Le premier lancement crée `.venv` et installe PySide6 (connexion nécessaire à l’installation). Pour réparer ou actualiser l’environnement : `./install_linux.sh`.
-Les scripts affichent encore une ancienne version ; la référence est `APP_VERSION` dans [app.py](app.py).
+Les lanceurs lisent la version canonique `APP_VERSION` dans [app.py](app.py), sans numéro dupliqué à maintenir.
 
 ## Données et exports
 
