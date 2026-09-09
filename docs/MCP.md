@@ -24,12 +24,12 @@ nécessaire à `run_linux.sh`. Une mise à jour du SDK exige les tests d’inté
 
 ## Connexion à Codex
 
-La configuration locale `.codex/config.toml` a été créée pour ce checkout,
-avec le chemin absolu du lanceur ; elle est ignorée par Git. Aucun réglage global
-ni serveur d’un autre projet n’est remplacé. Codex charge cette configuration
-pour les projets de confiance : redémarrer la connexion MCP ou ouvrir une nouvelle
-tâche dans ce projet pour recharger le catalogue. Le serveur déjà démarré dans une
-tâche existante n’est pas nécessairement actualisé automatiquement.
+La configuration locale `.codex/config.toml` a été créée et vérifiée pour ce
+checkout, avec le chemin absolu du lanceur ; elle est ignorée par Git. La commande
+`codex mcp get storyforge_context` confirme le serveur activé et ses sept outils
+autorisés. Aucun réglage global ni serveur d’un autre projet n’est remplacé. Une
+tâche Codex ouverte avant la configuration peut toutefois nécessiter un rechargement
+de la connexion ou une nouvelle tâche pour recevoir le catalogue actualisé.
 
 Sur un autre checkout, créer sa configuration de projet avec le **chemin réel** :
 
@@ -42,12 +42,7 @@ startup_timeout_sec = 20
 tool_timeout_sec = 30
 ```
 
-Le contrôle local a confirmé que ce checkout n’a pas encore d’entrée de confiance
-dans la configuration Codex : `codex mcp get storyforge_context` ne le voit pas
-encore. L’utilisateur doit autoriser ce projet dans Codex, puis recharger la
-connexion ; le code ne modifie pas ce réglage de sécurité automatiquement.
-
-Vérification après autorisation : `codex mcp get storyforge_context` depuis ce dépôt. Désactivation
+Vérification : `codex mcp get storyforge_context` depuis ce dépôt. Désactivation
 réversible : `enabled = false` dans cette seule table. Ne pas supprimer de base
 ni de sauvegarde pour désactiver le MCP.
 

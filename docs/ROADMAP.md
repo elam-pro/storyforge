@@ -13,7 +13,7 @@ Mise à jour : 9 septembre 2026. Ce document sépare les chantiers de consolidat
 | 5 | Frontière scénario — consolidation réalisée | Validation JSON/version/IDs ; règles de commande et retraits isolés ; FDX typé et PDF Unicode testés. Fidélité limitée au périmètre documenté, pas de Final Draft sans perte ni nouvel éditeur. |
 | 6 | Interface et performances — réalisée | Mesures sur fixtures, caches bornés et décodage réduit ; tests de navigation et sauvegarde conservés. Aucun remaniement global des vues non justifié par les mesures. |
 | 7 | Index ciblé — réalisé | Sources autorisées et suivies par Git, reparsing incrémental en mémoire, liens fonctionnalités/code/tests, provenance et limites testées. |
-| 8 | MCP — implémenté et testé | Sept outils et cinq ressources STDIO en lecture seule ; configuration locale préparée. Chargement dans Codex en attente de l’autorisation du projet par l’utilisateur ; voir MCP.md. |
+| 8 | MCP — implémenté, activé et testé | Sept outils et cinq ressources STDIO en lecture seule ; configuration locale active pour ce checkout. Une tâche ouverte antérieurement peut nécessiter un rechargement ; voir MCP.md. |
 
 Chaque chantier reste un changement borné avec tests et commit local. Les phases 5 à 8 ont été explicitement demandées, sans migration SQLite supplémentaire. Une future migration exige une sauvegarde restaurable : revenir au code précédent seul peut ne pas suffire. L’autorisation de confiance Codex n’est pas modifiée automatiquement.
 
