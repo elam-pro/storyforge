@@ -26,7 +26,7 @@ Chaque chantier reste un changement borné avec tests et commit local. Les phase
 - Ensemble 20 : apprentissage connecté étendu. Les transitions guide-outil conservent le contexte de retour, l’état courant reste compatible et un historique contextualisé garde chaque application et relecture ; voir FEATURES.md.
 - Anglais intégral : reporté à la demande de l’utilisateur ; contenus pédagogiques, formulaires et libellés dynamiques à compléter plus tard, sans traduire les textes utilisateur.
 - Templates : illustrations pédagogiques distinctes par modèle ; la personnalisation existe, les schémas restent parfois génériques.
-- Qualité : longs projets, images volumineuses, petites fenêtres, navigation avec modifications en attente et deux langues.
+- Qualité : fixtures de 200 personnages/lieux, scénario de 2 000 paragraphes, images volumineuses, cache de bibliothèque, fenêtre minimale et sauvegardes de navigation sont couvertes. Une validation Fedora interactive reste nécessaire ; les deux langues sont reportées avec l’anglais intégral.
 
 ## Validation prioritaire de la phase 2
 

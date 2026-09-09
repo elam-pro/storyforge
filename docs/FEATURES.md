@@ -27,7 +27,7 @@
 
 ## Garanties et limites de validation
 
-Les caches d’aperçus personnages/lieux sont bornés via `image_previews.py`.
+Les caches d’aperçus personnages/lieux et de miniatures de la bibliothèque sont bornés via `image_previews.py`. La bibliothèque décode les grands originaux directement à la taille d’affichage et réutilise ses miniatures lors des filtres.
 Mesures reproductibles et limites : [PERFORMANCE.md](PERFORMANCE.md).
 
 `screenplay_adapter.py` sépare la projection Qt et le chargement compatible. Le JSON invalide, les types inconnus, les IDs dupliqués et les versions futures sont refusés sans remplacement par le texte. `screenplay_commands.py` isole transitions et retraits. L’import FDX structuré conserve les six types éditables, y compris les paragraphes vides ; styles, révisions et extensions Final Draft ne sont pas garantis. Le PDF Unicode utilise les polices incorporées de Qt, le chemin WinAnsi historique reste conservé. Les alphabets disponibles dépendent des polices installées ; pas de garantie universelle pour tous les glyphes. `tests/test_screenplay_consolidation.py` et `tests/test_screenplay_adapter.py` couvrent ces frontières, les IDs et 2 000 paragraphes. Rendu contrôlé sur couverture, réplique longue, MORE/CONT'D et caractères vietnamiens, polonais et cyrilliques.

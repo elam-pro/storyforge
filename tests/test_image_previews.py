@@ -52,3 +52,47 @@ def test_obsolete_location_preview_cannot_paint():
             raise AssertionError('stale callback painted')
     StoryForgeWindow._show_deferred_location_image(View(), 2, {}, 8)
     StoryForgeWindow._show_deferred_location_image(View(), 3, {}, 7)
+
+
+def test_image_library_decodes_a_bounded_thumbnail_once(tmp_path, monkeypatch):
+    import app as app_module
+    from app import StoryForgeWindow
+    from db import NOW
+
+    qt = QApplication.instance() or QApplication([])
+    window = StoryForgeWindow(tmp_path / "library.db")
+    project_id = window.db.run(
+        "INSERT INTO projects(created_at,title,stage,updated_at) VALUES(?,?,?,?)",
+        (NOW(), "Images lourdes", "Idée", NOW()),
+    ).lastrowid
+    data = fixture_jpeg()
+    image_id = window.db.run(
+        """INSERT INTO image_library(
+        project_id,title,category,notes,file_name,mime_type,image_data,created_at,updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?)""",
+        (project_id, "Décor", "Lieu / décor", "", "decor.jpg", "image/jpeg", data, NOW(), NOW()),
+    ).lastrowid
+    window.active_project = int(project_id)
+
+    calls = 0
+    original = app_module.decode_preview
+
+    def counted_decode(source, size=QSize(1800, 1400)):
+        nonlocal calls
+        calls += 1
+        return original(source, size)
+
+    monkeypatch.setattr(app_module, "decode_preview", counted_decode)
+    window.show_images()
+    qt.processEvents()
+    window._refresh_library_images()
+
+    assert calls == 1
+    thumbnail = window._image_library_thumbnail_cache.get(int(image_id))
+    assert thumbnail.width() <= 170 and thumbnail.height() <= 105
+    assert window._image_library_thumbnail_cache.bytes_used <= 8 * 1024 * 1024
+
+    window.autosave_timer.stop()
+    window.db.conn.close()
+    window.deleteLater()
+    qt.processEvents()

@@ -3044,6 +3044,7 @@ class StoryForgeWindow(QMainWindow):
         self._story_map_drag_item: StoryMapCardItem | None = None
         self._location_pixmap_cache = PixmapCache()
         self._location_thumbnail_cache = PixmapCache(2 * 1024 * 1024)
+        self._image_library_thumbnail_cache = PixmapCache(8 * 1024 * 1024)
         self._location_image_refresh_generation = 0
         self.story_map_pan_timer = QTimer(self)
         self.story_map_pan_timer.setInterval(24)
@@ -3526,6 +3527,7 @@ class StoryForgeWindow(QMainWindow):
         self.active_project = int(project_id)
         self._location_pixmap_cache.clear()
         self._location_thumbnail_cache.clear()
+        self._image_library_thumbnail_cache.clear()
         self.db.set_setting("active_project", self.active_project)
         self._update_project_chips()
         # Rebuilding a full workspace can involve several linked lists and
@@ -15776,7 +15778,7 @@ class StoryForgeWindow(QMainWindow):
             self.image_count.setText("0")
             return
         rows = self.db.q(
-            "SELECT id,title,category,notes,file_name,image_data FROM image_library WHERE project_id=? ORDER BY id DESC",
+            "SELECT id,title,category,notes,file_name FROM image_library WHERE project_id=? ORDER BY id DESC",
             (self.active_project,),
         )
         total = len(rows)
@@ -15801,10 +15803,20 @@ class StoryForgeWindow(QMainWindow):
             )
         ]
         for row in rows:
-            pixmap = QPixmap()
-            pixmap.loadFromData(bytes(row["image_data"]))
+            image_id = int(row["id"])
+            pixmap = self._image_library_thumbnail_cache.get(image_id)
+            if pixmap is None:
+                source = self.db.one(
+                    "SELECT image_data FROM image_library WHERE id=? AND project_id=?",
+                    (image_id, self.active_project),
+                )
+                pixmap = decode_preview(
+                    bytes(source["image_data"]) if source else b"",
+                    QSize(170, 105),
+                )
+                self._image_library_thumbnail_cache[image_id] = pixmap
             item = QListWidgetItem(QIcon(pixmap), row["title"] or "Image sans titre")
-            item.setData(Qt.ItemDataRole.UserRole, int(row["id"]))
+            item.setData(Qt.ItemDataRole.UserRole, image_id)
             item.setToolTip(row["category"])
             self.image_library_list.addItem(item)
         self.image_count.setText(str(len(rows)) if len(rows) == total else f"{len(rows)} / {total}")
@@ -15830,8 +15842,8 @@ class StoryForgeWindow(QMainWindow):
         if len(data) > IDEA_ATTACHMENT_LIMIT:
             QMessageBox.warning(self, "Image trop volumineuse", "La limite est de 25 Mo par image.")
             return
-        pixmap = QPixmap()
-        if not pixmap.loadFromData(data):
+        preview = decode_preview(data, QSize(170, 105))
+        if preview.isNull():
             QMessageBox.warning(self, "Format non reconnu", "Ce fichier ne peut pas être affiché comme une image.")
             return
         title, accepted = QInputDialog.getText(self, "Titre de l’image", "Nom de la référence", text=path.stem)
@@ -15864,6 +15876,7 @@ class StoryForgeWindow(QMainWindow):
                 NOW(),
             ),
         ).lastrowid
+        self._image_library_thumbnail_cache[int(image_id)] = preview
         self._save_entity_tag_text("image", int(image_id), tags)
         self._refresh_library_images()
 
@@ -15891,6 +15904,7 @@ class StoryForgeWindow(QMainWindow):
         if QMessageBox.question(self, "Supprimer l’image", "Retirer cette image de la bibliothèque ?") != QMessageBox.StandardButton.Yes:
             return
         self._delete_entity_tag_links("image", int(row["id"]))
+        self._image_library_thumbnail_cache.pop(int(row["id"]), None)
         self.db.run("DELETE FROM image_library WHERE id=?", (row["id"],))
         self._refresh_library_images()
 

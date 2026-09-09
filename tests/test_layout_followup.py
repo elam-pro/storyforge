@@ -64,3 +64,33 @@ def test_template_custom_image_persists_without_source_file(tmp_path):
     assert not reopened.db.setting(f"template_image_{key}", "")
     qt.processEvents()
     reopened.close()
+
+
+def test_primary_workspaces_respect_the_minimum_supported_window(tmp_path):
+    qt = QApplication.instance() or QApplication([])
+    window = StoryForgeWindow(tmp_path / "small-window.db")
+    project_id = window.db.run(
+        "INSERT INTO projects(created_at,title,stage,updated_at) VALUES(?,?,?,?)",
+        (NOW(), "Fenêtre compacte", "Idée", NOW()),
+    ).lastrowid
+    window.active_project = int(project_id)
+    window.resize(1120, 720)
+    window.show()
+
+    for show_view in (
+        window.show_guides,
+        window.show_story_overview,
+        window.show_locations,
+        window.show_characters,
+        window.show_images,
+        window.show_script_editor,
+    ):
+        show_view()
+        qt.processEvents()
+        page = window.page_host_layout.itemAt(0).widget()
+        assert page.width() <= window.page_host.width()
+        assert page.height() <= window.page_host.height()
+
+    window.autosave_timer.stop()
+    window.close()
+    qt.processEvents()
