@@ -25,7 +25,7 @@ Chaque chantier reste un changement borné avec tests et commit local. Les phase
 - Ensemble 19 : IA reportée à la demande de l’utilisateur. L’ancien professeur est désactivé ; toute réactivation exige une décision explicite, contrôle des données envoyées et accord de l’auteur sur les propositions.
 - Ensemble 20 : apprentissage connecté étendu. Les transitions guide-outil conservent le contexte de retour, l’état courant reste compatible et un historique contextualisé garde chaque application et relecture ; voir FEATURES.md.
 - Anglais intégral : reporté à la demande de l’utilisateur ; contenus pédagogiques, formulaires et libellés dynamiques à compléter plus tard, sans traduire les textes utilisateur.
-- Templates : illustrations pédagogiques distinctes par modèle ; la personnalisation existe, les schémas restent parfois génériques.
+- Templates : réalisé. Les treize modèles ont des schémas natifs distincts (causalité, film, actes, mouvements, cercle, séquences, voyage, contraste, mystère, relation, valeurs, facettes et beats) ; l’image personnalisée par modèle reste prioritaire et réversible.
 - Qualité : fixtures de 200 personnages/lieux, scénario de 2 000 paragraphes, images volumineuses, cache de bibliothèque, fenêtre minimale et sauvegardes de navigation sont couvertes. Une validation Fedora interactive reste nécessaire ; les deux langues sont reportées avec l’anglais intégral.
 
 ## Validation prioritaire de la phase 2

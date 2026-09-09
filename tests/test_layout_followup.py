@@ -6,6 +6,8 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QGraphicsPixmapItem
 from app import StoryForgeWindow, TEMPLATE_LIBRARY
 from db import NOW
+from template_diagrams import DIAGRAM_FAMILIES, build_diagram
+from theme import DARK
 
 
 def test_margins_centered_script_and_nonoverlapping_popup(tmp_path):
@@ -64,6 +66,20 @@ def test_template_custom_image_persists_without_source_file(tmp_path):
     assert not reopened.db.setting(f"template_image_{key}", "")
     qt.processEvents()
     reopened.close()
+
+
+def test_every_template_uses_a_distinct_native_diagram_family():
+    qt = QApplication.instance() or QApplication([])
+    assert set(DIAGRAM_FAMILIES) == {template["key"] for template in TEMPLATE_LIBRARY}
+    assert len(set(DIAGRAM_FAMILIES.values())) == len(TEMPLATE_LIBRARY)
+
+    for template in TEMPLATE_LIBRARY:
+        view = build_diagram(template, DARK)
+        assert view.property("diagramFamily") == DIAGRAM_FAMILIES[template["key"]]
+        assert len(view.scene().items()) > len(template["steps"])
+        assert not view.sceneRect().isEmpty()
+        view.deleteLater()
+    qt.processEvents()
 
 
 def test_primary_workspaces_respect_the_minimum_supported_window(tmp_path):
